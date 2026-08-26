@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f6f6f7;
+  --surface: #ffffff;
+  --elevated: #f0f0f2;
+  --line: #e4e4e8;
+  --ink: #17171c;
+  --ink-dim: #565660;
+  --ink-faint: #8b8b95;
+  --brand: #7c3aed;
+  --brand-strong: #6d28d9;
+  --positive: #059669;
+  --negative: #e11d48;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #09090b;
+  --surface: #111114;
+  --elevated: #1a1a1f;
+  --line: #26262c;
+  --ink: #f4f4f5;
+  --ink-dim: #a1a1ab;
+  --ink-faint: #6e6e79;
+  --brand: #a78bfa;
+  --brand-strong: #8b5cf6;
+  --positive: #34d399;
+  --negative: #fb7185;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-elevated: var(--elevated);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-ink-faint: var(--ink-faint);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--brand) 35%, transparent);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 8px;
+  border: 2px solid var(--background);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.35s ease both;
+}
+
+.recharts-surface:focus,
+.recharts-wrapper:focus {
+  outline: none;
+}
