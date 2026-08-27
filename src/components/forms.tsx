@@ -1,12 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { Check, Loader2, Plus, X } from "lucide-react";
 import {
   ACCOUNT_KIND_LABELS,
+  ACCOUNT_TYPES,
   ASSET_CLASSES,
+  CURRENCIES,
   Account,
   AccountKind,
   AssetClass,
+  Currency,
   Holding,
   INCOME_CATEGORIES,
   Transaction,
@@ -14,6 +18,7 @@ import {
 } from "@/lib/types";
 import { todayISO } from "@/lib/format";
 import { useFinance } from "@/lib/store";
+import { useTickerValidation } from "@/lib/hooks";
 import { Button, Field, Input, Modal, Select } from "./ui";
 
 function FormActions({
@@ -308,6 +313,7 @@ function HoldingFormInner({
 }) {
   const addHolding = useFinance((s) => s.addHolding);
   const updateHolding = useFinance((s) => s.updateHolding);
+  const usdCadRate = useFinance((s) => s.usdCadRate);
 
   const [ticker, setTicker] = useState(initial?.ticker ?? "");
   const [name, setName] = useState(initial?.name ?? "");
@@ -318,13 +324,25 @@ function HoldingFormInner({
   const [shares, setShares] = useState(initial ? String(initial.shares) : "");
   const [avgCost, setAvgCost] = useState(initial ? String(initial.avgCost) : "");
   const [price, setPrice] = useState(initial ? String(initial.price) : "");
+  const [dividendsReceived, setDividendsReceived] = useState(
+    initial ? String(initial.dividendsReceived ?? 0) : "0",
+  );
+  const [accountType, setAccountType] = useState(initial?.accountType ?? "non-registered");
+  const [currency, setCurrency] = useState(initial?.currency ?? "USD");
   const [error, setError] = useState("");
+
+  const { status: tickerStatus, price: fetchedPrice } = useTickerValidation(
+    ticker,
+    assetClass,
+    currency,
+  );
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const sh = Number(shares);
     const cost = Number(avgCost);
     const px = Number(price);
+    const divs = Number(dividendsReceived);
     if (!ticker.trim()) return setError("Ticker is required.");
     if (!name.trim()) return setError("Please give the holding a name.");
     if (!Number.isFinite(sh) || sh <= 0)
@@ -341,6 +359,9 @@ function HoldingFormInner({
       shares: sh,
       avgCost: cost,
       price: px,
+      dividendsReceived: Number.isFinite(divs) ? Math.max(0, divs) : 0,
+      accountType,
+      currency,
     };
     if (initial) updateHolding(initial.id, payload);
     else addHolding(payload);
@@ -351,13 +372,38 @@ function HoldingFormInner({
     <form onSubmit={submit}>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Ticker">
-          <Input
-            value={ticker}
-            onChange={(e) => setTicker(e.target.value)}
-            placeholder="VTI"
-            autoFocus
-            className="uppercase"
-          />
+          <div className="relative">
+            <Input
+              value={ticker}
+              onChange={(e) => setTicker(e.target.value)}
+              placeholder="VTI"
+              autoFocus
+              className="uppercase pr-8"
+            />
+            <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2">
+              {tickerStatus === "loading" && (
+                <Loader2 size={14} className="animate-spin text-ink-faint" />
+              )}
+              {tickerStatus === "valid" && (
+                <Check size={14} className="text-positive" />
+              )}
+              {tickerStatus === "invalid" && ticker.trim() && (
+                <X size={14} className="text-negative" />
+              )}
+            </span>
+          </div>
+          {tickerStatus === "valid" && fetchedPrice != null && (
+            <p className="mt-1 text-[11px] text-positive">
+              Price: {currency === "USD"
+                ? `$${(fetchedPrice * usdCadRate).toLocaleString("en-CA", { minimumFractionDigits: 2 })} CAD`
+                : `$${fetchedPrice.toLocaleString("en-CA", { minimumFractionDigits: 2 })}`}
+            </p>
+          )}
+          {tickerStatus === "invalid" && ticker.trim() && (
+            <p className="mt-1 text-[11px] text-negative">
+              Ticker not found — check the symbol and asset class
+            </p>
+          )}
         </Field>
         <Field label="Name">
           <Input
@@ -415,10 +461,399 @@ function HoldingFormInner({
             placeholder="0.00"
           />
         </Field>
+        <Field label="Dividends received (total)" hint="Total cash dividends over the life of this position">
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            value={dividendsReceived}
+            onChange={(e) => setDividendsReceived(e.target.value)}
+            placeholder="0.00"
+          />
+        </Field>
+        <Field label="Account type">
+          <Select
+            value={accountType}
+            onChange={(e) => setAccountType(e.target.value as Holding["accountType"])}
+          >
+            {ACCOUNT_TYPES.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Currency">
+          <Select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value as Holding["currency"])}
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </Select>
+        </Field>
       </div>
       {error ? <p className="mt-3 text-xs text-negative">{error}</p> : null}
       <FormActions onCancel={onClose} label={initial ? "Save changes" : "Add holding"} />
     </form>
+  );
+}
+
+/* ---------------- Trade batch entry ---------------- */
+
+type TradeAction = "buy" | "sell" | "dividend";
+
+interface TradeRow {
+  id: string;
+  date: string;
+  action: TradeAction;
+  ticker: string;
+  quantity: string;
+  price: string;
+  accountType: string;
+  currency: string;
+  cadAmount: string; // CAD equivalent for USD trades
+}
+
+function emptyRow(): TradeRow {
+  return {
+    id: crypto.randomUUID(),
+    date: todayISO(),
+    action: "buy",
+    ticker: "",
+    quantity: "",
+    price: "",
+    accountType: "non-registered",
+    currency: "CAD",
+    cadAmount: "",
+  };
+}
+
+function TradeTickerInput({
+  row,
+  update,
+}: {
+  row: TradeRow;
+  update: (id: string, field: keyof TradeRow, value: string) => void;
+}) {
+  const { status, price: fetchedPrice } = useTickerValidation(row.ticker, "US Equity", row.currency as Currency);
+  const usdCadRate = useFinance((s) => s.usdCadRate);
+
+  return (
+    <div className="relative">
+      <Input
+        value={row.ticker}
+        onChange={(e) => update(row.id, "ticker", e.target.value)}
+        placeholder="VTI"
+        className="uppercase pr-7"
+      />
+      <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2">
+        {status === "loading" && (
+          <Loader2 size={12} className="animate-spin text-ink-faint" />
+        )}
+        {status === "valid" && (
+          <span className="flex items-center gap-0.5">
+            <Check size={12} className="text-positive" />
+            {fetchedPrice != null && (
+              <span className="text-[10px] text-positive tabular-nums">
+                ${row.currency === "USD"
+                  ? (fetchedPrice * usdCadRate).toLocaleString("en-CA", { maximumFractionDigits: 0 })
+                  : fetchedPrice.toLocaleString("en-CA", { maximumFractionDigits: 0 })}
+              </span>
+            )}
+          </span>
+        )}
+        {status === "invalid" && row.ticker.trim() && (
+          <X size={12} className="text-negative" />
+        )}
+      </span>
+    </div>
+  );
+}
+
+export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
+  const holdings = useFinance((s) => s.holdings);
+  const addHolding = useFinance((s) => s.addHolding);
+  const updateHolding = useFinance((s) => s.updateHolding);
+  const usdCadRate = useFinance((s) => s.usdCadRate);
+
+  const [rows, setRows] = useState<TradeRow[]>([emptyRow()]);
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState("");
+
+  const update = (id: string, field: keyof TradeRow, value: string) => {
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        const next = { ...r, [field]: value };
+        // Auto-fill ticker defaults when changing action
+        if (field === "action") {
+          if (value === "dividend") {
+            next.quantity = "1";
+          }
+          if (value === "sell") {
+            // Pre-fill price from current price if ticker exists
+            const h = holdings.find(
+              (h) => h.ticker.toUpperCase() === r.ticker.toUpperCase(),
+            );
+            if (h) next.price = String(h.price);
+          }
+        }
+        // Auto-fill CAD amount when currency is USD and price/qty change
+        if (
+          r.currency === "USD" &&
+          (field === "price" || field === "quantity" || field === "currency")
+        ) {
+          const qty = Number(field === "quantity" ? value : next.quantity);
+          const px = Number(field === "price" ? value : next.price);
+          if (qty > 0 && px > 0) {
+            next.cadAmount = String(Math.round(qty * px * usdCadRate * 100) / 100);
+          }
+        }
+        if (field === "currency" && value === "CAD") {
+          next.cadAmount = "";
+        }
+        return next;
+      }),
+    );
+  };
+
+  const removeRow = (id: string) => {
+    setRows((prev) => (prev.length > 1 ? prev.filter((r) => r.id !== id) : prev));
+  };
+
+  const process = () => {
+    setError("");
+    setOk("");
+    let created = 0;
+    let updated = 0;
+
+    for (const row of rows) {
+      const ticker = row.ticker.trim().toUpperCase();
+      if (!ticker) {
+        setError("Ticker is required on every row.");
+        return;
+      }
+
+      const qty = Number(row.quantity);
+      const px = Number(row.price);
+      const isUsd = row.currency === "USD";
+
+      if (row.action === "buy") {
+        if (!Number.isFinite(qty) || qty <= 0) {
+          setError(`Buy ${ticker}: quantity must be > 0.`);
+          return;
+        }
+        if (!Number.isFinite(px) || px <= 0) {
+          setError(`Buy ${ticker}: price must be > 0.`);
+          return;
+        }
+        const costCad = isUsd ? Number(row.cadAmount) || qty * px * usdCadRate : qty * px;
+        const existing = holdings.find(
+          (h) => h.ticker.toUpperCase() === ticker,
+        );
+        if (existing) {
+          const newShares = existing.shares + qty;
+          const newAvgCost =
+            existing.shares > 0
+              ? (existing.shares * existing.avgCost + costCad) / newShares
+              : costCad / qty;
+          updateHolding(existing.id, {
+            ...existing,
+            shares: Math.round(newShares * 1e8) / 1e8,
+            avgCost: Math.round(newAvgCost * 10000) / 10000,
+            accountType: row.accountType as Holding["accountType"],
+            currency: row.currency as Holding["currency"],
+          });
+          updated++;
+        } else {
+          addHolding({
+            ticker,
+            name: ticker,
+            assetClass: "US Equity",
+            sector: "Other",
+            shares: qty,
+            avgCost: Math.round((costCad / qty) * 10000) / 10000,
+            price: px,
+            dividendsReceived: 0,
+            accountType: row.accountType as Holding["accountType"],
+            currency: row.currency as Holding["currency"],
+          });
+          created++;
+        }
+      } else if (row.action === "sell") {
+        if (!Number.isFinite(qty) || qty <= 0) {
+          setError(`Sell ${ticker}: quantity must be > 0.`);
+          return;
+        }
+        const existing = holdings.find(
+          (h) => h.ticker.toUpperCase() === ticker,
+        );
+        if (!existing) {
+          setError(`Sell ${ticker}: no position found.`);
+          return;
+        }
+        if (qty > existing.shares) {
+          setError(
+            `Sell ${ticker}: cannot sell ${qty} shares, only ${existing.shares} held.`,
+          );
+          return;
+        }
+        const newShares = existing.shares - qty;
+        updateHolding(existing.id, {
+          ...existing,
+          shares: Math.round(newShares * 1e8) / 1e8,
+        });
+        updated++;
+      } else if (row.action === "dividend") {
+        const cadAmount = isUsd ? Number(row.cadAmount) || 0 : Number(row.price) || 0;
+        if (!Number.isFinite(cadAmount) || cadAmount <= 0) {
+          setError(`Dividend ${ticker}: amount must be > 0.`);
+          return;
+        }
+        const existing = holdings.find(
+          (h) => h.ticker.toUpperCase() === ticker,
+        );
+        if (existing) {
+          updateHolding(existing.id, {
+            ...existing,
+            dividendsReceived: existing.dividendsReceived + cadAmount,
+          });
+          updated++;
+        } else {
+          setError(`Dividend ${ticker}: no position found to credit.`);
+          return;
+        }
+      }
+    }
+
+    setOk(
+      `Processed ${created + updated} trade${created + updated !== 1 ? "s" : ""}` +
+        (created > 0 ? ` (${created} new)` : "") +
+        (updated > 0 ? ` (${updated} updated)` : ""),
+    );
+    setRows([emptyRow()]);
+    onComplete?.();
+  };
+
+  return (
+    <div className="space-y-3">
+      {rows.map((row, idx) => (
+        <div
+          key={row.id}
+          className="grid items-end gap-2 rounded-lg border border-line bg-elevated/60 p-3"
+          style={{
+            gridTemplateColumns:
+              "minmax(110px,1fr) minmax(80px,100px) minmax(80px,110px) minmax(60px,80px) minmax(60px,90px) minmax(90px,120px) minmax(70px,90px)" +
+              (rows.length > 1 ? " 32px" : ""),
+          }}
+        >
+          <Field label={idx === 0 ? "Date" : undefined}>
+            <Input
+              type="date"
+              value={row.date}
+              onChange={(e) => update(row.id, "date", e.target.value)}
+            />
+          </Field>
+          <Field label={idx === 0 ? "Action" : undefined}>
+            <Select
+              value={row.action}
+              onChange={(e) => update(row.id, "action", e.target.value)}
+            >
+              <option value="buy">Buy</option>
+              <option value="sell">Sell</option>
+              <option value="dividend">Dividend</option>
+            </Select>
+          </Field>
+          <Field label={idx === 0 ? "Ticker" : undefined}>
+            <TradeTickerInput row={row} update={update} />
+          </Field>
+          <Field label={idx === 0 ? "Qty" : undefined}>
+            <Input
+              type="number"
+              step="any"
+              min="0"
+              value={row.quantity}
+              onChange={(e) => update(row.id, "quantity", e.target.value)}
+              placeholder={row.action === "dividend" ? "1" : "0"}
+              disabled={row.action === "dividend"}
+            />
+          </Field>
+          <Field label={idx === 0 ? "Price" : undefined}>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={row.price}
+              onChange={(e) => update(row.id, "price", e.target.value)}
+              placeholder={
+                row.action === "dividend"
+                  ? "Amount"
+                  : row.action === "sell"
+                    ? "Market"
+                    : "0.00"
+              }
+            />
+          </Field>
+          <Field label={idx === 0 ? "Account" : undefined}>
+            <Select
+              value={row.accountType}
+              onChange={(e) => update(row.id, "accountType", e.target.value)}
+            >
+              {ACCOUNT_TYPES.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label={idx === 0 ? "Currency" : undefined}>
+            <Select
+              value={row.currency}
+              onChange={(e) => update(row.id, "currency", e.target.value)}
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {rows.length > 1 && (
+            <button
+              type="button"
+              onClick={() => removeRow(row.id)}
+              className="mb-1 flex h-8 w-8 items-center justify-center self-end rounded-md text-ink-faint hover:bg-elevated hover:text-negative"
+              aria-label="Remove row"
+            >
+              &times;
+            </button>
+          )}
+        </div>
+      ))}
+
+      {/* USD CAD equivalent row */}
+      {rows.some((r) => r.currency === "USD") && (
+        <p className="text-[11px] text-ink-faint">
+          USD trades use a {usdCadRate.toFixed(2)} CAD/USD rate. Enter the exact CAD amount if you know it.
+        </p>
+      )}
+
+      {error && <p className="text-xs text-negative">{error}</p>}
+      {ok && <p className="text-xs text-positive">{ok}</p>}
+
+      <div className="flex items-center gap-2">
+        <Button type="button" variant="secondary" onClick={() => setRows((prev) => [...prev, emptyRow()])}>
+          <Plus size={14} /> Add row
+        </Button>
+        <Button type="button" onClick={process}>
+          Submit trades
+        </Button>
+      </div>
+    </div>
   );
 }
 

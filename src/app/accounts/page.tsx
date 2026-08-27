@@ -21,7 +21,7 @@ import { AccountForm, ConfirmDelete } from "@/components/forms";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import { netWorthSeries } from "@/lib/analytics";
-import { fmtCompact, fmtSignedUSD, fmtUSD, labelMonth, lastMonthKeys } from "@/lib/format";
+import { fmtCompact, fmtSignedCAD, fmtCAD, labelMonth, lastMonthKeys } from "@/lib/format";
 import {
   ACCOUNT_KIND_LABELS,
   Account,
@@ -92,18 +92,18 @@ export default function AccountsPage() {
     >
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Total assets" value={fmtUSD(data.assets)} icon={<Landmark size={16} />} />
+          <StatCard label="Total assets" value={fmtCAD(data.assets)} icon={<Landmark size={16} />} />
           <StatCard
             label="Total liabilities"
-            value={fmtUSD(data.liabilities)}
+            value={fmtCAD(data.liabilities)}
             deltaLabel={`${ratio.toFixed(1)}% of assets`}
             tone="negative"
             icon={<CreditCard size={16} />}
           />
           <StatCard
             label="Net worth"
-            value={fmtUSD(netWorth)}
-            deltaLabel={`incl. ${fmtUSD(data.series[data.series.length - 1]?.portfolio ?? 0)} portfolio`}
+            value={fmtCAD(netWorth)}
+            deltaLabel={`incl. ${fmtCAD(data.series[data.series.length - 1]?.portfolio ?? 0)} portfolio`}
             icon={<PiggyBank size={16} />}
             spark={data.series.map((p) => ({ v: p.net }))}
             sparkKey="v"
@@ -111,7 +111,7 @@ export default function AccountsPage() {
           />
           <StatCard
             label="Portfolio"
-            value={fmtUSD(data.series[data.series.length - 1]?.portfolio ?? 0)}
+            value={fmtCAD(data.series[data.series.length - 1]?.portfolio ?? 0)}
             deltaLabel="tracked separately on Investments"
             icon={<Landmark size={16} />}
           />
@@ -197,12 +197,12 @@ export default function AccountsPage() {
                       {liability ? "Owed" : "Balance"}
                     </p>
                     <p className="text-xl font-semibold tabular-nums">
-                      {fmtUSD(acc.balance)}
+                      {fmtCAD(acc.balance)}
                     </p>
                   </div>
                   {delta !== undefined && delta !== 0 ? (
                     <Badge tone={(delta >= 0) !== liability ? "positive" : "negative"}>
-                      {fmtSignedUSD(liability ? -delta : delta)} / mo
+                      {fmtSignedCAD(liability ? -delta : delta)} / mo
                     </Badge>
                   ) : (
                     <Badge>{ACCOUNT_KIND_LABELS[acc.kind]}</Badge>

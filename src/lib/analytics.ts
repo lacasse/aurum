@@ -34,8 +34,9 @@ export function accountValueAt(acc: Account, monthKey: string): number {
 function portfolioValueAt(holdings: Holding[], monthsAgoFromEnd: number): number {
   let total = 0;
   for (const h of holdings) {
-    const idx = h.history.length - 1 - monthsAgoFromEnd;
-    total += h.shares * (h.history[Math.max(0, Math.min(h.history.length - 1, idx))] ?? h.price);
+    const hist = h.historyCAD ?? h.history;
+    const idx = hist.length - 1 - monthsAgoFromEnd;
+    total += h.shares * (hist[Math.max(0, Math.min(hist.length - 1, idx))] ?? h.priceCAD ?? h.price);
   }
   return total;
 }
@@ -127,6 +128,7 @@ export function stackedSpend(
 }
 
 export interface PortfolioPoint {
+  key: string;
   label: string;
   value: number;
   cost: number;
@@ -134,9 +136,10 @@ export interface PortfolioPoint {
 
 export function portfolioSeries(holdings: Holding[], n = 18): PortfolioPoint[] {
   const keys = lastMonthKeys(Math.min(n, 18));
-  const totalCost = holdings.reduce((s, h) => s + h.shares * h.avgCost, 0);
-  return keys.map((_, i) => ({
-    label: labelMonth(keys[i]),
+  const totalCost = holdings.reduce((s, h) => s + h.shares * (h.avgCostCAD ?? h.avgCost), 0);
+  return keys.map((key, i) => ({
+    key,
+    label: labelMonth(key),
     value: portfolioValueAt(holdings, keys.length - 1 - i),
     cost: totalCost,
   }));
@@ -147,7 +150,8 @@ export function allocationByClass(
 ): { name: string; value: number }[] {
   const totals = new Map<string, number>();
   for (const h of holdings) {
-    totals.set(h.assetClass, (totals.get(h.assetClass) ?? 0) + h.shares * h.price);
+    const px = h.priceCAD ?? h.price;
+    totals.set(h.assetClass, (totals.get(h.assetClass) ?? 0) + h.shares * px);
   }
   return [...totals.entries()].map(([name, value]) => ({ name, value }));
 }
@@ -157,7 +161,8 @@ export function sectorExposure(
 ): { sector: string; value: number }[] {
   const totals = new Map<string, number>();
   for (const h of holdings) {
-    totals.set(h.sector, (totals.get(h.sector) ?? 0) + h.shares * h.price);
+    const px = h.priceCAD ?? h.price;
+    totals.set(h.sector, (totals.get(h.sector) ?? 0) + h.shares * px);
   }
   const rows = [...totals.entries()].map(([sector, value]) => ({ sector, value }));
   rows.sort((a, b) => b.value - a.value);
@@ -173,27 +178,52 @@ export interface HoldingRow {
   marketValue: number;
   costBasis: number;
   gain: number;
-  gainPct: number;
+  totalDividends: number;
+  totalReturn: number;
+  mwrr: number; // annualized money-weighted rate of return (%)
   weightPct: number;
   change1mPct: number;
 }
 
+/** Annualized MWRR for a buy-and-hold position with dividends. */
+function computeMwrr(
+  costBasis: number,
+  marketValue: number,
+  dividendsReceived: number,
+  months: number,
+): number {
+  if (costBasis <= 0 || months <= 0) return 0;
+  const totalValue = marketValue + dividendsReceived;
+  const periodReturn = (totalValue - costBasis) / costBasis;
+  const annualized = (1 + periodReturn) ** (12 / months) - 1;
+  return annualized * 100;
+}
+
 export function holdingRows(holdings: Holding[]): HoldingRow[] {
-  const totalValue = holdings.reduce((s, h) => s + h.shares * h.price, 0);
+  const totalValue = holdings.reduce((s, h) => s + h.shares * (h.priceCAD ?? h.price), 0);
   return holdings
     .map((h) => {
-      const marketValue = h.shares * h.price;
-      const costBasis = h.shares * h.avgCost;
+      const px = h.priceCAD ?? h.price;
+      const avgC = h.avgCostCAD ?? h.avgCost;
+      const divs = h.dividendsReceivedCAD ?? h.dividendsReceived ?? 0;
+      const hist = h.historyCAD ?? h.history;
+      const marketValue = h.shares * px;
+      const costBasis = h.shares * avgC;
       const prev =
-        h.history.length > 1 ? h.history[h.history.length - 2] : h.price;
+        hist.length > 1 ? hist[hist.length - 2] : px;
+      const gain = marketValue - costBasis;
+      const totalReturn = gain + divs;
+      const mwrr = computeMwrr(costBasis, marketValue, divs, 18);
       return {
         holding: h,
         marketValue,
         costBasis,
-        gain: marketValue - costBasis,
-        gainPct: costBasis > 0 ? ((marketValue - costBasis) / costBasis) * 100 : 0,
+        gain,
+        totalDividends: divs,
+        totalReturn,
+        mwrr,
         weightPct: totalValue > 0 ? (marketValue / totalValue) * 100 : 0,
-        change1mPct: prev > 0 ? ((h.price - prev) / prev) * 100 : 0,
+        change1mPct: prev > 0 ? ((px - prev) / prev) * 100 : 0,
       };
     })
     .sort((a, b) => b.marketValue - a.marketValue);

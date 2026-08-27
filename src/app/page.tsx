@@ -19,6 +19,7 @@ import {
   SeriesChart,
 } from "@/components/charts";
 import { TransactionForm } from "@/components/forms";
+import { MonthlyChecklistButton, MonthlyChecklistModal } from "@/components/monthly-checklist";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import {
@@ -32,8 +33,8 @@ import {
 import {
   fmtCompact,
   fmtPct,
-  fmtSignedUSD,
-  fmtUSD,
+  fmtSignedCAD,
+  fmtCAD,
   labelDate,
 } from "@/lib/format";
 import { ACCOUNT_KIND_LABELS } from "@/lib/types";
@@ -47,6 +48,7 @@ export default function DashboardPage() {
   const holdings = useFinance((s) => s.holdings);
   const [range, setRange] = useState<Range>("12");
   const [addOpen, setAddOpen] = useState(false);
+  const [checklistOpen, setChecklistOpen] = useState(false);
 
   const data = useMemo(() => {
     const nwAll = netWorthSeries(accounts, holdings, 18);
@@ -94,9 +96,12 @@ export default function DashboardPage() {
       title="Dashboard"
       subtitle="Your complete financial picture at a glance"
       action={
-        <Button onClick={() => setAddOpen(true)}>
-          <ArrowUpRight size={15} /> Add transaction
-        </Button>
+        <div className="flex items-center gap-2">
+          <MonthlyChecklistButton onOpen={() => setChecklistOpen(true)} />
+          <Button onClick={() => setAddOpen(true)}>
+            <ArrowUpRight size={15} /> Add transaction
+          </Button>
+        </div>
       }
     >
       <div className="space-y-4">
@@ -104,7 +109,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Net Worth"
-            value={fmtUSD(nwLast.net)}
+            value={fmtCAD(nwLast.net)}
             delta={nwDelta}
             deltaLabel="vs last month"
             icon={<Wallet size={16} />}
@@ -114,7 +119,7 @@ export default function DashboardPage() {
           />
           <StatCard
             label="Income · this month"
-            value={fmtUSD(data.totals.income)}
+            value={fmtCAD(data.totals.income)}
             delta={incDelta}
             deltaLabel="vs last month"
             icon={<ArrowDownRight size={16} className="text-positive" />}
@@ -124,7 +129,7 @@ export default function DashboardPage() {
           />
           <StatCard
             label="Expenses · this month"
-            value={fmtUSD(data.totals.expenses)}
+            value={fmtCAD(data.totals.expenses)}
             delta={expDelta}
             deltaLabel="vs last month"
             tone={expDelta > 0 ? "negative" : "positive"}
@@ -136,7 +141,7 @@ export default function DashboardPage() {
           <StatCard
             label="Savings rate"
             value={`${data.totals.savingsRate.toFixed(1)}%`}
-            deltaLabel={`kept ${fmtUSD(data.totals.net)} of income`}
+            deltaLabel={`kept ${fmtCAD(data.totals.net)} of income`}
             icon={<PiggyBank size={16} />}
             spark={data.cf.map((p) => ({
               v: p.income > 0 ? ((p.income - p.expenses) / p.income) * 100 : 0,
@@ -151,7 +156,7 @@ export default function DashboardPage() {
           <Card className="lg:col-span-2">
             <CardHeader
               title="Net worth over time"
-              subtitle={`Assets + portfolio − liabilities · ${fmtUSD(nwLast.assets)} + ${fmtUSD(nwLast.portfolio)} − ${fmtUSD(nwLast.liabilities)}`}
+              subtitle={`Assets + portfolio − liabilities · ${fmtCAD(nwLast.assets)} + ${fmtCAD(nwLast.portfolio)} − ${fmtCAD(nwLast.liabilities)}`}
               action={
                 <Segmented<Range>
                   options={[
@@ -185,8 +190,8 @@ export default function DashboardPage() {
                 <DonutChart
                   data={data.spend}
                   centerLabel="Spent"
-                  centerValue={fmtUSD(totalSpend)}
-                  fmt={(n) => fmtUSD(n)}
+                  centerValue={fmtCAD(totalSpend)}
+                  fmt={(n) => fmtCAD(n)}
                   height={210}
                 />
               ) : (
@@ -225,7 +230,7 @@ export default function DashboardPage() {
               subtitle={
                 holdings.length === 0
                   ? "Add holdings to see growth"
-                  : `Market value vs cost basis · ${fmtUSD(data.port[data.port.length - 1].value)} invested`
+                  : `Market value vs cost basis · ${fmtCAD(data.port[data.port.length - 1].value)} invested`
               }
               action={
                 <Link href="/investments">
@@ -306,7 +311,7 @@ export default function DashboardPage() {
                     </p>
                   </div>
                   <span className="ml-3 shrink-0 text-sm font-semibold tabular-nums">
-                    {fmtUSD(a.balance)}
+                    {fmtCAD(a.balance)}
                   </span>
                 </li>
               ))}
@@ -351,7 +356,7 @@ export default function DashboardPage() {
                         )}
                       >
                         {t.type === "income" ? "+" : "−"}
-                        {fmtUSD(t.amount, 2)}
+                        {fmtCAD(t.amount, 2)}
                       </td>
                     </tr>
                   );
@@ -362,14 +367,15 @@ export default function DashboardPage() {
         </Card>
 
         <p className="text-center text-[11px] text-ink-faint">
-          Net worth changed {fmtSignedUSD(nwLast.net - nwPrev.net)} ({fmtPct(nwDelta)})
+          Net worth changed {fmtSignedCAD(nwLast.net - nwPrev.net)} ({fmtPct(nwDelta)})
           over the last month · portfolio is{" "}
-          {fmtSignedUSD(data.port[data.port.length - 1].value - data.port[0].value)}{" "}
+          {fmtSignedCAD(data.port[data.port.length - 1].value - data.port[0].value)}{" "}
           over 18 months
         </p>
       </div>
 
       <TransactionForm open={addOpen} onClose={() => setAddOpen(false)} />
+      <MonthlyChecklistModal open={checklistOpen} onClose={() => setChecklistOpen(false)} />
     </Shell>
   );
 }

@@ -1,19 +1,19 @@
 "use client";
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
 import {
   Account,
   Budget,
-  EXPENSE_CATEGORIES,
   FinanceData,
   Holding,
+  MonthlySnapshot,
   Transaction,
   isLiability,
 } from "./types";
 import { generateSampleData } from "./sample";
 import { HISTORY_MONTHS } from "./types";
-import { lastMonthKeys } from "./format";
+import { currentMonthKey, lastMonthKeys } from "./format";
+import { api } from "./api";
 
 export function uid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -23,7 +23,7 @@ export function uid(): string {
 }
 
 export type TransactionInput = Omit<Transaction, "id">;
-export type HoldingInput = Omit<Holding, "id" | "history">;
+export type HoldingInput = Omit<Holding, "id" | "history" | "historyCAD" | "priceCAD" | "avgCostCAD" | "dividendsReceivedCAD">;
 export type AccountInput = {
   name: string;
   institution: string;
@@ -33,7 +33,11 @@ export type AccountInput = {
 
 interface FinanceStore extends FinanceData {
   hydrated: boolean;
-  markHydrated: () => void;
+  /** Loads the full state from the API (Postgres via /api/data). */
+  loadFromServer: () => Promise<void>;
+  /** USD/CAD exchange rate, fetched from /api/fx. */
+  usdCadRate: number;
+  refreshFxRate: () => Promise<void>;
   /** Merchant name (lowercase) -> category, learned from import corrections. */
   merchantRules: Record<string, string>;
   setMerchantRule: (merchant: string, category: string) => void;
@@ -53,6 +57,11 @@ interface FinanceStore extends FinanceData {
   /** Deletes a category, its budget, and moves its transactions to "Other". */
   deleteCategory: (name: string) => void;
   resetDemo: () => void;
+  /** Monthly snapshots for the checklist feature. */
+  snapshots: MonthlySnapshot[];
+  snapshotMonth: string;
+  loadSnapshots: (month: string) => Promise<void>;
+  saveSnapshots: (snapshots: MonthlySnapshot[]) => Promise<void>;
 }
 
 /** Apply a transaction's effect on its account balance. sign=-1 reverts it. */
@@ -109,31 +118,95 @@ function extendAccountHistory(acc: Account): Account {
   return { ...acc, history };
 }
 
-export const useFinance = create<FinanceStore>()(
-  persist(
-    (set) => ({
-      ...generateSampleData(),
-      hydrated: false,
-      merchantRules: {},
-      categories: [...EXPENSE_CATEGORIES],
+const report = (err: unknown) => console.error("[sync]", err);
 
-      markHydrated: () => set({ hydrated: true }),
+/** Convert a value to CAD based on currency and current rate. */
+function toCad(value: number, currency: string, rate: number): number {
+  return currency === "USD" ? Math.round(value * rate * 100) / 100 : value;
+}
 
-      setMerchantRule: (merchant, category) =>
+/** Compute CAD fields for a holding given the current FX rate. */
+function computeCadFields(
+  h: Pick<Holding, "price" | "avgCost" | "dividendsReceived" | "history" | "currency">,
+  rate: number,
+) {
+  const isUSD = h.currency === "USD";
+  return {
+    priceCAD: isUSD ? Math.round(h.price * rate * 100) / 100 : h.price,
+    avgCostCAD: isUSD ? Math.round(h.avgCost * rate * 100) / 100 : h.avgCost,
+    dividendsReceivedCAD: isUSD
+      ? Math.round(h.dividendsReceived * rate * 100) / 100
+      : h.dividendsReceived,
+    historyCAD: isUSD ? h.history.map((v) => Math.round(v * rate * 100) / 100) : h.history,
+  };
+}
+
+export const useFinance = create<FinanceStore>()((set, get) => ({
+  ...generateSampleData(),
+  hydrated: false,
+  usdCadRate: 1.37,
+  merchantRules: {},
+  categories: [...generateSampleData().categories],
+  snapshots: [],
+  snapshotMonth: "",
+
+  refreshFxRate: async () => {
+    try {
+      const res = await fetch("/api/fx");
+      const data = await res.json();
+      if (typeof data.rate === "number" && Number.isFinite(data.rate)) {
+        set({ usdCadRate: data.rate });
+      }
+    } catch {
+      // keep current rate
+    }
+  },
+
+  loadFromServer: async () => {
+    try {
+      const [data] = await Promise.all([api.loadData(), get().refreshFxRate()]);
+      set({ ...data, hydrated: true });
+    } catch (err) {
+      report(err);
+      set({ hydrated: true }); // offline: keep bundled sample data
+    }
+  },
+
+  setMerchantRule: (merchant, category) => {
+    set((s) => ({
+      merchantRules: { ...s.merchantRules, [merchant.trim().toLowerCase()]: category },
+    }));
+    api.setMerchantRule(merchant, category).catch(report);
+  },
+
+  loadSnapshots: async (month) => {
+    try {
+      const { snapshots } = await api.getSnapshots(month);
+      set({ snapshots, snapshotMonth: month });
+    } catch (err) {
+      report(err);
+    }
+  },
+
+  saveSnapshots: async (rows) => {
+    try {
+      await api.saveSnapshots(rows);
+      set({ snapshots: rows });
+    } catch (err) {
+      report(err);
+    }
+  },
+
+      addTransaction: (input) => {
+        const txn: Transaction = { ...input, id: uid() };
         set((s) => ({
-          merchantRules: { ...s.merchantRules, [merchant.trim().toLowerCase()]: category },
-        })),
+          transactions: [txn, ...s.transactions],
+          accounts: applyTxn(s.accounts, txn, 1),
+        }));
+        api.createTransaction(txn).catch(report);
+      },
 
-      addTransaction: (input) =>
-        set((s) => {
-          const txn: Transaction = { ...input, id: uid() };
-          return {
-            transactions: [txn, ...s.transactions],
-            accounts: applyTxn(s.accounts, txn, 1),
-          };
-        }),
-
-      updateTransaction: (id, input) =>
+      updateTransaction: (id, input) => {
         set((s) => {
           const old = s.transactions.find((t) => t.id === id);
           if (!old) return s;
@@ -144,9 +217,11 @@ export const useFinance = create<FinanceStore>()(
             transactions: s.transactions.map((t) => (t.id === id ? updated : t)),
             accounts,
           };
-        }),
+        });
+        api.updateTransaction(id, input as Transaction).catch(report);
+      },
 
-      deleteTransaction: (id) =>
+      deleteTransaction: (id) => {
         set((s) => {
           const old = s.transactions.find((t) => t.id === id);
           if (!old) return s;
@@ -154,61 +229,87 @@ export const useFinance = create<FinanceStore>()(
             transactions: s.transactions.filter((t) => t.id !== id),
             accounts: applyTxn(s.accounts, old, -1),
           };
-        }),
+        });
+        api.deleteTransaction(id).catch(report);
+      },
 
-      addAccount: (input) =>
-        set((s) => {
-          const account: Account = {
-            id: uid(),
-            name: input.name,
-            institution: input.institution,
-            kind: input.kind,
-            balance: input.balance,
-            history: [{ month: lastMonthKeys(1)[0], value: input.balance }],
-          };
-          return { accounts: [...s.accounts, account] };
-        }),
+      addAccount: (input) => {
+        const account: Account = {
+          id: uid(),
+          name: input.name,
+          institution: input.institution,
+          kind: input.kind,
+          balance: input.balance,
+          history: [{ month: currentMonthKey(), value: input.balance }],
+        };
+        set((s) => ({ accounts: [...s.accounts, account] }));
+        api.createAccount(account).catch(report);
+      },
 
-      updateAccount: (id, input) =>
+      updateAccount: (id, input) => {
+        let updated: Account | undefined;
         set((s) => ({
-          accounts: s.accounts.map((a) =>
-            a.id === id
-              ? extendAccountHistory({
-                  ...a,
-                  name: input.name,
-                  institution: input.institution,
-                  kind: input.kind,
-                  balance: input.balance,
-                })
-              : a,
-          ),
-        })),
+          accounts: s.accounts.map((a) => {
+            if (a.id !== id) return a;
+            updated = extendAccountHistory({
+              ...a,
+              name: input.name,
+              institution: input.institution,
+              kind: input.kind,
+              balance: input.balance,
+            });
+            return updated;
+          }),
+        }));
+        if (updated) api.updateAccount(updated).catch(report);
+      },
 
-      deleteAccount: (id) =>
-        set((s) => ({ accounts: s.accounts.filter((a) => a.id !== id) })),
+      deleteAccount: (id) => {
+        set((s) => ({ accounts: s.accounts.filter((a) => a.id !== id) }));
+        api.deleteAccount(id).catch(report);
+      },
 
-      addHolding: (input) =>
-        set((s) => ({
-          holdings: [
-            ...s.holdings,
-            { ...input, id: uid(), history: synthHistory(input.ticker, input.price) },
-          ],
-        })),
+      addHolding: (input) => {
+        const rate = get().usdCadRate;
+        const cadFields = computeCadFields(
+          { ...input, history: synthHistory(input.ticker, input.price) },
+          rate,
+        );
+        const holding: Holding = {
+          ...input,
+          id: uid(),
+          history: synthHistory(input.ticker, input.price),
+          ...cadFields,
+        };
+        set((s) => ({ holdings: [...s.holdings, holding] }));
+        api.createHolding(holding).catch(report);
+      },
 
-      updateHolding: (id, input) =>
+      updateHolding: (id, input) => {
+        let updated: Holding | undefined;
+        const rate = get().usdCadRate;
         set((s) => ({
           holdings: s.holdings.map((h) => {
             if (h.id !== id) return h;
             const history = h.history.slice();
             if (history.length > 0) history[history.length - 1] = input.price;
-            return { ...h, ...input, history };
+            const cadFields = computeCadFields(
+              { ...h, ...input, history },
+              rate,
+            );
+            updated = { ...h, ...input, history, ...cadFields };
+            return updated;
           }),
-        })),
+        }));
+        if (updated) api.updateHolding(updated).catch(report);
+      },
 
-      deleteHolding: (id) =>
-        set((s) => ({ holdings: s.holdings.filter((h) => h.id !== id) })),
+      deleteHolding: (id) => {
+        set((s) => ({ holdings: s.holdings.filter((h) => h.id !== id) }));
+        api.deleteHolding(id).catch(report);
+      },
 
-      setBudget: (category, limit) =>
+      setBudget: (category, limit) => {
         set((s) => {
           const existing = s.budgets.find((b) => b.category === category);
           const budgets: Budget[] = existing
@@ -217,12 +318,16 @@ export const useFinance = create<FinanceStore>()(
               )
             : [...s.budgets, { category, limit }];
           return { budgets };
-        }),
+        });
+        api.setBudget(category, limit).catch(report);
+      },
 
-      deleteBudget: (category) =>
+      deleteBudget: (category) => {
         set((s) => ({
           budgets: s.budgets.filter((b) => b.category !== category),
-        })),
+        }));
+        api.deleteBudget(category).catch(report);
+      },
 
       addCategory: (name, limit) => {
         const n = name.trim();
@@ -238,6 +343,8 @@ export const useFinance = create<FinanceStore>()(
               ? [...s.budgets, { category: n, limit: round2(limit) }]
               : s.budgets,
         }));
+        api.addCategory(n).catch(report);
+        if (limit && limit > 0) api.setBudget(n, round2(limit)).catch(report);
         return true;
       },
 
@@ -261,10 +368,11 @@ export const useFinance = create<FinanceStore>()(
             t.category === oldName ? { ...t, category: n } : t,
           ),
         }));
+        api.renameCategory(oldName, n).catch(report);
         return true;
       },
 
-      deleteCategory: (name) =>
+      deleteCategory: (name) => {
         set((s) => {
           const categories = s.categories.filter((c) => c !== name);
           const fallback = categories.includes("Other")
@@ -279,25 +387,17 @@ export const useFinance = create<FinanceStore>()(
                 )
               : s.transactions,
           };
-        }),
-
-      resetDemo: () =>
-        set({ ...generateSampleData(), merchantRules: {} }),
-    }),
-    {
-      name: "aurum-finance-v1",
-      storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({
-        accounts: s.accounts,
-        transactions: s.transactions,
-        holdings: s.holdings,
-        budgets: s.budgets,
-        merchantRules: s.merchantRules,
-        categories: s.categories,
-      }),
-      onRehydrateStorage: () => (state) => {
-        state?.markHydrated();
+        });
+        api.deleteCategory(name).catch(report);
       },
-    },
-  ),
+
+      resetDemo: () => {
+        const fresh = generateSampleData();
+        set({ ...fresh, merchantRules: {} });
+        api
+          .reset()
+          .then((data) => set({ ...data }))
+          .catch(report);
+      },
+    }),
 );

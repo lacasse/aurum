@@ -19,7 +19,7 @@ import {
 } from "@/components/forms";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
-import { fmtCompact, fmtUSD, labelDate, labelMonth, lastMonthKeys, monthKeyOf } from "@/lib/format";
+import { fmtCompact, fmtCAD, labelDate, labelMonth, lastMonthKeys, monthKeyOf } from "@/lib/format";
 import { INCOME_CATEGORIES, Transaction } from "@/lib/types";
 
 export default function TransactionsPage() {
@@ -111,13 +111,13 @@ export default function TransactionsPage() {
           <Card className="p-4">
             <p className="text-[11px] font-medium text-ink-dim">Money in</p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-positive">
-              +{fmtUSD(totals.income, 2)}
+              +{fmtCAD(totals.income, 2)}
             </p>
           </Card>
           <Card className="p-4">
             <p className="text-[11px] font-medium text-ink-dim">Money out</p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-negative">
-              −{fmtUSD(totals.expenses, 2)}
+              −{fmtCAD(totals.expenses, 2)}
             </p>
           </Card>
           <Card className="p-4">
@@ -128,7 +128,7 @@ export default function TransactionsPage() {
                 totals.net >= 0 ? "text-positive" : "text-negative",
               )}
             >
-              {fmtUSD(totals.net, 2)}
+              {fmtCAD(totals.net, 2)}
             </p>
           </Card>
         </div>
@@ -271,12 +271,12 @@ export default function TransactionsPage() {
                         {t.type === "income" ? (
                           <span className="inline-flex items-center gap-1">
                             <ArrowDownRight size={13} />+
-                            {fmtUSD(t.amount, 2)}
+                            {fmtCAD(t.amount, 2)}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1">
                             <ArrowUpRight size={13} />
-                            {fmtUSD(t.amount, 2)}
+                            {fmtCAD(t.amount, 2)}
                           </span>
                         )}
                       </td>
@@ -324,7 +324,7 @@ export default function TransactionsPage() {
         onClose={() => setDeleting(null)}
         onConfirm={() => deleting && deleteTransaction(deleting.id)}
         title="Delete transaction"
-        message={`Delete “${deleting?.payee ?? ""}" (${fmtUSD(deleting?.amount ?? 0, 2)})? The linked account balance will be adjusted.`}
+        message={`Delete “${deleting?.payee ?? ""}" (${fmtCAD(deleting?.amount ?? 0, 2)})? The linked account balance will be adjusted.`}
       />
     </Shell>
   );

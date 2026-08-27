@@ -26,7 +26,7 @@ import { ConfirmDelete } from "@/components/forms";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import { budgetRows, monthTotals } from "@/lib/analytics";
-import { currentMonthKey, daysLeftInMonth, fmtUSD, monthKeyOf } from "@/lib/format";
+import { currentMonthKey, daysLeftInMonth, fmtCAD, monthKeyOf } from "@/lib/format";
 
 interface ManageRow {
   name: string;
@@ -168,7 +168,7 @@ export default function BudgetsPage() {
               <Wallet size={15} className="text-ink-faint" />
             </div>
             <p className="mt-2 text-2xl font-semibold tabular-nums">
-              {fmtUSD(totalBudget)}
+              {fmtCAD(totalBudget)}
             </p>
             <p className="mt-1 text-[11px] text-ink-faint">for this month</p>
           </Card>
@@ -178,10 +178,10 @@ export default function BudgetsPage() {
               <PiggyBank size={15} className="text-ink-faint" />
             </div>
             <p className="mt-2 text-2xl font-semibold tabular-nums">
-              {fmtUSD(totalSpent)}
+              {fmtCAD(totalSpent)}
             </p>
             <p className="mt-1 text-[11px] text-ink-faint">
-              {fmtUSD(totals.expenses)} tracked expenses
+              {fmtCAD(totals.expenses)} tracked expenses
             </p>
           </Card>
           <Card className="p-5">
@@ -197,10 +197,10 @@ export default function BudgetsPage() {
                 remaining < 0 && "text-negative",
               )}
             >
-              {fmtUSD(remaining)}
+              {fmtCAD(remaining)}
             </p>
             <p className="mt-1 text-[11px] text-ink-faint">
-              {fmtUSD(Math.max(0, remaining))} left to spend
+              {fmtCAD(Math.max(0, remaining))} left to spend
             </p>
           </Card>
           <Card className="p-5">
@@ -212,7 +212,7 @@ export default function BudgetsPage() {
               {daysLeftInMonth()}
             </p>
             <p className="mt-1 text-[11px] text-ink-faint">
-              ≈ {fmtUSD(Math.max(0, remaining) / Math.max(1, daysLeftInMonth()))}/day pace
+              ≈ {fmtCAD(Math.max(0, remaining) / Math.max(1, daysLeftInMonth()))}/day pace
             </p>
           </Card>
         </div>
@@ -224,7 +224,7 @@ export default function BudgetsPage() {
               <RadialGauge
                 pct={utilization}
                 label="of budget used"
-                sublabel={`${fmtUSD(totalSpent)} of ${fmtUSD(totalBudget)}`}
+                sublabel={`${fmtCAD(totalSpent)} of ${fmtCAD(totalBudget)}`}
                 height={210}
               />
             </div>
@@ -243,7 +243,7 @@ export default function BudgetsPage() {
                   spent: r.spent,
                 }))}
                 height={300}
-                fmt={(n) => fmtUSD(n)}
+                fmt={(n) => fmtCAD(n)}
               />
             </div>
           </Card>
@@ -293,11 +293,11 @@ export default function BudgetsPage() {
                       <p className="text-[11px] text-ink-faint">
                         {r.limit > 0 ? (
                           <>
-                            {fmtUSD(r.spent, 0)} spent ·{" "}
+                            {fmtCAD(r.spent, 0)} spent ·{" "}
                             {r.pct >= 100 ? (
-                              <span className="text-negative">over by {fmtUSD(-r.remaining, 0)}</span>
+                              <span className="text-negative">over by {fmtCAD(-r.remaining, 0)}</span>
                             ) : (
-                              <span>{fmtUSD(r.remaining, 0)} left</span>
+                              <span>{fmtCAD(r.remaining, 0)} left</span>
                             )}
                           </>
                         ) : (
@@ -350,7 +350,7 @@ export default function BudgetsPage() {
                   ) : (
                     <>
                       <span className="text-xs tabular-nums text-ink-dim">
-                        {r.limit > 0 ? `limit ${fmtUSD(r.limit)}` : "—"}
+                        {r.limit > 0 ? `limit ${fmtCAD(r.limit)}` : "—"}
                       </span>
                       {r.limit > 0 ? (
                         <span

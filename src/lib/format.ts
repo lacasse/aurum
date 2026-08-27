@@ -13,21 +13,27 @@ export const MONTH_SHORT = [
   "Dec",
 ];
 
-export function fmtUSD(n: number, decimals = 0): string {
-  return new Intl.NumberFormat("en-US", {
+export function fmtCAD(n: number, decimals = 0): string {
+  return new Intl.NumberFormat("en-CA", {
     style: "currency",
-    currency: "USD",
+    currency: "CAD",
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(n);
 }
 
-export function fmtSignedUSD(n: number, decimals = 0): string {
-  const s = fmtUSD(Math.abs(n), decimals);
+/** @deprecated Use fmtCAD */
+export const fmtUSD = fmtCAD;
+
+export function fmtSignedCAD(n: number, decimals = 0): string {
+  const s = fmtCAD(Math.abs(n), decimals);
   if (n > 0) return `+${s}`;
   if (n < 0) return `-${s}`;
   return s;
 }
+
+/** @deprecated Use fmtSignedCAD */
+export const fmtSignedUSD = fmtSignedCAD;
 
 export function fmtCompact(n: number): string {
   const abs = Math.abs(n);

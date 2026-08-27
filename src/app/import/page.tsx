@@ -32,7 +32,7 @@ import {
   suggestCategory,
   txnKey,
 } from "@/lib/csv";
-import { fmtUSD } from "@/lib/format";
+import { fmtCAD } from "@/lib/format";
 
 type Step = "upload" | "review" | "done";
 
@@ -266,13 +266,13 @@ export default function ImportPage() {
             <Card className="p-4">
               <p className="text-[11px] font-medium text-ink-dim">Expenses</p>
               <p className="mt-1 text-lg font-semibold tabular-nums text-negative">
-                {fmtUSD(includedExpenses, 2)}
+                {fmtCAD(includedExpenses, 2)}
               </p>
             </Card>
             <Card className="p-4">
               <p className="text-[11px] font-medium text-ink-dim">Credits / refunds</p>
               <p className="mt-1 text-lg font-semibold tabular-nums text-positive">
-                {fmtUSD(includedIncome, 2)}
+                {fmtCAD(includedIncome, 2)}
               </p>
             </Card>
             <Card className="p-4">
@@ -465,8 +465,8 @@ export default function ImportPage() {
             <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
               <div className="flex-1 text-xs text-ink-dim">
                 <span className="font-semibold text-ink">{included.length}</span> selected ·{" "}
-                <span className="text-negative">{fmtUSD(includedExpenses, 2)}</span> out ·{" "}
-                <span className="text-positive">{fmtUSD(includedIncome, 2)}</span> in
+                <span className="text-negative">{fmtCAD(includedExpenses, 2)}</span> out ·{" "}
+                <span className="text-positive">{fmtCAD(includedIncome, 2)}</span> in
               </div>
               <Button variant="secondary" onClick={() => setStep("upload")}>
                 <ArrowLeft size={14} /> Files

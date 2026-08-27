@@ -138,18 +138,20 @@ export function generateSampleData(): FinanceData {
     price: number;
     drift: number; // total growth factor over window
     vol: number;
+    dividends: number; // total cash dividends received over the window
   }
-  const seeds: Seed[] = [
-    { ticker: "VTI", name: "Vanguard Total Stock Market ETF", assetClass: "US Equity", sector: "Broad Market", shares: 62, avgCost: 228.4, price: 292.15, drift: 1.28, vol: 0.05 },
-    { ticker: "VXUS", name: "Vanguard Total International Stock ETF", assetClass: "Intl Equity", sector: "International", shares: 48, avgCost: 52.1, price: 66.84, drift: 1.24, vol: 0.06 },
-    { ticker: "BND", name: "Vanguard Total Bond Market ETF", assetClass: "Bonds", sector: "Bonds", shares: 90, avgCost: 74.3, price: 72.92, drift: 0.99, vol: 0.02 },
-    { ticker: "AAPL", name: "Apple Inc.", assetClass: "US Equity", sector: "Technology", shares: 40, avgCost: 148.2, price: 231.44, drift: 1.52, vol: 0.08 },
-    { ticker: "MSFT", name: "Microsoft Corp.", assetClass: "US Equity", sector: "Technology", shares: 25, avgCost: 262.5, price: 418.92, drift: 1.55, vol: 0.07 },
-    { ticker: "NVDA", name: "NVIDIA Corp.", assetClass: "US Equity", sector: "Semiconductors", shares: 30, avgCost: 68.4, price: 174.22, drift: 2.3, vol: 0.14 },
-    { ticker: "AMZN", name: "Amazon.com Inc.", assetClass: "US Equity", sector: "Consumer Disc.", shares: 22, avgCost: 118.9, price: 186.53, drift: 1.5, vol: 0.09 },
-    { ticker: "GOOGL", name: "Alphabet Inc.", assetClass: "US Equity", sector: "Comm. Services", shares: 18, avgCost: 121.7, price: 191.34, drift: 1.47, vol: 0.08 },
-    { ticker: "TSLA", name: "Tesla Inc.", assetClass: "US Equity", sector: "Automotive", shares: 12, avgCost: 244.8, price: 232.11, drift: 1.02, vol: 0.16 },
-    { ticker: "BTC", name: "Bitcoin", assetClass: "Crypto", sector: "Crypto", shares: 0.35, avgCost: 38250, price: 91400, drift: 2.1, vol: 0.18 },
+  const FX = 1.37; // sample USD/CAD rate
+  const seeds: (Seed & { currency: "CAD" | "USD" })[] = [
+    { ticker: "VTI", name: "Vanguard Total Stock Market ETF", assetClass: "US Equity", sector: "Broad Market", shares: 62, avgCost: 228.4, price: 292.15, drift: 1.28, vol: 0.05, dividends: 184.42, currency: "USD" },
+    { ticker: "VXUS", name: "Vanguard Total International Stock ETF", assetClass: "Intl Equity", sector: "International", shares: 48, avgCost: 52.1, price: 66.84, drift: 1.24, vol: 0.06, dividends: 94.56, currency: "USD" },
+    { ticker: "BND", name: "Vanguard Total Bond Market ETF", assetClass: "Bonds", sector: "Bonds", shares: 90, avgCost: 74.3, price: 72.92, drift: 0.99, vol: 0.02, dividends: 243.90, currency: "USD" },
+    { ticker: "AAPL", name: "Apple Inc.", assetClass: "US Equity", sector: "Technology", shares: 40, avgCost: 148.2, price: 231.44, drift: 1.52, vol: 0.08, dividends: 37.60, currency: "USD" },
+    { ticker: "MSFT", name: "Microsoft Corp.", assetClass: "US Equity", sector: "Technology", shares: 25, avgCost: 262.5, price: 418.92, drift: 1.55, vol: 0.07, dividends: 47.50, currency: "USD" },
+    { ticker: "NVDA", name: "NVIDIA Corp.", assetClass: "US Equity", sector: "Semiconductors", shares: 30, avgCost: 68.4, price: 174.22, drift: 2.3, vol: 0.14, dividends: 4.50, currency: "USD" },
+    { ticker: "AMZN", name: "Amazon.com Inc.", assetClass: "US Equity", sector: "Consumer Disc.", shares: 22, avgCost: 118.9, price: 186.53, drift: 1.5, vol: 0.09, dividends: 0, currency: "USD" },
+    { ticker: "GOOGL", name: "Alphabet Inc.", assetClass: "US Equity", sector: "Comm. Services", shares: 18, avgCost: 121.7, price: 191.34, drift: 1.47, vol: 0.08, dividends: 0, currency: "USD" },
+    { ticker: "TSLA", name: "Tesla Inc.", assetClass: "US Equity", sector: "Automotive", shares: 12, avgCost: 244.8, price: 232.11, drift: 1.02, vol: 0.16, dividends: 0, currency: "USD" },
+    { ticker: "BTC", name: "Bitcoin", assetClass: "Crypto", sector: "Crypto", shares: 0.35, avgCost: 38250, price: 91400, drift: 2.1, vol: 0.18, dividends: 0, currency: "USD" },
   ];
 
   const holdings: Holding[] = seeds.map((s, idx) => {
@@ -165,6 +167,7 @@ export function generateSampleData(): FinanceData {
     const norm = history.map((v, i) =>
       i === n - 1 ? s.price : round2(v * scale),
     );
+    const isUSD = s.currency === "USD";
     return {
       id: `hold-${idx + 1}`,
       ticker: s.ticker,
@@ -175,6 +178,13 @@ export function generateSampleData(): FinanceData {
       avgCost: s.avgCost,
       price: s.price,
       history: norm,
+      dividendsReceived: s.dividends,
+      accountType: (idx % 3 === 0 ? "TFSA" : idx % 3 === 1 ? "RRSP" : "non-registered") as Holding["accountType"],
+      currency: s.currency,
+      priceCAD: isUSD ? round2(s.price * FX) : s.price,
+      avgCostCAD: isUSD ? round2(s.avgCost * FX) : s.avgCost,
+      dividendsReceivedCAD: isUSD ? round2(s.dividends * FX) : s.dividends,
+      historyCAD: isUSD ? norm.map((v) => round2(v * FX)) : norm,
     };
   });
 
