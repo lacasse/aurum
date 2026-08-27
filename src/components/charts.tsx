@@ -16,6 +16,7 @@ import {
   PolarRadiusAxis,
   Radar,
   RadarChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -292,31 +293,33 @@ export function DonutChart({
   fmt?: (n: number) => string;
 }) {
   return (
-    <div className="relative">
-      <ResponsiveContainer width="100%" height={height}>
-        <PieChart>
-          <Pie
-            data={data}
-            dataKey="value"
-            nameKey="name"
-            innerRadius="62%"
-            outerRadius="88%"
-            paddingAngle={2}
-            strokeWidth={0}
-          >
-            {data.map((_, i) => (
-              <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-            ))}
-          </Pie>
-          <Tooltip content={<ChartTooltip fmt={fmt} />} />
-        </PieChart>
-      </ResponsiveContainer>
-      {centerValue ? (
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center pb-1">
-          <span className="text-[11px] text-ink-faint">{centerLabel}</span>
-          <span className="text-lg font-semibold tabular-nums">{centerValue}</span>
-        </div>
-      ) : null}
+    <div>
+      <div className="relative">
+        <ResponsiveContainer width="100%" height={height}>
+          <PieChart>
+            <Pie
+              data={data}
+              dataKey="value"
+              nameKey="name"
+              innerRadius="62%"
+              outerRadius="88%"
+              paddingAngle={2}
+              strokeWidth={0}
+            >
+              {data.map((_, i) => (
+                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+              ))}
+            </Pie>
+            <Tooltip content={<ChartTooltip fmt={fmt} />} />
+          </PieChart>
+        </ResponsiveContainer>
+        {centerValue ? (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-[11px] text-ink-faint">{centerLabel}</span>
+            <span className="text-lg font-semibold tabular-nums">{centerValue}</span>
+          </div>
+        ) : null}
+      </div>
       <ul className="mt-2 space-y-1.5 px-1">
         {data.slice(0, 7).map((d, i) => (
           <li key={d.name} className="flex items-center gap-2 text-xs">
@@ -332,6 +335,58 @@ export function DonutChart({
         ))}
       </ul>
     </div>
+  );
+}
+
+/* ---------------- Time-weighted return comparison ---------------- */
+
+export function TwrChart({
+  data,
+  height = 300,
+  benchmarkName = "Benchmark",
+}: {
+  data: Record<string, unknown>[];
+  height?: number;
+  benchmarkName?: string;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+        <CartesianGrid {...GRID_PROPS} />
+        <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={24} />
+        <YAxis
+          tick={AXIS_TICK}
+          tickLine={false}
+          axisLine={false}
+          width={56}
+          tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
+        />
+        <Tooltip
+          cursor={{ stroke: "var(--ink-faint)", strokeDasharray: "4 4" }}
+          content={<ChartTooltip fmt={(n) => `${n.toFixed(1)}%`} />}
+        />
+        <Legend wrapperStyle={LEGEND_STYLE} iconType="circle" iconSize={8} />
+        <ReferenceLine y={0} stroke="var(--ink-faint)" strokeDasharray="4 4" />
+        <Line
+          type="monotone"
+          dataKey="portfolio"
+          name="Portfolio"
+          stroke="#22d3ee"
+          strokeWidth={2}
+          dot={false}
+          activeDot={{ r: 3 }}
+        />
+        <Line
+          type="monotone"
+          dataKey="benchmark"
+          name={benchmarkName}
+          stroke="#f59e0b"
+          strokeWidth={2}
+          dot={false}
+          activeDot={{ r: 3 }}
+        />
+      </ComposedChart>
+    </ResponsiveContainer>
   );
 }
 

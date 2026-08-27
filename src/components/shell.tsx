@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useState } from "react";
 import {
@@ -15,8 +15,10 @@ import {
   Target,
   TrendingUp,
   Upload,
+  UploadCloud,
   Wallet,
   X,
+  LogOut,
 } from "lucide-react";
 import { Button, Modal } from "./ui";
 import { useFinance } from "@/lib/store";
@@ -30,6 +32,7 @@ const NAV = [
   { href: "/budgets", label: "Budgets", icon: Target },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/import", label: "Import CSV", icon: Upload },
+  { href: "/import-trades", label: "Import trades", icon: UploadCloud },
 ] as const;
 
 function ThemeToggle() {
@@ -89,6 +92,14 @@ function ResetDemo() {
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const logout = async () => {
+    await fetch("/api/logout", { method: "POST" });
+    router.push("/login");
+    router.refresh();
+  };
+
   return (
     <div className="flex h-full flex-col">
       <Link
@@ -135,6 +146,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <ThemeToggle />
         </div>
         <ResetDemo />
+        <button
+          onClick={logout}
+          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
+        >
+          <LogOut size={14} />
+          Sign out
+        </button>
       </div>
     </div>
   );
@@ -147,7 +165,7 @@ export function Shell({
   children,
 }: {
   title: string;
-  subtitle?: string;
+  subtitle?: React.ReactNode;
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -198,7 +216,7 @@ export function Shell({
           {children}
         </main>
         <footer className="px-6 pb-6 pt-2 text-center text-[11px] text-ink-faint">
-          Aurum · demo data stored locally in your browser · not financial advice
+          Aurum · data stored in PostgreSQL via Docker · not financial advice
         </footer>
       </div>
 

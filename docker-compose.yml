@@ -1,0 +1,115 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aurum}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-aurum}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - max_connections=20
+      - -c
+      - synchronous_commit=off
+    mem_limit: 512m
+    pids_limit: 512
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aurum -d aurum"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  app:
+    image: finance-app:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-aurum}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-aurum}
+      NODE_OPTIONS: --max-old-space-size=256
+      TWELVEDATA_API_KEY: ${TWELVEDATA_API_KEY:?set TWELVEDATA_API_KEY in .env}
+      EODHD_API_KEY: ${EODHD_API_KEY:?set EODHD_API_KEY in .env}
+      AUTH_USERNAME: ${AUTH_USERNAME:?set AUTH_USERNAME in .env}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:?set AUTH_PASSWORD in .env}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env}
+      TWELVEDATA_MINUTE_LIMIT: ${TWELVEDATA_MINUTE_LIMIT:-8}
+      TWELVEDATA_DAY_LIMIT: ${TWELVEDATA_DAY_LIMIT:-800}
+      TWELVEDATA_MINUTE_RESERVE: ${TWELVEDATA_MINUTE_RESERVE:-1}
+      TWELVEDATA_DAY_RESERVE: ${TWELVEDATA_DAY_RESERVE:-100}
+    mem_limit: 512m
+    pids_limit: 256
+    expose:
+      - "3000"
+    volumes:
+      - backups:/backups:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  adminer:
+    image: adminer:latest
+    restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+      ADMINER_DESIGN: dracula
+    mem_limit: 128m
+    pids_limit: 128
+    expose:
+      - "8080"
+    depends_on:
+      - db
+
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    mem_limit: 128m
+    pids_limit: 128
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-aurum}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-aurum}
+      # Seconds between backups (default 21600 = every 6 hours).
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-21600}
+      # Number of backups to retain (default 14).
+      RETENTION: ${BACKUP_RETENTION:-14}
+    volumes:
+      - ./backup/backup.sh:/backup.sh:ro
+      - backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+
+  proxy:
+    image: nginx:1.27
+    restart: unless-stopped
+    mem_limit: 128m
+    pids_limit: 128
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/entrypoint.sh:/entrypoint.sh:ro
+      - certs:/etc/nginx/certs
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8443:8443"
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    depends_on:
+      - app
+      - adminer
+
+volumes:
+  pgdata:
+  certs:
+  backups:

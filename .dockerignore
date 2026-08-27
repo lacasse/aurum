@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+.dockerignore
+README.md
+*.log
+.DS_Store
+tsconfig.tsbuildinfo
+*.sql.gz
+*.sql
+backup/
+nginx/

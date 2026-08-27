@@ -35,6 +35,9 @@ export interface Transaction {
 
 export type AssetClass = "US Equity" | "Intl Equity" | "Bonds" | "Crypto";
 
+export type AccountType = "TFSA" | "RRSP" | "FHSA" | "non-registered";
+export type Currency = "CAD" | "USD";
+
 export interface Holding {
   id: string;
   ticker: string;
@@ -42,10 +45,24 @@ export interface Holding {
   assetClass: AssetClass;
   sector: string;
   shares: number;
-  avgCost: number;
-  price: number; // current price
-  history: number[]; // monthly prices, last entry === price
+  avgCost: number; // in listing currency
+  price: number; // current price in listing currency
+  history: number[]; // monthly prices in listing currency, last entry === price
+  dividendsReceived: number; // total dividends in listing currency
+  accountType: AccountType;
+  currency: Currency;
+  /** Price converted to CAD. Same as price when currency is CAD. */
+  priceCAD: number;
+  /** Average cost converted to CAD. Same as avgCost when currency is CAD. */
+  avgCostCAD: number;
+  /** Dividends converted to CAD. Same as dividendsReceived when currency is CAD. */
+  dividendsReceivedCAD: number;
+  /** Monthly prices converted to CAD. Same as history when currency is CAD. */
+  historyCAD: number[];
 }
+
+export const ACCOUNT_TYPES: AccountType[] = ["TFSA", "RRSP", "FHSA", "non-registered"];
+export const CURRENCIES: Currency[] = ["CAD", "USD"];
 
 export interface Budget {
   category: string;
@@ -111,6 +128,17 @@ export function categoriesFor(type: TxnType): readonly string[] {
 
 export function isLiability(kind: AccountKind): boolean {
   return LIABILITY_KINDS.includes(kind);
+}
+
+export interface MonthlySnapshot {
+  month: string; // YYYY-MM
+  holdingId: string;
+  ticker: string;
+  price: number;
+  avgCost: number;
+  shares: number;
+  value: number;
+  valueCAD: number;
 }
 
 export const HISTORY_MONTHS = 18;
