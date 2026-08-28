@@ -16,6 +16,12 @@ concurrency:
 # first and a zero limit refuses every reservation.
 env:
   EODHD_DAY_LIMIT: "0"
+  # Twelve Data allows 8 credits a minute and 800 a day for the whole account.
+  # CI must never spend one: no test calls the provider, and pinning the caps to
+  # zero means a future one still could not, since every call site reserves
+  # against these limits first and a zero limit refuses every reservation.
+  TWELVEDATA_MINUTE_LIMIT: "0"
+  TWELVEDATA_DAY_LIMIT: "0"
 
 jobs:
   check:

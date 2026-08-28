@@ -260,6 +260,51 @@ async function main() {
       await eodhd.__resetEodhdLedgerForTests();
     }
 
+    {
+      console.log("twelve data credit ledger");
+      const td = await import("../src/db/twelvedata");
+      const { MINUTE_RESERVE, TWELVEDATA_MINUTE_LIMIT } = await import(
+        "../src/lib/twelvedata-quota"
+      );
+      const cap = Math.max(0, TWELVEDATA_MINUTE_LIMIT - MINUTE_RESERVE);
+      const at = new Date("2026-08-28T13:30:00Z");
+      await td.__resetTwelveDataLedgerForTests();
+
+      expect(await td.reserveTwelveDataCredits(cap, at), `a full minute's credits are granted (${cap})`);
+      expect(
+        !(await td.reserveTwelveDataCredits(1, at)),
+        "one more in the same minute is refused",
+      );
+      expect(
+        (await td.twelveDataUsage(at)).minute.remaining === 0,
+        "the minute is reported as spent",
+      );
+
+      // The next minute restores the per-minute allowance but not the day's.
+      const nextMinute = new Date(at.getTime() + 60_000);
+      expect(
+        await td.reserveTwelveDataCredits(1, nextMinute),
+        "a new minute restores the allowance",
+      );
+      expect(
+        (await td.twelveDataUsage(nextMinute)).day.used === cap + 1,
+        "the daily count carries across minutes",
+      );
+
+      // The whole point of moving this out of memory: concurrent refreshes must
+      // not both see the same remaining allowance.
+      await td.__resetTwelveDataLedgerForTests();
+      const results = await Promise.all(
+        Array.from({ length: 10 }, () => td.reserveTwelveDataCredits(2, at)),
+      );
+      const grantedCredits = results.filter(Boolean).length * 2;
+      expect(
+        grantedCredits <= cap,
+        `10 concurrent 2-credit requests never exceed ${cap} (got ${grantedCredits})`,
+      );
+      await td.__resetTwelveDataLedgerForTests();
+    }
+
     console.log("budgets / categories");
     await repo.upsertBudget("Coffee", 42.5);
     state = await repo.getState();

@@ -6,8 +6,14 @@ import {
   reserveEodhdCalls,
 } from "@/db/eodhd";
 import { selectEodhdDue, utcDay } from "@/lib/eodhd-quota";
-import { priceSource, toEodhdSymbol, toTwelveDataSymbol } from "@/lib/market";
-import { reserveTwelveDataCredits } from "@/lib/ratelimit";
+import {
+  priceSource,
+  toEodhdSymbol,
+  toTwelveDataSymbol,
+  toUsdCryptoSymbol,
+} from "@/lib/market";
+import { usdCadRate } from "@/lib/fx";
+import { reserveTwelveDataCredits, twelveDataUsage } from "@/db/twelvedata";
 import type { AssetClass, Currency } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +33,7 @@ async function fetchTwelveData(
   const CHUNK = 8;
   for (let start = 0; start < items.length; start += CHUNK) {
     const chunk = items.slice(start, start + CHUNK);
-    if (!reserveTwelveDataCredits(chunk.length)) {
+    if (!(await reserveTwelveDataCredits(chunk.length))) {
       console.warn(
         `[prices] Twelve Data skipped (rate/quota): ${chunk.length} credit(s)`,
       );
@@ -163,7 +169,12 @@ export async function GET(req: Request) {
     const nowDate = new Date(now);
     const afterClose = isAfterMarketClose(nowDate);
 
-    const twelveDataItems: { ticker: string; symbol: string }[] = [];
+    const twelveDataItems: {
+      ticker: string;
+      symbol: string;
+      assetClass: AssetClass;
+      currency: Currency;
+    }[] = [];
     const eodhdItems: { ticker: string; symbol: string }[] = [];
     const cachedPrices: Record<string, number> = {};
 
@@ -172,7 +183,7 @@ export async function GET(req: Request) {
       const cu = (currencies[i] ?? "USD") as Currency;
 
       const cached = priceCache.get(tickers[i]);
-      const source = priceSource(ac, cu);
+      const source = priceSource(ac, cu, tickers[i]);
       const ttl = CACHE_TTL[source] ?? 60_000;
       if (cached && now - cached.at < ttl) {
         cachedPrices[tickers[i]] = cached.price;
@@ -187,7 +198,12 @@ export async function GET(req: Request) {
         // price the moment it is added, from /api/prices/validate.
         eodhdItems.push({ ticker: tickers[i], symbol: toEodhdSymbol(tickers[i]) });
       } else {
-        twelveDataItems.push({ ticker: tickers[i], symbol: toTwelveDataSymbol(tickers[i], ac) });
+        twelveDataItems.push({
+          ticker: tickers[i],
+          symbol: toTwelveDataSymbol(tickers[i], ac, cu),
+          assetClass: ac,
+          currency: cu,
+        });
       }
     }
 
@@ -209,6 +225,25 @@ export async function GET(req: Request) {
       fetchTwelveData(twelveDataItems),
       fetchEodhd(eodhdToFetch),
     ]);
+
+    /*
+     * Twelve Data does not document which quote currencies each coin carries,
+     * so a CAD pair may simply not exist. Rather than let that show as a stale
+     * price, ask again in USD — every pair has one — and convert. Twelve Data's
+     * allowance is 800 a day, so the retry is cheap; the EODHD cap is untouched.
+     */
+    const cryptoMissing = twelveDataItems.filter(
+      (i) => i.assetClass === "Crypto" && i.currency === "CAD" && !twelvePrices.has(i.ticker),
+    );
+    if (cryptoMissing.length > 0) {
+      const { rate } = await usdCadRate();
+      const usdPrices = await fetchTwelveData(
+        cryptoMissing.map((i) => ({ ...i, symbol: toUsdCryptoSymbol(i.ticker) })),
+      );
+      for (const [ticker, usd] of usdPrices) {
+        twelvePrices.set(ticker, Math.round(usd * rate * 100) / 100);
+      }
+    }
 
     for (const [ticker, price] of twelvePrices)
       priceCache.set(ticker, { price, at: now });
@@ -232,6 +267,7 @@ export async function GET(req: Request) {
       prices,
       stale,
       quota: await eodhdUsage(nowDate),
+      twelveData: await twelveDataUsage(nowDate),
       ts: now,
       afterClose,
     };
