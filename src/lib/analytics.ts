@@ -13,6 +13,14 @@ import {
   lastMonthKeys,
   monthKeyOf,
 } from "./format";
+import {
+  fromCents,
+  roundMoney,
+  subtractMoney,
+  sumMoney,
+  sumProducts,
+  toCents,
+} from "./money";
 
 
 export interface NetWorthPoint {
@@ -32,13 +40,15 @@ export function accountValueAt(acc: Account, monthKey: string): number {
 }
 
 function portfolioValueAt(holdings: Holding[], monthsAgoFromEnd: number): number {
-  let total = 0;
-  for (const h of holdings) {
-    const hist = h.historyCAD ?? h.history;
-    const idx = hist.length - 1 - monthsAgoFromEnd;
-    total += h.shares * (hist[Math.max(0, Math.min(hist.length - 1, idx))] ?? h.priceCAD ?? h.price);
-  }
-  return total;
+  return sumProducts(
+    holdings.map((h) => {
+      const hist = h.historyCAD ?? h.history;
+      const idx = hist.length - 1 - monthsAgoFromEnd;
+      const px =
+        hist[Math.max(0, Math.min(hist.length - 1, idx))] ?? h.priceCAD ?? h.price;
+      return [h.shares, px] as const;
+    }),
+  );
 }
 
 export function netWorthSeries(
@@ -48,21 +58,21 @@ export function netWorthSeries(
 ): NetWorthPoint[] {
   const keys = lastMonthKeys(n);
   return keys.map((key, i) => {
-    let assets = 0;
-    let liabilities = 0;
+    let assetCents = 0;
+    let liabilityCents = 0;
     for (const acc of accounts) {
-      const v = accountValueAt(acc, key);
-      if (isLiability(acc.kind)) liabilities += v;
-      else assets += v;
+      const v = toCents(accountValueAt(acc, key));
+      if (isLiability(acc.kind)) liabilityCents += v;
+      else assetCents += v;
     }
     const portfolio = portfolioValueAt(holdings, keys.length - 1 - i);
     return {
       key,
       label: labelMonth(key),
-      assets,
-      liabilities,
+      assets: fromCents(assetCents),
+      liabilities: fromCents(liabilityCents),
       portfolio,
-      net: assets + portfolio - liabilities,
+      net: fromCents(assetCents + toCents(portfolio) - liabilityCents),
     };
   });
 }
@@ -83,12 +93,18 @@ export function cashflowSeries(transactions: Transaction[], n = 12): CashflowPoi
     const k = monthKeyOf(t.date);
     const slot = map.get(k);
     if (!slot) continue;
-    if (t.type === "income") slot.income += t.amount;
-    else slot.expenses += t.amount;
+    if (t.type === "income") slot.income += toCents(t.amount);
+    else slot.expenses += toCents(t.amount);
   }
   return keys.map((key) => {
     const { income, expenses } = map.get(key)!;
-    return { key, label: labelMonth(key), income, expenses, net: income - expenses };
+    return {
+      key,
+      label: labelMonth(key),
+      income: fromCents(income),
+      expenses: fromCents(expenses),
+      net: fromCents(income - expenses),
+    };
   });
 }
 
@@ -100,10 +116,10 @@ export function spendByCategory(
   for (const t of transactions) {
     if (t.type !== "expense") continue;
     if (monthKey && monthKeyOf(t.date) !== monthKey) continue;
-    totals.set(t.category, (totals.get(t.category) ?? 0) + t.amount);
+    totals.set(t.category, (totals.get(t.category) ?? 0) + toCents(t.amount));
   }
   return [...totals.entries()]
-    .map(([name, value]) => ({ name, value }))
+    .map(([name, cents]) => ({ name, value: fromCents(cents) }))
     .sort((a, b) => b.value - a.value);
 }
 
@@ -115,14 +131,15 @@ export function stackedSpend(
 ): Record<string, number | string>[] {
   const keys = lastMonthKeys(n);
   return keys.map((key) => {
-    const row: Record<string, number | string> = { key, label: labelMonth(key) };
-    for (const c of categories) row[c] = 0;
+    const cents = new Map<string, number>(categories.map((c) => [c, 0]));
     for (const t of transactions) {
       if (t.type !== "expense") continue;
       if (monthKeyOf(t.date) !== key) continue;
-      if (!(t.category in row)) continue;
-      row[t.category] = (row[t.category] as number) + t.amount;
+      if (!cents.has(t.category)) continue;
+      cents.set(t.category, cents.get(t.category)! + toCents(t.amount));
     }
+    const row: Record<string, number | string> = { key, label: labelMonth(key) };
+    for (const [category, total] of cents) row[category] = fromCents(total);
     return row;
   });
 }
@@ -136,7 +153,9 @@ export interface PortfolioPoint {
 
 export function portfolioSeries(holdings: Holding[], n = 18): PortfolioPoint[] {
   const keys = lastMonthKeys(Math.min(n, 18));
-  const totalCost = holdings.reduce((s, h) => s + h.shares * (h.avgCostCAD ?? h.avgCost), 0);
+  const totalCost = sumProducts(
+    holdings.map((h) => [h.shares, h.avgCostCAD ?? h.avgCost] as const),
+  );
   return keys.map((key, i) => ({
     key,
     label: labelMonth(key),
@@ -151,9 +170,12 @@ export function allocationByClass(
   const totals = new Map<string, number>();
   for (const h of holdings) {
     const px = h.priceCAD ?? h.price;
-    totals.set(h.assetClass, (totals.get(h.assetClass) ?? 0) + h.shares * px);
+    totals.set(h.assetClass, (totals.get(h.assetClass) ?? 0) + toCents(h.shares * px));
   }
-  return [...totals.entries()].map(([name, value]) => ({ name, value }));
+  return [...totals.entries()].map(([name, cents]) => ({
+    name,
+    value: fromCents(cents),
+  }));
 }
 
 export function sectorExposure(
@@ -162,13 +184,16 @@ export function sectorExposure(
   const totals = new Map<string, number>();
   for (const h of holdings) {
     const px = h.priceCAD ?? h.price;
-    totals.set(h.sector, (totals.get(h.sector) ?? 0) + h.shares * px);
+    totals.set(h.sector, (totals.get(h.sector) ?? 0) + toCents(h.shares * px));
   }
-  const rows = [...totals.entries()].map(([sector, value]) => ({ sector, value }));
+  const rows = [...totals.entries()].map(([sector, cents]) => ({
+    sector,
+    value: fromCents(cents),
+  }));
   rows.sort((a, b) => b.value - a.value);
   if (rows.length <= 6) return rows;
   const top = rows.slice(0, 5);
-  const other = rows.slice(5).reduce((s, r) => s + r.value, 0);
+  const other = sumMoney(rows.slice(5).map((r) => r.value));
   top.push({ sector: "Other", value: other });
   return top;
 }
@@ -200,19 +225,21 @@ function computeMwrr(
 }
 
 export function holdingRows(holdings: Holding[]): HoldingRow[] {
-  const totalValue = holdings.reduce((s, h) => s + h.shares * (h.priceCAD ?? h.price), 0);
+  const totalValue = sumProducts(
+    holdings.map((h) => [h.shares, h.priceCAD ?? h.price] as const),
+  );
   return holdings
     .map((h) => {
       const px = h.priceCAD ?? h.price;
       const avgC = h.avgCostCAD ?? h.avgCost;
       const divs = h.dividendsReceivedCAD ?? h.dividendsReceived ?? 0;
       const hist = h.historyCAD ?? h.history;
-      const marketValue = h.shares * px;
-      const costBasis = h.shares * avgC;
+      const marketValue = roundMoney(h.shares * px);
+      const costBasis = roundMoney(h.shares * avgC);
       const prev =
         hist.length > 1 ? hist[hist.length - 2] : px;
-      const gain = marketValue - costBasis;
-      const totalReturn = gain + divs;
+      const gain = subtractMoney(marketValue, costBasis);
+      const totalReturn = roundMoney(gain + divs);
       const mwrr = computeMwrr(costBasis, marketValue, divs, 18);
       return {
         holding: h,
@@ -244,19 +271,21 @@ export function budgetRows(
 ): BudgetRow[] {
   return budgets
     .map((b) => {
-      const spent = transactions
-        .filter(
-          (t) =>
-            t.type === "expense" &&
-            t.category === b.category &&
-            monthKeyOf(t.date) === monthKey,
-        )
-        .reduce((s, t) => s + t.amount, 0);
+      const spent = sumMoney(
+        transactions
+          .filter(
+            (t) =>
+              t.type === "expense" &&
+              t.category === b.category &&
+              monthKeyOf(t.date) === monthKey,
+          )
+          .map((t) => t.amount),
+      );
       return {
         category: b.category,
         limit: b.limit,
         spent,
-        remaining: b.limit - spent,
+        remaining: subtractMoney(b.limit, spent),
         pct: b.limit > 0 ? (spent / b.limit) * 100 : 0,
       };
     })
@@ -274,17 +303,22 @@ export function monthTotals(
   transactions: Transaction[],
   monthKey = currentMonthKey(),
 ): MonthTotals {
-  let income = 0;
-  let expenses = 0;
+  let incomeCents = 0;
+  let expenseCents = 0;
   for (const t of transactions) {
     if (monthKeyOf(t.date) !== monthKey) continue;
-    if (t.type === "income") income += t.amount;
-    else expenses += t.amount;
+    if (t.type === "income") incomeCents += toCents(t.amount);
+    else expenseCents += toCents(t.amount);
   }
+  const income = fromCents(incomeCents);
+  const expenses = fromCents(expenseCents);
   return {
     income,
     expenses,
-    net: income - expenses,
-    savingsRate: income > 0 ? ((income - expenses) / income) * 100 : 0,
+    net: fromCents(incomeCents - expenseCents),
+    savingsRate:
+      incomeCents > 0
+        ? ((incomeCents - expenseCents) / incomeCents) * 100
+        : 0,
   };
 }

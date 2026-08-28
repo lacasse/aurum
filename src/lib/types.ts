@@ -78,6 +78,15 @@ export interface FinanceData {
   categories: string[];
 }
 
+export const ACCOUNT_KINDS: AccountKind[] = [
+  "checking",
+  "savings",
+  "cash",
+  "property",
+  "credit",
+  "loan",
+];
+
 export const LIABILITY_KINDS: AccountKind[] = ["credit", "loan"];
 
 export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {

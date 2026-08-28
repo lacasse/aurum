@@ -6,6 +6,7 @@ import {
   recordLoginFailure,
   resetLoginFailures,
 } from "@/lib/login-rate-limit";
+import { loginSchema } from "@/lib/schemas";
 
 function clientIp(request: Request): string | undefined {
   // Prefer X-Real-IP: nginx sets it to the real peer address (not spoofable
@@ -37,22 +38,23 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { username?: string; password?: string };
+  let raw: unknown;
   try {
-    body = await request.json();
+    raw = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
-  const username = (body.username ?? "").trim();
-  const password = (body.password ?? "").trim();
-
-  if (!username || !password) {
+  // Deliberately not surfacing the schema's field-level issues here: the
+  // response must not distinguish "no such user" from "wrong password".
+  const parsed = loginSchema.safeParse(raw);
+  if (!parsed.success) {
     return NextResponse.json(
       { error: "Username and password are required" },
       { status: 400 },
     );
   }
+  const { username, password } = parsed.data;
 
   const valid = verifyCredentials(username, password);
   if (!valid) {

@@ -1,6 +1,12 @@
 import { ensureDb } from "@/db/init";
-import { getSnapshots, parseSnapshotInput, upsertSnapshots } from "@/db/repo";
+import {
+  BadRequestError,
+  getSnapshots,
+  parseSnapshotsBody,
+  upsertSnapshots,
+} from "@/db/repo";
 import { handle, readJson } from "@/db/http";
+import { monthKeySchema } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
 
@@ -8,25 +14,18 @@ export async function GET(req: Request) {
   return handle(async () => {
     await ensureDb();
     const url = new URL(req.url);
-    const month = url.searchParams.get("month");
-    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
-      return { error: "month query param required (YYYY-MM)" };
+    const month = monthKeySchema.safeParse(url.searchParams.get("month"));
+    if (!month.success) {
+      throw new BadRequestError("month query param required (YYYY-MM)");
     }
-    const rows = await getSnapshots(month);
-    return { snapshots: rows };
+    return { snapshots: await getSnapshots(month.data) };
   });
 }
 
 export async function POST(req: Request) {
   return handle(async () => {
     await ensureDb();
-    const body = (await readJson(req)) as Record<string, unknown>;
-    const snapshots = body.snapshots;
-    if (!Array.isArray(snapshots)) {
-      return { error: "snapshots array required" };
-    }
-    const parsed = snapshots.map((s) => parseSnapshotInput(s));
-    await upsertSnapshots(parsed);
+    await upsertSnapshots(parseSnapshotsBody(await readJson(req)));
     return { ok: true };
   });
 }
