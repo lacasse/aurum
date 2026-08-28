@@ -12,6 +12,13 @@ reviewable before saving.
 docker compose up --build
 ```
 
+The Compose project name is pinned to `finance` in `docker-compose.yml`, so the stack and
+its volumes are the same on every machine and survive renaming or moving the checked-out
+folder. Without that pin Compose names the project after the enclosing directory, and a
+rename would start a second stack on empty volumes — indistinguishable, at a glance, from
+losing every figure in the app. Containers are always `finance-*`, and `docker compose`
+commands need no `-p` flag.
+
 | Service | URL | Purpose |
 | --- | --- | --- |
 | app | https://localhost | Next.js app + JSON API (HTTPS only) |
