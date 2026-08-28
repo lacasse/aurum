@@ -201,6 +201,31 @@ describe("accumulatePositions", () => {
     assert.equal(positions.length, 0, "nothing lands in a fallback account");
   });
 
+  test("a ticker bought and sold in one import still leaves a record", () => {
+    // It ends at zero shares — the table hides it — but the realized gain and
+    // any dividends it paid are worth keeping.
+    const { positions } = accumulatePositions(
+      [
+        row({ quantity: 10, transactedAmount: 300, amountCad: 300 }),
+        row({ date: "2025-06-01", type: "sell", quantity: 10, transactedAmount: 400, amountCad: 400 }),
+      ],
+      resolve,
+      [],
+    );
+    assert.equal(positions.length, 1);
+    assert.equal(positions[0].shares, 0);
+    assert.equal(positions[0].everHeld, true, "so the caller knows to keep it");
+  });
+
+  test("a position that was never bought is not invented", () => {
+    const { positions } = accumulatePositions(
+      [row({ type: "dividend", quantity: 0, transactedAmount: 5, amountCad: 5 })],
+      resolve,
+      [],
+    );
+    assert.equal(positions[0].everHeld, false);
+  });
+
   test("trades add to a position that already exists", () => {
     const existing = {
       id: "h1",

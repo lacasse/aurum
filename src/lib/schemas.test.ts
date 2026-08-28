@@ -202,15 +202,33 @@ describe("holdingSchema", () => {
     assert.deepEqual(h.historyCAD, h.history);
   });
 
-  test("rejects non-positive shares, cost and price", () => {
+  test("accepts a sold-off position at zero shares", () => {
+    // The row outlives the position: cost basis and dividends are the record
+    // of a realized gain. Rejecting zero here made a full sell-off fail
+    // silently, leaving the database on the old share count.
+    const sold = holdingSchema.safeParse({ ...valid, shares: 0, avgCost: 0 });
+    assert.equal(sold.success, true);
+    assert.equal(sold.success && sold.data.shares, 0);
+  });
+
+  test("still rejects negative or unparseable quantities", () => {
     for (const field of ["shares", "avgCost", "price"] as const) {
       assert.equal(
-        holdingSchema.safeParse({ ...valid, [field]: 0 }).success,
+        holdingSchema.safeParse({ ...valid, [field]: -1 }).success,
         false,
-        `${field} = 0 should be rejected`,
+        `${field} = -1 should be rejected`,
       );
-      assert.equal(holdingSchema.safeParse({ ...valid, [field]: -1 }).success, false);
+      assert.equal(
+        holdingSchema.safeParse({ ...valid, [field]: "abc" }).success,
+        false,
+        `${field} = "abc" should be rejected, not silently zeroed`,
+      );
     }
+    assert.equal(
+      holdingSchema.safeParse({ ...valid, price: 0 }).success,
+      false,
+      "a security still has a price",
+    );
   });
 
   test("rejects unknown enum values (previously cast unchecked)", () => {
