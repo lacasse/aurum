@@ -44,6 +44,13 @@ const requiredString = z.string().trim().min(1);
 /** Mirrors `Number(value)`, required finite and strictly positive. */
 const positiveNumber = z.coerce.number().finite().positive();
 
+/*
+ * Zero or more, and still an error when unparseable — unlike nonNegativeNumber,
+ * which clamps and defaults. Used where zero is meaningful (a sold-off
+ * position) but nonsense should still be rejected rather than silently zeroed.
+ */
+const zeroOrMore = z.coerce.number().finite().min(0);
+
 /** Mirrors `Number(value)`, finite, clamped at zero, defaulting to zero. */
 const nonNegativeNumber = z.coerce
   .number()
@@ -158,8 +165,14 @@ export const holdingSchema = z
     name: z.coerce.string().optional().catch(undefined),
     assetClass: enumWithDefault<AssetClass>(ASSET_CLASSES, "US Equity"),
     sector: z.coerce.string().optional().catch(undefined),
-    shares: positiveNumber,
-    avgCost: positiveNumber,
+    /*
+     * Zero is valid: a position sold down to nothing keeps its row so the cost
+     * basis and dividends behind the realized gain survive. Rejecting it here
+     * meant a full sell-off failed silently — the store showed zero shares and
+     * the database kept the old count.
+     */
+    shares: zeroOrMore,
+    avgCost: zeroOrMore,
     price: positiveNumber,
     history: numberArray,
     dividendsReceived: nonNegativeNumber,
@@ -197,8 +210,9 @@ export const snapshotSchema = z
     holdingId: requiredString,
     ticker: requiredString,
     price: positiveNumber,
-    avgCost: positiveNumber,
-    shares: positiveNumber,
+    // A snapshot of a closed position is legitimately zero.
+    avgCost: zeroOrMore,
+    shares: zeroOrMore,
     value: z.coerce.number().finite(),
     valueCAD: optionalNumber,
   })

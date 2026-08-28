@@ -195,6 +195,12 @@ export interface Position {
   dividendsNative: number;
   dividendsCad: number;
   lastPrice: number;
+  /**
+   * Whether any shares were ever bought. A position bought and sold within one
+   * import ends at zero shares but is still a realized gain worth recording,
+   * and cannot be told apart from an empty position by its totals alone.
+   */
+  everHeld: boolean;
 }
 
 export interface AccumulationResult {
@@ -250,6 +256,7 @@ export function accumulatePositions(
           shares: existing.shares,
           costNative: existing.shares * existing.avgCost,
           costCad: existing.shares * (existing.avgCostCAD ?? existing.avgCost),
+          everHeld: true,
           dividendsNative: existing.dividendsReceived ?? 0,
           dividendsCad: existing.dividendsReceivedCAD ?? existing.dividendsReceived ?? 0,
           lastPrice: existing.price,
@@ -261,6 +268,7 @@ export function accumulatePositions(
           shares: 0,
           costNative: 0,
           costCad: 0,
+          everHeld: false,
           dividendsNative: 0,
           dividendsCad: 0,
           lastPrice: row.pricePerUnit,
@@ -305,6 +313,7 @@ export function accumulatePositions(
       pos.shares += row.quantity;
       pos.costNative += row.transactedAmount;
       pos.costCad += row.amountCad;
+      pos.everHeld = true;
     } else if (row.type === "sell") {
       moveCash(accountId, row.amountCad);
       // Average-cost disposal: selling a third of the shares removes a third of

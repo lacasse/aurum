@@ -127,6 +127,12 @@ export default function InvestmentsPage() {
           { key, dir: key === "name" ? "asc" : "desc" },
     );
 
+  /*
+   * Fully-sold positions are hidden rather than deleted, so the cost basis and
+   * dividends behind a realized gain survive for tax reporting.
+   */
+  const [showClosed, setShowClosed] = useState(false);
+
   /* Tickers whose per-account lots are shown; only ever set for pooled rows. */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpanded = (ticker: string) =>
@@ -209,23 +215,29 @@ export default function InvestmentsPage() {
   }, []);
 
   const data = useMemo(() => {
-    const rows = sortHoldingRows(holdingRows(holdings), sort.key, sort.dir);
+    const all = sortHoldingRows(holdingRows(holdings), sort.key, sort.dir);
+    const closedCount = all.filter((r) => r.closed).length;
+    const rows = showClosed ? all : all.filter((r) => !r.closed);
+    // Derived figures describe the live portfolio, so a closed position never
+    // becomes the "best performer" on the strength of old dividends.
+    const open = all.filter((r) => !r.closed);
     const series = portfolioSeries(holdings, 18);
     const allocation = allocationByClass(holdings).sort((a, b) => b.value - a.value);
     const sectors = sectorExposure(holdings);
-    const totalValue = rows.reduce((s, r) => s + r.marketValue, 0);
-    const totalCost = rows.reduce((s, r) => s + r.costBasis, 0);
-    const totalDividends = rows.reduce((s, r) => s + r.totalDividends, 0);
-    const best = [...rows].sort((a, b) => b.mwrr - a.mwrr)[0];
+    const totalValue = open.reduce((s, r) => s + r.marketValue, 0);
+    const totalCost = open.reduce((s, r) => s + r.costBasis, 0);
+    const totalDividends = open.reduce((s, r) => s + r.totalDividends, 0);
+    const best = [...open].sort((a, b) => b.mwrr - a.mwrr)[0];
     // Independent of the table's sort: the chart shows the ten largest
     // positions, and should not reshuffle when a column header is clicked.
-    const gainBars = [...rows]
+    const gainBars = [...open]
       .sort((a, b) => b.marketValue - a.marketValue)
       .slice(0, 10)
       .map((r) => ({ label: r.ticker, gain: r.totalReturn }))
       .sort((a, b) => b.gain - a.gain);
     return {
       rows,
+      closedCount,
       series,
       allocation,
       sectors,
@@ -235,7 +247,7 @@ export default function InvestmentsPage() {
       best,
       gainBars,
     };
-  }, [holdings, sort]);
+  }, [holdings, sort, showClosed]);
 
   const twr = useMemo(() => {
     if (!benchmark || benchmark.series.length < 2) return null;
@@ -511,7 +523,19 @@ export default function InvestmentsPage() {
 
         {/* Holdings table */}
         <Card>
-          <CardHeader title="Holdings" subtitle="Click the pencil to update price or shares" />
+          <CardHeader
+            title="Holdings"
+            subtitle="Click the pencil to update price or shares"
+            action={
+              data.closedCount > 0 ? (
+                <Button variant="secondary" onClick={() => setShowClosed((v) => !v)}>
+                  {showClosed
+                    ? "Hide closed positions"
+                    : `Show ${data.closedCount} closed position${data.closedCount === 1 ? "" : "s"}`}
+                </Button>
+              ) : undefined
+            }
+          />
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -538,6 +562,7 @@ export default function InvestmentsPage() {
                     className={cn(
                       "border-b border-line/50 transition-colors last:border-0 hover:bg-elevated/60",
                       pooled && "cursor-pointer",
+                      r.closed && "opacity-60",
                     )}
                     onClick={pooled ? () => toggleExpanded(r.ticker) : undefined}
                   >
@@ -561,6 +586,14 @@ export default function InvestmentsPage() {
                           </span>
                           <span className="flex items-center gap-1 text-ink-faint">
                             <span className="truncate max-w-[100px]">{r.ticker}</span>
+                            {r.closed && (
+                              <span
+                                className="shrink-0 rounded bg-elevated px-1 py-px text-[8px] font-medium text-ink-faint"
+                                title="Every share has been sold. Kept for the record of the realized gain and the dividends it paid."
+                              >
+                                CLOSED
+                              </span>
+                            )}
                             {/* One tag per account the security sits in. */}
                             {r.accountIds.map((id) => (
                               <span
@@ -665,6 +698,11 @@ export default function InvestmentsPage() {
                           <span className="text-[11px] text-ink-dim">
                             {accountLabel(lot.accountId)}
                           </span>
+                          {lot.shares <= 0 && (
+                            <span className="ml-1 rounded bg-elevated px-1 py-px text-[8px] font-medium text-ink-faint">
+                              CLOSED
+                            </span>
+                          )}
                         </td>
                         <td className="hidden px-3 py-2 text-right tabular-nums text-ink-dim md:table-cell">
                           {lot.shares.toLocaleString("en-US")}
