@@ -8,6 +8,7 @@ import {
   holdings,
   merchantRules,
   monthlySnapshots,
+  recurringTransactions,
   transactions,
 } from "./schema";
 import {
@@ -17,14 +18,18 @@ import {
   Holding,
   MonthlyPoint,
   MonthlySnapshot,
+  RecurringRule,
   Transaction,
   TxnType,
-  isLiability,
+  balanceDelta,
 } from "@/lib/types";
+import { advanceRule, dueOccurrences } from "@/lib/recurrence";
+import { todayISO } from "@/lib/format";
 import { addMoney } from "@/lib/money";
 import {
   DEMO_ACCOUNT_ID_PREFIX,
   DEMO_HOLDING_ID_PREFIX,
+  DEMO_RECURRING_ID_PREFIX,
   DEMO_TRANSACTION_ID_PREFIX,
   SAMPLE_BUDGETS,
 } from "@/lib/sample";
@@ -36,6 +41,7 @@ import {
   formatIssues,
   holdingSchema,
   merchantRuleSchema,
+  recurringRuleSchema,
   renameCategorySchema,
   snapshotSchema,
   snapshotsBodySchema,
@@ -57,6 +63,7 @@ function toAccount(row: AccountRow): Account {
     kind: row.kind as AccountKind,
     balance: row.balance,
     history: row.history,
+    registration: (row.registration ?? undefined) as Account["registration"],
   };
 }
 
@@ -72,7 +79,7 @@ function toHolding(row: HoldingRow): Holding {
     price: row.price,
     history: row.history,
     dividendsReceived: row.dividendsReceived ?? 0,
-    accountType: (row.accountType ?? "non-registered") as Holding["accountType"],
+    accountId: row.accountId,
     currency: (row.currency ?? "USD") as Holding["currency"],
     priceCAD: row.priceCAD ?? row.price,
     avgCostCAD: row.avgCostCAD ?? row.avgCost,
@@ -88,9 +95,31 @@ function toTransaction(row: typeof transactions.$inferSelect): Transaction {
     type: row.type as TxnType,
     amount: row.amount,
     category: row.category,
-    accountId: row.accountId,
+    sourceAccountId: row.sourceAccountId ?? undefined,
+    destinationAccountId: row.destinationAccountId ?? undefined,
     payee: row.payee,
     note: row.note ?? undefined,
+    recurringId: row.recurringId ?? undefined,
+  };
+}
+
+function toRecurringRule(
+  row: typeof recurringTransactions.$inferSelect,
+): RecurringRule {
+  return {
+    id: row.id,
+    type: row.type as TxnType,
+    amount: row.amount,
+    category: row.category,
+    sourceAccountId: row.sourceAccountId ?? undefined,
+    destinationAccountId: row.destinationAccountId ?? undefined,
+    payee: row.payee,
+    note: row.note ?? undefined,
+    frequency: row.frequency as RecurringRule["frequency"],
+    startDate: row.startDate,
+    endDate: row.endDate ?? undefined,
+    nextDate: row.nextDate,
+    active: row.active,
   };
 }
 
@@ -108,6 +137,7 @@ export async function getState(): Promise<
     budgetRows,
     categoryRows,
     ruleRows,
+    recurringRows,
     demoPresent,
   ] = await Promise.all([
     db.select().from(accounts).orderBy(asc(accounts.position)),
@@ -116,6 +146,7 @@ export async function getState(): Promise<
     db.select().from(budgets),
     db.select().from(categories).orderBy(asc(categories.position)),
     db.select().from(merchantRules),
+    db.select().from(recurringTransactions).orderBy(asc(recurringTransactions.position)),
     hasDemoData(),
   ]);
 
@@ -125,6 +156,7 @@ export async function getState(): Promise<
     holdings: holdingRows.map(toHolding),
     budgets: budgetRows.map((b) => ({ category: b.category, limit: b.max })),
     categories: categoryRows.map((c) => c.name),
+    recurring: recurringRows.map(toRecurringRule),
     merchantRules: Object.fromEntries(ruleRows.map((r) => [r.merchant, r.category])),
     demoPresent,
   };
@@ -152,6 +184,7 @@ export async function seed(data: FinanceData): Promise<void> {
         balance: a.balance,
         history: a.history,
         position: i,
+        registration: a.registration ?? null,
       })),
     );
   }
@@ -163,7 +196,8 @@ export async function seed(data: FinanceData): Promise<void> {
         type: t.type,
         amount: t.amount,
         category: t.category,
-        accountId: t.accountId,
+        sourceAccountId: t.sourceAccountId ?? null,
+        destinationAccountId: t.destinationAccountId ?? null,
         payee: t.payee,
         note: t.note ?? null,
       })),
@@ -182,7 +216,7 @@ export async function seed(data: FinanceData): Promise<void> {
         price: h.price,
         history: h.history,
         dividendsReceived: h.dividendsReceived ?? 0,
-        accountType: h.accountType ?? "non-registered",
+        accountId: h.accountId,
         currency: h.currency ?? "USD",
         priceCAD: h.priceCAD ?? h.price,
         avgCostCAD: h.avgCostCAD ?? h.avgCost,
@@ -197,6 +231,11 @@ export async function seed(data: FinanceData): Promise<void> {
       .insert(budgets)
       .values(data.budgets.map((b) => ({ category: b.category, max: b.limit })));
   }
+  if (data.recurring.length > 0) {
+    await db
+      .insert(recurringTransactions)
+      .values(data.recurring.map((r, i) => recurringValues(r, i)));
+  }
   if (data.categories.length > 0) {
     await db
       .insert(categories)
@@ -206,6 +245,7 @@ export async function seed(data: FinanceData): Promise<void> {
 
 export async function wipe(): Promise<void> {
   await db.delete(transactions);
+  await db.delete(recurringTransactions);
   await db.delete(budgets);
   await db.delete(merchantRules);
   await db.delete(categories);
@@ -216,6 +256,108 @@ export async function wipe(): Promise<void> {
 export async function resetToSample(data: FinanceData): Promise<void> {
   await wipe();
   await seed(data);
+}
+
+/* ------------------------------------------------------------------ */
+/* Recurring transactions                                              */
+/* ------------------------------------------------------------------ */
+
+function recurringValues(r: RecurringRule, position: number) {
+  return {
+    id: r.id,
+    type: r.type,
+    amount: r.amount,
+    category: r.category,
+    sourceAccountId: r.sourceAccountId ?? null,
+    destinationAccountId: r.destinationAccountId ?? null,
+    payee: r.payee,
+    note: r.note ?? null,
+    frequency: r.frequency,
+    startDate: r.startDate,
+    endDate: r.endDate ?? null,
+    nextDate: r.nextDate,
+    active: r.active,
+    position,
+  };
+}
+
+export async function insertRecurringRule(
+  rule: RecurringRule,
+  position: number,
+): Promise<void> {
+  await db.insert(recurringTransactions).values(recurringValues(rule, position));
+}
+
+export async function replaceRecurringRule(rule: RecurringRule): Promise<void> {
+  const { id: _id, position: _position, ...rest } = recurringValues(rule, 0);
+  void _id;
+  void _position;
+  await db
+    .update(recurringTransactions)
+    .set(rest)
+    .where(eq(recurringTransactions.id, rule.id));
+}
+
+export async function deleteRecurringRule(id: string): Promise<void> {
+  await db.delete(recurringTransactions).where(eq(recurringTransactions.id, id));
+}
+
+/**
+ * Post every occurrence each active rule owes up to today, then advance the
+ * rule past them.
+ *
+ * Catch-up is driven by the rule's own `nextDate`, so this is safe to call on
+ * every load: a rule that is up to date produces nothing, and one that has not
+ * run for three months produces exactly the three payments it missed. Each
+ * generated transaction carries `recurringId`, so it can be traced back — and
+ * so a re-run can never duplicate one that already exists.
+ */
+export async function materializeRecurring(
+  today = todayISO(),
+): Promise<number> {
+  const rules = (await db.select().from(recurringTransactions)).map(toRecurringRule);
+  let created = 0;
+
+  for (const rule of rules) {
+    const due = dueOccurrences(rule, today);
+    if (due.length === 0) continue;
+
+    // Belt and braces against a double-post: ask which dates already exist for
+    // this rule rather than trusting nextDate alone.
+    const existing = new Set(
+      (
+        await db
+          .select({ date: transactions.date })
+          .from(transactions)
+          .where(eq(transactions.recurringId, rule.id))
+      ).map((r) => r.date),
+    );
+
+    for (const date of due) {
+      if (existing.has(date)) continue;
+      await insertTransaction({
+        id: `rec-${rule.id}-${date}`,
+        date,
+        type: rule.type,
+        amount: rule.amount,
+        category: rule.category,
+        sourceAccountId: rule.sourceAccountId,
+        destinationAccountId: rule.destinationAccountId,
+        payee: rule.payee,
+        note: rule.note,
+        recurringId: rule.id,
+      });
+      created += 1;
+    }
+
+    const { nextDate, active } = advanceRule(rule, due);
+    await db
+      .update(recurringTransactions)
+      .set({ nextDate, active })
+      .where(eq(recurringTransactions.id, rule.id));
+  }
+
+  return created;
 }
 
 /* ------------------------------------------------------------------ */
@@ -293,6 +435,9 @@ export async function deleteDemoData(): Promise<void> {
     await tx
       .delete(accounts)
       .where(like(accounts.id, startsWith(DEMO_ACCOUNT_ID_PREFIX)));
+    await tx
+      .delete(recurringTransactions)
+      .where(like(recurringTransactions.id, startsWith(DEMO_RECURRING_ID_PREFIX)));
     await tx.delete(budgets).where(
       inArray(
         budgets.category,
@@ -319,6 +464,7 @@ export async function insertAccount(a: Account, position: number): Promise<void>
     balance: a.balance,
     history: a.history,
     position,
+    registration: a.registration ?? null,
   });
 }
 
@@ -331,6 +477,7 @@ export async function replaceAccount(a: Account): Promise<void> {
       kind: a.kind,
       balance: a.balance,
       history: a.history,
+      registration: a.registration ?? null,
     })
     .where(eq(accounts.id, a.id));
 }
@@ -340,7 +487,11 @@ export async function deleteAccountRow(id: string): Promise<void> {
 }
 
 export async function nextPosition(
-  table: typeof accounts | typeof holdings | typeof categories,
+  table:
+    | typeof accounts
+    | typeof holdings
+    | typeof categories
+    | typeof recurringTransactions,
 ): Promise<number> {
   const [row] = await db
     .select({ max: sql<number>`coalesce(max(${table.position}), -1)::int` })
@@ -352,63 +503,97 @@ export async function nextPosition(
 /* Transactions (with account-balance side effects)                    */
 /* ------------------------------------------------------------------ */
 
-/** Mirror of the client-side rule: expenses drain assets / grow debts, income the reverse. */
-async function applyTxnEffect(txn: Transaction, sign: 1 | -1): Promise<void> {
-  const [acc] = await db.select().from(accounts).where(eq(accounts.id, txn.accountId));
+/**
+ * A database handle inside a transaction. Writing a transaction and moving the
+ * balances it affects must be atomic: a transfer touches two accounts, and a
+ * failure between the two halves would make money disappear.
+ */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Move one account's balance, keeping the latest history point in step. */
+async function applyToAccount(
+  tx: Tx,
+  accountId: string,
+  side: "source" | "destination",
+  amount: number,
+  sign: 1 | -1,
+): Promise<void> {
+  const [acc] = await tx.select().from(accounts).where(eq(accounts.id, accountId));
   if (!acc) return;
-  const liability = isLiability(acc.kind as AccountKind);
-  let delta = txn.type === "income" ? txn.amount : -txn.amount;
-  if (liability) delta = -delta;
-  const balance = addMoney(acc.balance, delta * sign);
+  const delta = balanceDelta(acc.kind as AccountKind, side, amount) * sign;
+  const balance = addMoney(acc.balance, delta);
   const history: MonthlyPoint[] = acc.history.slice();
   if (history.length > 0) {
     history[history.length - 1] = { ...history[history.length - 1], value: balance };
   }
-  await db.update(accounts).set({ balance, history }).where(eq(accounts.id, acc.id));
+  await tx.update(accounts).set({ balance, history }).where(eq(accounts.id, acc.id));
+}
+
+/**
+ * Apply a transaction to both of its sides. A transfer touches two accounts
+ * and nets to zero across them; income and expenses touch only the one side
+ * that is an account of yours. `sign=-1` reverses the effect.
+ */
+async function applyTxnEffect(tx: Tx, txn: Transaction, sign: 1 | -1): Promise<void> {
+  if (txn.sourceAccountId) {
+    await applyToAccount(tx, txn.sourceAccountId, "source", txn.amount, sign);
+  }
+  if (txn.destinationAccountId) {
+    await applyToAccount(tx, txn.destinationAccountId, "destination", txn.amount, sign);
+  }
 }
 
 export async function insertTransaction(txn: Transaction): Promise<void> {
-  await db.insert(transactions).values({
-    id: txn.id,
-    date: txn.date,
-    type: txn.type,
-    amount: txn.amount,
-    category: txn.category,
-    accountId: txn.accountId,
-    payee: txn.payee,
-    note: txn.note ?? null,
+  await db.transaction(async (tx) => {
+    await tx.insert(transactions).values({
+      id: txn.id,
+      date: txn.date,
+      type: txn.type,
+      amount: txn.amount,
+      category: txn.category,
+      sourceAccountId: txn.sourceAccountId ?? null,
+      destinationAccountId: txn.destinationAccountId ?? null,
+      payee: txn.payee,
+      note: txn.note ?? null,
+      recurringId: txn.recurringId ?? null,
+    });
+    await applyTxnEffect(tx, txn, 1);
   });
-  await applyTxnEffect(txn, 1);
 }
 
 export async function updateTransactionRow(
   id: string,
   input: Transaction,
 ): Promise<void> {
-  const [old] = await db.select().from(transactions).where(eq(transactions.id, id));
-  if (!old) return;
-  await applyTxnEffect(toTransaction(old), -1);
-  const updated: Transaction = { ...toTransaction(old), ...input, id };
-  await db
-    .update(transactions)
-    .set({
-      date: updated.date,
-      type: updated.type,
-      amount: updated.amount,
-      category: updated.category,
-      accountId: updated.accountId,
-      payee: updated.payee,
-      note: updated.note ?? null,
-    })
-    .where(eq(transactions.id, id));
-  await applyTxnEffect(updated, 1);
+  await db.transaction(async (tx) => {
+    const [old] = await tx.select().from(transactions).where(eq(transactions.id, id));
+    if (!old) return;
+    await applyTxnEffect(tx, toTransaction(old), -1);
+    const updated: Transaction = { ...toTransaction(old), ...input, id };
+    await tx
+      .update(transactions)
+      .set({
+        date: updated.date,
+        type: updated.type,
+        amount: updated.amount,
+        category: updated.category,
+        sourceAccountId: updated.sourceAccountId ?? null,
+        destinationAccountId: updated.destinationAccountId ?? null,
+        payee: updated.payee,
+        note: updated.note ?? null,
+      })
+      .where(eq(transactions.id, id));
+    await applyTxnEffect(tx, updated, 1);
+  });
 }
 
 export async function removeTransaction(id: string): Promise<void> {
-  const [old] = await db.select().from(transactions).where(eq(transactions.id, id));
-  if (!old) return;
-  await applyTxnEffect(toTransaction(old), -1);
-  await db.delete(transactions).where(eq(transactions.id, id));
+  await db.transaction(async (tx) => {
+    const [old] = await tx.select().from(transactions).where(eq(transactions.id, id));
+    if (!old) return;
+    await applyTxnEffect(tx, toTransaction(old), -1);
+    await tx.delete(transactions).where(eq(transactions.id, id));
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -427,7 +612,7 @@ export async function insertHolding(h: Holding, position: number): Promise<void>
     price: h.price,
     history: h.history,
     dividendsReceived: h.dividendsReceived ?? 0,
-    accountType: h.accountType ?? "non-registered",
+    accountId: h.accountId,
     currency: h.currency ?? "USD",
     priceCAD: h.priceCAD ?? h.price,
     avgCostCAD: h.avgCostCAD ?? h.avgCost,
@@ -450,7 +635,7 @@ export async function replaceHolding(h: Holding): Promise<void> {
       price: h.price,
       history: h.history,
       dividendsReceived: h.dividendsReceived ?? 0,
-      accountType: h.accountType ?? "non-registered",
+      accountId: h.accountId,
       currency: h.currency ?? "USD",
       priceCAD: h.priceCAD ?? h.price,
       avgCostCAD: h.avgCostCAD ?? h.avgCost,
@@ -552,6 +737,10 @@ export function parseRenameCategory(body: unknown): { oldName: string; newName: 
 
 export function parseMerchantRule(body: unknown): { merchant: string; category: string } {
   return parseWith(merchantRuleSchema, body);
+}
+
+export function parseRecurringRule(body: unknown): RecurringRule {
+  return parseWith(recurringRuleSchema, body);
 }
 
 export function parseSnapshotsBody(body: unknown): MonthlySnapshot[] {

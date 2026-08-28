@@ -94,7 +94,7 @@ export function cashflowSeries(transactions: Transaction[], n = 12): CashflowPoi
     const slot = map.get(k);
     if (!slot) continue;
     if (t.type === "income") slot.income += toCents(t.amount);
-    else slot.expenses += toCents(t.amount);
+    else if (t.type === "expense") slot.expenses += toCents(t.amount);
   }
   return keys.map((key) => {
     const { income, expenses } = map.get(key)!;
@@ -308,7 +308,7 @@ export function monthTotals(
   for (const t of transactions) {
     if (monthKeyOf(t.date) !== monthKey) continue;
     if (t.type === "income") incomeCents += toCents(t.amount);
-    else expenseCents += toCents(t.amount);
+    else if (t.type === "expense") expenseCents += toCents(t.amount);
   }
   const income = fromCents(incomeCents);
   const expenses = fromCents(expenseCents);

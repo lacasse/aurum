@@ -12,7 +12,7 @@ function txn(over: Partial<Transaction> & Pick<Transaction, "amount" | "type">):
     id: Math.random().toString(36).slice(2),
     date: DAY,
     category: "Groceries",
-    accountId: "a1",
+    sourceAccountId: "a1",
     payee: "Market",
     ...over,
   };

@@ -44,7 +44,7 @@ async function main() {
     console.log("migrations + seed");
     await ensureDb();
     let state = await repo.getState();
-    expect(state.accounts.length === 6, `seeded 6 accounts (got ${state.accounts.length})`);
+    expect(state.accounts.length === 9, `seeded 9 accounts, 6 everyday + 3 investment (got ${state.accounts.length})`);
     expect(state.transactions.length > 400, `seeded transactions (${state.transactions.length})`);
     expect(state.holdings.length === 10, `seeded 10 holdings (got ${state.holdings.length})`);
     expect(state.budgets.length === 11, `seeded 11 budgets (got ${state.budgets.length})`);
@@ -53,7 +53,7 @@ async function main() {
     // ensureDb is idempotent
     await ensureDb();
     state = await repo.getState();
-    expect(state.accounts.length === 6, "ensureDb does not double-seed");
+    expect(state.accounts.length === 9, "ensureDb does not double-seed");
 
     console.log("transaction balance side effects");
     const checking = state.accounts.find((a) => a.name === "Everyday Checking")!;
@@ -64,7 +64,7 @@ async function main() {
       type: "expense" as const,
       amount: 10,
       category: "Dining",
-      accountId: checking.id,
+      sourceAccountId: checking.id,
       payee: "Test Cafe",
     };
     await repo.insertTransaction(txn);
@@ -87,6 +87,126 @@ async function main() {
       Math.abs(state.accounts.find((a) => a.id === checking.id)!.balance - before) < 0.01,
       "deleting reverts balance",
     );
+
+    console.log("transfers move money between two accounts");
+    {
+      const from = state.accounts.find((a) => a.name === "Everyday Checking")!;
+      const to = state.accounts.find((a) => a.name === "TFSA")!;
+      const card = state.accounts.find((a) => a.name === "Gold Card")!;
+      const fromBefore = from.balance;
+      const toBefore = to.balance;
+      const cardBefore = card.balance;
+
+      await repo.insertTransaction({
+        id: "test-transfer-1",
+        date: "2026-08-20",
+        type: "transfer",
+        amount: 500,
+        category: "Transfer",
+        sourceAccountId: from.id,
+        destinationAccountId: to.id,
+        payee: "TFSA contribution",
+      });
+      state = await repo.getState();
+      const at = (id: string) => state.accounts.find((a) => a.id === id)!.balance;
+      expect(
+        Math.abs(at(from.id) - (fromBefore - 500)) < 0.01,
+        "transfer debits the source account",
+      );
+      expect(
+        Math.abs(at(to.id) - (toBefore + 500)) < 0.01,
+        "transfer credits the destination account",
+      );
+
+      // Paying a credit card is a transfer whose destination is a liability:
+      // both the cash and the debt must go down.
+      await repo.insertTransaction({
+        id: "test-transfer-2",
+        date: "2026-08-21",
+        type: "transfer",
+        amount: 200,
+        category: "Transfer",
+        sourceAccountId: from.id,
+        destinationAccountId: card.id,
+        payee: "Card payment",
+      });
+      state = await repo.getState();
+      expect(
+        Math.abs(at(card.id) - (cardBefore - 200)) < 0.01,
+        "paying a credit card reduces what is owed",
+      );
+
+      await repo.removeTransaction("test-transfer-1");
+      await repo.removeTransaction("test-transfer-2");
+      state = await repo.getState();
+      expect(
+        Math.abs(at(from.id) - fromBefore) < 0.01 &&
+          Math.abs(at(to.id) - toBefore) < 0.01 &&
+          Math.abs(at(card.id) - cardBefore) < 0.01,
+        "deleting transfers reverts both sides",
+      );
+    }
+
+    console.log("recurring transactions");
+    {
+      const from = state.accounts.find((a) => a.name === "Everyday Checking")!;
+      const before = from.balance;
+      // Starts three months ago, so materializing must post the back payments.
+      await repo.insertRecurringRule(
+        {
+          id: "test-rule-1",
+          type: "expense",
+          amount: 100,
+          category: "Housing",
+          sourceAccountId: from.id,
+          payee: "Storage Unit",
+          frequency: "monthly",
+          startDate: "2026-06-10",
+          nextDate: "2026-06-10",
+          active: true,
+        },
+        0,
+      );
+
+      const created = await repo.materializeRecurring("2026-08-27");
+      expect(created === 3, `posts the three payments already due (got ${created})`);
+      state = await repo.getState();
+      const posted = state.transactions.filter((t) => t.recurringId === "test-rule-1");
+      expect(posted.length === 3, "generated transactions are tagged with the rule");
+      expect(
+        posted.every((t) => t.sourceAccountId === from.id),
+        "generated transactions carry the rule's source account",
+      );
+      expect(
+        Math.abs(state.accounts.find((a) => a.id === from.id)!.balance - (before - 300)) < 0.01,
+        "each posted payment moves the balance",
+      );
+      expect(
+        state.recurring.find((r) => r.id === "test-rule-1")?.nextDate === "2026-09-10",
+        "the rule advances past what it posted",
+      );
+
+      // The whole point of nextDate + the recurringId guard: running again on
+      // the same day must not post a second copy of anything.
+      const again = await repo.materializeRecurring("2026-08-27");
+      expect(again === 0, `re-running posts nothing (got ${again})`);
+      state = await repo.getState();
+      expect(
+        state.transactions.filter((t) => t.recurringId === "test-rule-1").length === 3,
+        "no duplicates after a second run",
+      );
+
+      await repo.deleteRecurringRule("test-rule-1");
+      state = await repo.getState();
+      expect(!state.recurring.some((r) => r.id === "test-rule-1"), "rule deleted");
+      expect(
+        state.transactions.filter((t) => t.recurringId === "test-rule-1").length === 3,
+        "payments it already posted are kept",
+      );
+      for (const t of state.transactions.filter((t) => t.recurringId === "test-rule-1")) {
+        await repo.removeTransaction(t.id);
+      }
+    }
 
     console.log("budgets / categories");
     await repo.upsertBudget("Coffee", 42.5);
@@ -129,11 +249,16 @@ async function main() {
         kind: "savings",
         balance: 500,
         history: [{ month: "2026-08", value: 500 }],
+        registration: "TFSA",
       },
       99,
     );
     state = await repo.getState();
     expect(state.accounts.some((a) => a.id === "test-acc-1"), "account inserted");
+    expect(
+      state.accounts.find((a) => a.id === "test-acc-1")?.registration === "TFSA",
+      "registration survives the insert",
+    );
     await repo.replaceAccount({
       id: "test-acc-1",
       name: "Renamed Account",
@@ -141,9 +266,33 @@ async function main() {
       kind: "savings",
       balance: 750,
       history: [{ month: "2026-08", value: 750 }],
+      registration: "RRSP",
     });
     state = await repo.getState();
     expect(state.accounts.find((a) => a.id === "test-acc-1")?.balance === 750, "account updated");
+    expect(
+      state.accounts.find((a) => a.id === "test-acc-1")?.registration === "RRSP",
+      "registration can be changed",
+    );
+
+    // Crypto accounts hold positions like a brokerage does.
+    await repo.insertAccount(
+      {
+        id: "test-crypto-1",
+        name: "Ledger",
+        institution: "Self-custody",
+        kind: "crypto",
+        balance: 0,
+        history: [],
+      },
+      98,
+    );
+    state = await repo.getState();
+    expect(
+      state.accounts.find((a) => a.id === "test-crypto-1")?.kind === "crypto",
+      "crypto account round-trips through the database",
+    );
+    await repo.deleteAccountRow("test-crypto-1");
     await repo.deleteAccountRow("test-acc-1");
     state = await repo.getState();
     expect(!state.accounts.some((a) => a.id === "test-acc-1"), "account deleted");
@@ -160,7 +309,7 @@ async function main() {
         price: 110,
         history: [90, 100, 110],
         dividendsReceived: 0,
-        accountType: "non-registered",
+        accountId: "acc-nonreg",
         currency: "CAD",
         priceCAD: 110,
         avgCostCAD: 100,
@@ -178,7 +327,7 @@ async function main() {
     console.log("reset");
     await repo.resetToSample(generateSampleData());
     state = await repo.getState();
-    expect(state.accounts.length === 6, "reset restores sample accounts");
+    expect(state.accounts.length === 9, "reset restores sample accounts");
     expect(!state.budgets.some((b) => b.category === "Coffee"), "reset clears added budgets");
     expect(!("test cafe" in state.merchantRules), "reset clears merchant rules");
 

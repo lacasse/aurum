@@ -1,4 +1,5 @@
 import {
+  Account,
   Budget,
   EXPENSE_CATEGORIES,
   FinanceData,
@@ -20,6 +21,7 @@ import { lastMonthKeys } from "./format";
 export const DEMO_ACCOUNT_ID_PREFIX = "acc-";
 export const DEMO_HOLDING_ID_PREFIX = "hold-";
 export const DEMO_TRANSACTION_ID_PREFIX = "txn-";
+export const DEMO_RECURRING_ID_PREFIX = "rec-demo-";
 
 /** Budgets are keyed by category name, so the demo rows are named outright. */
 export const SAMPLE_BUDGETS: Budget[] = [
@@ -156,6 +158,29 @@ export function generateSampleData(): FinanceData {
     return { ...a, balance: history[history.length - 1].value, history };
   });
 
+  /*
+   * The accounts the sample holdings sit in. Their balance is uninvested cash
+   * only — the securities are valued from the holdings themselves — so they
+   * start at zero and add nothing to net worth on their own.
+   */
+  const investmentAccounts: Account[] = (
+    [
+      { id: "acc-tfsa", name: "TFSA", registration: "TFSA" as const },
+      { id: "acc-rrsp", name: "RRSP", registration: "RRSP" as const },
+      {
+        id: "acc-nonreg",
+        name: "Non-registered",
+        registration: "non-registered" as const,
+      },
+    ]
+  ).map((a) => ({
+    ...a,
+    institution: "Questrade",
+    kind: "investment" as const,
+    balance: 0,
+    history: months.map((month) => ({ month, value: 0 })),
+  }));
+
   // ---------- holdings ----------
   interface Seed {
     ticker: string;
@@ -208,7 +233,8 @@ export function generateSampleData(): FinanceData {
       price: s.price,
       history: norm,
       dividendsReceived: s.dividends,
-      accountType: (idx % 3 === 0 ? "TFSA" : idx % 3 === 1 ? "RRSP" : "non-registered") as Holding["accountType"],
+      accountId:
+        idx % 3 === 0 ? "acc-tfsa" : idx % 3 === 1 ? "acc-rrsp" : "acc-nonreg",
       currency: s.currency,
       priceCAD: isUSD ? round2(s.price * FX) : s.price,
       avgCostCAD: isUSD ? round2(s.avgCost * FX) : s.avgCost,
@@ -237,7 +263,10 @@ export function generateSampleData(): FinanceData {
       type,
       amount: round2(amount),
       category,
-      accountId,
+      // The sample only generates money entering or leaving the outside
+      // world, so exactly one side is one of the sample accounts.
+      sourceAccountId: type === "income" ? undefined : accountId,
+      destinationAccountId: type === "income" ? accountId : undefined,
       payee,
       note,
     });
@@ -323,5 +352,12 @@ export function generateSampleData(): FinanceData {
 
   const budgets: Budget[] = SAMPLE_BUDGETS.map((b) => ({ ...b }));
 
-  return { accounts, transactions, holdings, budgets, categories: [...EXPENSE_CATEGORIES] };
+  return {
+    accounts: [...accounts, ...investmentAccounts],
+    transactions,
+    holdings,
+    budgets,
+    categories: [...EXPENSE_CATEGORIES],
+    recurring: [],
+  };
 }

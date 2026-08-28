@@ -37,7 +37,7 @@ import {
   fmtCAD,
   labelDate,
 } from "@/lib/format";
-import { ACCOUNT_KIND_LABELS } from "@/lib/types";
+import { ACCOUNT_KIND_LABELS, primaryAccountId } from "@/lib/types";
 
 type Range = "6" | "12" | "18";
 
@@ -336,7 +336,7 @@ export default function DashboardPage() {
             <table className="w-full text-sm">
               <tbody>
                 {recent.map((t) => {
-                  const acc = accounts.find((a) => a.id === t.accountId);
+                  const acc = accounts.find((a) => a.id === primaryAccountId(t));
                   return (
                     <tr key={t.id} className="border-t border-line/60">
                       <td className="px-3 py-2.5 text-ink-dim tabular-nums">

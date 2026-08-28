@@ -1,4 +1,5 @@
 import {
+  boolean,
   date,
   integer,
   jsonb,
@@ -33,6 +34,8 @@ export const accounts = pgTable("accounts", {
   balance: money("balance").notNull().default(0),
   history: jsonb("history").$type<MonthlyPoint[]>().notNull(),
   position: integer("position").notNull().default(0),
+  /** Tax treatment; null for kinds where it does not apply. */
+  registration: text("registration"),
 });
 
 export const transactions = pgTable("transactions", {
@@ -41,9 +44,30 @@ export const transactions = pgTable("transactions", {
   type: text("type").notNull(),
   amount: money("amount").notNull(),
   category: text("category").notNull(),
-  accountId: text("account_id").notNull(),
+  // Nullable on purpose: an expense has no destination account and income has
+  // no source account — that side of the transaction is the outside world.
+  sourceAccountId: text("source_account_id"),
+  destinationAccountId: text("destination_account_id"),
   payee: text("payee").notNull(),
   note: text("note"),
+  recurringId: text("recurring_id"),
+});
+
+export const recurringTransactions = pgTable("recurring_transactions", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  amount: money("amount").notNull(),
+  category: text("category").notNull(),
+  sourceAccountId: text("source_account_id"),
+  destinationAccountId: text("destination_account_id"),
+  payee: text("payee").notNull(),
+  note: text("note"),
+  frequency: text("frequency").notNull(),
+  startDate: date("start_date", { mode: "string" }).notNull(),
+  endDate: date("end_date", { mode: "string" }),
+  nextDate: date("next_date", { mode: "string" }).notNull(),
+  active: boolean("active").notNull().default(true),
+  position: integer("position").notNull().default(0),
 });
 
 export const holdings = pgTable("holdings", {
@@ -57,7 +81,8 @@ export const holdings = pgTable("holdings", {
   price: unitPrice("price").notNull(),
   history: jsonb("history").$type<number[]>().notNull(),
   dividendsReceived: money("dividends_received").notNull().default(0),
-  accountType: text("account_type").notNull().default("non-registered"),
+  /** The investment account holding this position. */
+  accountId: text("account_id").notNull(),
   currency: text("currency").notNull().default("USD"),
   priceCAD: unitPrice("price_cad").notNull().default(0),
   avgCostCAD: unitPrice("avg_cost_cad").notNull().default(0),

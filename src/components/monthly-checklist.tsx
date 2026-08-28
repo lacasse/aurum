@@ -17,7 +17,7 @@ import {
   parseCsvFile,
   txnKey,
 } from "@/lib/csv";
-import type { MonthlySnapshot } from "@/lib/types";
+import { sidesFor, type MonthlySnapshot } from "@/lib/types";
 
 type Step = "income" | "import" | "trades" | "snapshot";
 
@@ -97,7 +97,7 @@ function IncomeStep({ onNext }: { onNext: () => void }) {
           type: "income",
           amount: Math.round(amt * 100) / 100,
           category: "Salary",
-          accountId: defaultAccount,
+          ...sidesFor("income", defaultAccount),
           payee: box.label,
         });
       }
@@ -193,7 +193,7 @@ function ImportStep({
         type: r.type,
         amount: r.amount,
         category: r.category,
-        accountId: creditCard,
+        ...sidesFor(r.type, creditCard),
         payee: r.payee.trim(),
         note: r.note,
       });
