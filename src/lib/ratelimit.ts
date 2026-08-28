@@ -20,8 +20,8 @@ interface Bucket {
   used: number;   // credits used in the current window
 }
 
-let minute: Bucket = { window: 0, used: 0 };
-let day: Bucket = { window: 0, used: 0 };
+const minute: Bucket = { window: 0, used: 0 };
+const day: Bucket = { window: 0, used: 0 };
 
 function minuteKey(now: number): number {
   return Math.floor(now / 60_000);

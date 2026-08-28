@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, typecheck, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Security regression check
+        run: npm run check:security
+
+      - name: Unit tests
+        run: npm test
+
+      - name: CSV parser tests
+        run: npm run test:csv
+
+      - name: Build
+        # The app refuses to start without these; API routes are force-dynamic
+        # so the build itself never reads them, but next build loads the modules.
+        env:
+          AUTH_USERNAME: ci
+          AUTH_PASSWORD: ci-build-only-not-a-real-password
+          AUTH_SECRET: ci-build-only-not-a-real-secret
+        run: npm run build
+
+  database:
+    name: Database integration (migrations + repository)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Boots an embedded PostgreSQL, applies every migration in drizzle/ and
+      # exercises the repository layer, so a bad migration fails CI.
+      - name: Integration tests
+        run: npm run test:db
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

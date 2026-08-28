@@ -127,6 +127,7 @@ skipped with console errors).
 
 - [Next.js](https://nextjs.org) 16 (App Router, Turbopack) + React 19 + TypeScript
 - [PostgreSQL](https://www.postgresql.org) 17 + [Drizzle ORM](https://orm.drizzle.team) (migrations in `drizzle/`, applied at startup)
+- [Zod](https://zod.dev) for request-body validation — schemas are declared once in `src/lib/schemas.ts` and shared by every route
 - Route Handlers under `src/app/api` expose the data (accounts, transactions, holdings, budgets, categories, merchant rules, reset)
 - [Tailwind CSS](https://tailwindcss.com) v4 (semantic design tokens, dark theme by default with a light-mode toggle)
 - [Recharts](https://recharts.org) for all charts
@@ -138,6 +139,12 @@ skipped with console errors).
 > esbuild dev-service advisory that applies only to `next dev`/`tsx` in a
 > development environment. Do not pin dev-only tooling below the advisory line.
 
+> **Money is never stored as a float.** Every monetary, price and quantity
+> column is Postgres `numeric` (see `src/db/schema.ts`), and every total is
+> accumulated in integer cents via `src/lib/money.ts`. Binary floating point
+> cannot represent values like `0.10` exactly, and the error compounds across
+> the repeated sums and FX conversions this app performs.
+
 ## Structure
 
 ```
@@ -146,11 +153,13 @@ src/
   app/api/        # JSON API (force-dynamic route handlers)
   components/     # shell (sidebar/topbar), ui primitives, charts, forms, stat cards
   db/
-    schema.ts     # Drizzle schema (7 tables)
+    schema.ts     # Drizzle schema (7 tables; money stored as exact `numeric`)
     repo.ts       # queries, validation, balance side-effects, seed/reset
     init.ts       # one-shot migrate + first-run seed
   lib/
     types.ts      # domain models
+    schemas.ts    # Zod request schemas shared by every API route
+    money.ts      # exact money arithmetic in integer cents
     sample.ts     # deterministic 18-month sample data generator
     store.ts      # zustand store — optimistic updates + API sync
     api.ts        # typed fetch client for the API
@@ -164,9 +173,20 @@ drizzle/          # generated SQL migrations (applied on startup)
 ## Tests
 
 ```bash
-npm run test:csv   # CSV parsing / categorization suite (scripts/csv-test.ts)
-npm run test:db    # boots embedded PostgreSQL, tests migrations + repository end-to-end
+npm test            # unit tests (money, schemas, auth, rate limiting, analytics)
+npm run typecheck   # tsc --noEmit
+npm run lint        # eslint
+npm run check:security
+npm run test:csv    # CSV parsing / categorization suite (scripts/csv-test.ts)
+npm run test:db     # boots embedded PostgreSQL, tests migrations + repository end-to-end
 ```
+
+Unit tests live beside the code as `src/lib/*.test.ts` and run on Node's built-in
+test runner — `npm test` compiles them with `tsconfig.test.json` into `.test-build/`
+and runs `node --test`, so there is no extra test-framework dependency.
+
+Every one of the above runs in CI on push and pull request
+(`.github/workflows/ci.yml`), along with a Docker image build.
 
 Demo data is regenerated deterministically; use **Reset demo data** in the sidebar to
 start over (server-side reset).

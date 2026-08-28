@@ -52,9 +52,14 @@ export function useTickerValidation(ticker: string, assetClass: AssetClass, curr
   const [price, setPrice] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // This effect synchronizes with an external system (the price API): it
+  // resets to "idle" when the field is cleared and shows "loading" while the
+  // debounced request is in flight. Both are deliberate single re-renders, not
+  // the cascading render chain `set-state-in-effect` exists to catch.
   useEffect(() => {
     const t = ticker.trim().toUpperCase();
     if (!t) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus("idle");
       setPrice(null);
       return;

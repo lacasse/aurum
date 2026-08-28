@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test \".test-build/**/*.test.js\"",
     "test:csv": "tsx scripts/csv-test.ts",
     "db:generate": "drizzle-kit generate",
     "test:db": "tsx scripts/db-integration.ts",
@@ -26,6 +28,7 @@
     "react-dom": "19.2.8",
     "recharts": "^3.10.1",
     "tailwind-merge": "^3.6.0",
+    "zod": "^4.4.3",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

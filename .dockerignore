@@ -17,3 +17,9 @@ nginx/
 .env
 .env.*
 !.env.example
+
+# tests / CI: not needed in the image
+.test-build
+tsconfig.test.json
+**/*.test.ts
+.github

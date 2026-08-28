@@ -20,6 +20,20 @@ import {
   TxnType,
   isLiability,
 } from "@/lib/types";
+import { addMoney } from "@/lib/money";
+import { z } from "zod";
+import {
+  accountSchema,
+  budgetSchema,
+  categorySchema,
+  formatIssues,
+  holdingSchema,
+  merchantRuleSchema,
+  renameCategorySchema,
+  snapshotSchema,
+  snapshotsBodySchema,
+  transactionSchema,
+} from "@/lib/schemas";
 
 type AccountRow = typeof accounts.$inferSelect;
 type HoldingRow = typeof holdings.$inferSelect;
@@ -72,8 +86,6 @@ function toTransaction(row: typeof transactions.$inferSelect): Transaction {
     note: row.note ?? undefined,
   };
 }
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /* ------------------------------------------------------------------ */
 /* Read                                                                */
@@ -243,7 +255,7 @@ async function applyTxnEffect(txn: Transaction, sign: 1 | -1): Promise<void> {
   const liability = isLiability(acc.kind as AccountKind);
   let delta = txn.type === "income" ? txn.amount : -txn.amount;
   if (liability) delta = -delta;
-  const balance = round2(acc.balance + delta * sign);
+  const balance = addMoney(acc.balance, delta * sign);
   const history: MonthlyPoint[] = acc.history.slice();
   if (history.length > 0) {
     history[history.length - 1] = { ...history[history.length - 1], value: balance };
@@ -398,91 +410,48 @@ export async function upsertMerchantRule(merchant: string, category: string): Pr
 }
 
 /* ------------------------------------------------------------------ */
-/* Validation helpers (route bodies -> domain objects)                 */
+/* Validation (route bodies -> domain objects, via shared schemas)     */
 /* ------------------------------------------------------------------ */
 
 export class BadRequestError extends Error {}
 
+/** Validate `body` against a shared schema, surfacing issues as a 400. */
+function parseWith<S extends z.ZodType>(schema: S, body: unknown): z.infer<S> {
+  const result = schema.safeParse(body ?? {});
+  if (!result.success) throw new BadRequestError(formatIssues(result.error));
+  return result.data;
+}
+
 export function parseTransaction(body: unknown): Transaction {
-  const b = (body ?? {}) as Record<string, unknown>;
-  const amount = Number(b.amount);
-  if (typeof b.id !== "string" || !b.id) throw new BadRequestError("id required");
-  if (typeof b.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(b.date))
-    throw new BadRequestError("date must be YYYY-MM-DD");
-  if (b.type !== "income" && b.type !== "expense")
-    throw new BadRequestError("type must be income or expense");
-  if (!Number.isFinite(amount) || amount <= 0)
-    throw new BadRequestError("amount must be > 0");
-  return {
-    id: b.id,
-    date: b.date,
-    type: b.type,
-    amount: round2(amount),
-    category: String(b.category ?? "Other"),
-    accountId: String(b.accountId ?? ""),
-    payee: String(b.payee ?? "").trim(),
-    note: typeof b.note === "string" && b.note.trim() ? b.note.trim() : undefined,
-  };
+  return parseWith(transactionSchema, body);
 }
 
 export function parseAccount(body: unknown): Account {
-  const b = (body ?? {}) as Record<string, unknown>;
-  const balance = Number(b.balance);
-  if (typeof b.id !== "string" || !b.id) throw new BadRequestError("id required");
-  if (typeof b.name !== "string" || !b.name.trim())
-    throw new BadRequestError("name required");
-  const history = Array.isArray(b.history) ? (b.history as MonthlyPoint[]) : [];
-  return {
-    id: b.id,
-    name: String(b.name).trim(),
-    institution: String(b.institution ?? "—"),
-    kind: (b.kind ?? "checking") as AccountKind,
-    balance: Number.isFinite(balance) ? round2(balance) : 0,
-    history,
-  };
+  return parseWith(accountSchema, body);
 }
 
 export function parseHolding(body: unknown): Holding {
-  const b = (body ?? {}) as Record<string, unknown>;
-  const shares = Number(b.shares);
-  const avgCost = Number(b.avgCost);
-  const price = Number(b.price);
-  if (typeof b.id !== "string" || !b.id) throw new BadRequestError("id required");
-  if (typeof b.ticker !== "string" || !b.ticker.trim())
-    throw new BadRequestError("ticker required");
-  if (!Number.isFinite(shares) || shares <= 0)
-    throw new BadRequestError("shares must be > 0");
-  if (!Number.isFinite(avgCost) || avgCost <= 0)
-    throw new BadRequestError("avgCost must be > 0");
-  if (!Number.isFinite(price) || price <= 0)
-    throw new BadRequestError("price must be > 0");
-  const history = Array.isArray(b.history) ? (b.history as number[]) : [];
-  const dividendsReceived = Number(b.dividendsReceived);
-  const accountType = String(b.accountType ?? "non-registered");
-  const currency = String(b.currency ?? "USD") as Holding["currency"];
-  const isUSD = currency === "USD";
-  const priceCAD = Number(b.priceCAD);
-  const avgCostCAD = Number(b.avgCostCAD);
-  const dividendsReceivedCAD = Number(b.dividendsReceivedCAD);
-  const historyCAD = Array.isArray(b.historyCAD) ? (b.historyCAD as number[]) : [];
-  return {
-    id: b.id,
-    ticker: String(b.ticker).trim().toUpperCase(),
-    name: String(b.name ?? b.ticker).trim(),
-    assetClass: (b.assetClass ?? "US Equity") as Holding["assetClass"],
-    sector: String(b.sector ?? b.assetClass ?? "Other"),
-    shares,
-    avgCost,
-    price,
-    history,
-    dividendsReceived: Number.isFinite(dividendsReceived) ? Math.max(0, dividendsReceived) : 0,
-    accountType: accountType as Holding["accountType"],
-    currency,
-    priceCAD: Number.isFinite(priceCAD) ? priceCAD : price,
-    avgCostCAD: Number.isFinite(avgCostCAD) ? avgCostCAD : avgCost,
-    dividendsReceivedCAD: Number.isFinite(dividendsReceivedCAD) ? dividendsReceivedCAD : dividendsReceived,
-    historyCAD: historyCAD.length > 0 ? historyCAD : history,
-  };
+  return parseWith(holdingSchema, body);
+}
+
+export function parseBudget(body: unknown): { category: string; limit: number } {
+  return parseWith(budgetSchema, body);
+}
+
+export function parseCategory(body: unknown): { name: string } {
+  return parseWith(categorySchema, body);
+}
+
+export function parseRenameCategory(body: unknown): { oldName: string; newName: string } {
+  return parseWith(renameCategorySchema, body);
+}
+
+export function parseMerchantRule(body: unknown): { merchant: string; category: string } {
+  return parseWith(merchantRuleSchema, body);
+}
+
+export function parseSnapshotsBody(body: unknown): MonthlySnapshot[] {
+  return parseWith(snapshotsBodySchema, body).snapshots;
 }
 
 /* ------------------------------------------------------------------ */
@@ -490,36 +459,7 @@ export function parseHolding(body: unknown): Holding {
 /* ------------------------------------------------------------------ */
 
 export function parseSnapshotInput(body: unknown): MonthlySnapshot {
-  const b = (body ?? {}) as Record<string, unknown>;
-  const price = Number(b.price);
-  const avgCost = Number(b.avgCost);
-  const shares = Number(b.shares);
-  const value = Number(b.value);
-  const valueCAD = Number(b.valueCAD ?? b.value);
-  if (typeof b.month !== "string" || !/^\d{4}-\d{2}$/.test(b.month))
-    throw new BadRequestError("month must be YYYY-MM");
-  if (typeof b.holdingId !== "string" || !b.holdingId)
-    throw new BadRequestError("holdingId required");
-  if (typeof b.ticker !== "string" || !b.ticker.trim())
-    throw new BadRequestError("ticker required");
-  if (!Number.isFinite(price) || price <= 0)
-    throw new BadRequestError("price must be > 0");
-  if (!Number.isFinite(avgCost) || avgCost <= 0)
-    throw new BadRequestError("avgCost must be > 0");
-  if (!Number.isFinite(shares) || shares <= 0)
-    throw new BadRequestError("shares must be > 0");
-  if (!Number.isFinite(value))
-    throw new BadRequestError("value must be a number");
-  return {
-    month: b.month,
-    holdingId: b.holdingId,
-    ticker: String(b.ticker).trim().toUpperCase(),
-    price,
-    avgCost,
-    shares,
-    value,
-    valueCAD: Number.isFinite(valueCAD) ? valueCAD : value,
-  };
+  return parseWith(snapshotSchema, body);
 }
 
 export async function getSnapshots(month: string): Promise<MonthlySnapshot[]> {
