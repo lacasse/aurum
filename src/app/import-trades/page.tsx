@@ -24,8 +24,10 @@ import { useFinance } from "@/lib/store";
 import {
   TradeRow,
   accumulatePositions,
+  markAlreadyImported,
   parseTradeCsv,
   positionToHolding,
+  tradeKey,
 } from "@/lib/trades";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import { fmtCAD, todayISO } from "@/lib/format";
@@ -48,6 +50,7 @@ export default function ImportTradesPage() {
   const updateHolding = useFinance((s) => s.updateHolding);
   const addTransaction = useFinance((s) => s.addTransaction);
   const accounts = useFinance((s) => s.accounts);
+  const transactions = useFinance((s) => s.transactions);
   const adjustAccountCash = useFinance((s) => s.adjustAccountCash);
 
   const investmentAccounts = accounts.filter((a) => isInvestmentAccount(a.kind));
@@ -63,6 +66,8 @@ export default function ImportTradesPage() {
   const accountIdFor = (registration: Registration): string =>
     investmentAccounts.find((a) => a.registration === registration)?.id ?? "";
   /** The everyday account cash moves in from / out to. */
+  /** Account name for a resolved id, for the warnings above. */
+  const accountLabelFor = (id: string) => accounts.find((a) => a.id === id)?.name ?? id;
   const cashAccountId =
     accounts.find((a) => !isInvestmentAccount(a.kind) && !isLiability(a.kind))?.id ?? "";
 
@@ -74,7 +79,27 @@ export default function ImportTradesPage() {
   const [result, setResult] = useState<{ created: number; updated: number; deposits: number; withdrawals: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const included = rows.filter((r) => r.include);
+  /*
+   * Rows already represented by a stored flow or transfer. Checked here rather
+   * than at parse time because it needs the database, not just the file — the
+   * within-file check alone let a second import of the same file double every
+   * position.
+   */
+  const investmentAccountIds = new Set(investmentAccounts.map((a) => a.id));
+  const checkedRows = useMemo(
+    () =>
+      markAlreadyImported(
+        rows,
+        accountIdFor,
+        holdings,
+        transactions.filter((t) => t.type === "transfer"),
+        investmentAccountIds,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, holdings, transactions, accounts],
+  );
+
+  const included = checkedRows.filter((r) => r.include);
   const buyCount = included.filter((r) => r.type === "buy").length;
   const sellCount = included.filter((r) => r.type === "sell").length;
   const dividendCount = included.filter((r) => r.type === "dividend").length;
@@ -87,10 +112,15 @@ export default function ImportTradesPage() {
     );
     if (csvs.length === 0) return;
     setBusy(true);
+    // Carry the keys forward so a file dropped twice, or one overlapping a file
+    // already loaded, is flagged rather than counted again.
+    const keys = new Set(rows.map(tradeKey));
     const allRows: TradeRow[] = [];
     for (const file of csvs) {
       const text = await file.text();
-      allRows.push(...parseTradeCsv(file.name, text));
+      const parsed = parseTradeCsv(file.name, text, keys);
+      for (const r of parsed) keys.add(tradeKey(r));
+      allRows.push(...parsed);
     }
     setRows((prev) => [...prev, ...allRows]);
     setBusy(false);
@@ -108,7 +138,26 @@ export default function ImportTradesPage() {
         .filter((reg): reg is Registration => reg !== null && !accountIdFor(reg)),
     ),
   ];
-  const unreadableRows = rows.filter((r) => r.registration === null).length;
+  /*
+   * Dry-run the accumulation during review so a sale that cannot be applied is
+   * seen before it is imported, not inferred weeks later from a share count
+   * that looks slightly wrong. Selling more than the account holds means the
+   * matching buys are missing or are attributed to a different account, and the
+   * difference is silently lost when the position clamps at zero.
+   */
+  const preview = useMemo(
+    () => accumulatePositions(included, accountIdFor, holdings),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, accounts, holdings],
+  );
+
+  const unreadableRows = checkedRows.filter(
+    (r) => r.registration === null || r.type === null,
+  ).length;
+  const duplicateRows = checkedRows.filter((r) => r.duplicate).length;
+  const unreadableTypes = [
+    ...new Set(rows.filter((r) => r.type === null && r.typeRaw).map((r) => r.typeRaw)),
+  ];
   const blocked = unmatchedRegistrations.length > 0;
 
   const process = async () => {
@@ -304,7 +353,7 @@ export default function ImportTradesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r) => (
+                    {checkedRows.map((r) => (
                       <tr
                         key={r.id}
                         className={cn(
@@ -366,7 +415,11 @@ export default function ImportTradesPage() {
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          {r.registration ? (
+                          {r.type === null ? (
+                            <span title={r.error}>
+                              <Badge tone="negative">unreadable</Badge>
+                            </span>
+                          ) : r.registration ? (
                             <Badge
                               tone={accountIdFor(r.registration) ? undefined : "negative"}
                             >
@@ -404,16 +457,61 @@ export default function ImportTradesPage() {
                 </p>
               </Card>
             )}
+            {preview.oversold.length > 0 && (
+              <Card className="border-amber-500/40 bg-amber-500/5 p-4">
+                <p className="text-xs font-semibold text-amber-400">
+                  {preview.oversold.length} sale
+                  {preview.oversold.length === 1 ? "" : "s"} larger than the position
+                </p>
+                <p className="mt-1 text-xs text-ink-dim">
+                  The shares that cannot be sold are dropped, so the final count
+                  will be higher than it should be by that amount. Usually the
+                  row names the wrong account, or the matching purchases are
+                  missing from this file.
+                </p>
+                <ul className="mt-2 space-y-0.5">
+                  {preview.oversold.map((o, i) => (
+                    <li key={i} className="text-xs text-ink">
+                      <span className="font-medium">{o.ticker}</span> in{" "}
+                      {accountLabelFor(o.accountId)}: sells {o.sold.toLocaleString("en-US")} but
+                      only {o.held.toLocaleString("en-US")} held
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            )}
+            {duplicateRows > 0 && (
+              <Card className="border-amber-500/40 bg-amber-500/5 p-4">
+                <p className="text-xs font-semibold text-amber-400">
+                  {duplicateRows} duplicate row{duplicateRows === 1 ? "" : "s"} excluded
+                </p>
+                <p className="mt-1 text-xs text-ink-dim">
+                  These are already in your portfolio, or repeated within the
+                  file. Importing them again would double the positions they
+                  belong to. Tick one individually if the same trade genuinely
+                  happened twice.
+                </p>
+              </Card>
+            )}
             {unreadableRows > 0 && (
               <Card className="border-amber-500/40 bg-amber-500/5 p-4">
                 <p className="text-xs font-semibold text-amber-400">
                   {unreadableRows} row{unreadableRows === 1 ? "" : "s"} have an
-                  unreadable account type and are excluded
+                  unreadable account or activity type and are excluded
                 </p>
                 <p className="mt-1 text-xs text-ink-dim">
-                  Check the &ldquo;account type&rdquo; column for those rows.
-                  Recognized values include TFSA, RRSP, FHSA, Pension, and taxable
-                  or non-registered.
+                  {unreadableTypes.length > 0 ? (
+                    <>
+                      Unrecognized activity {unreadableTypes.length === 1 ? "type" : "types"}:{" "}
+                      <span className="text-ink">{unreadableTypes.join(", ")}</span>. Recognized
+                      values contain buy, sell, dividend, deposit or withdrawal.
+                    </>
+                  ) : (
+                    <>
+                      Check the &ldquo;account type&rdquo; column for those rows. Recognized values
+                      include TFSA, RRSP, FHSA, Pension, and taxable or non-registered.
+                    </>
+                  )}
                 </p>
               </Card>
             )}

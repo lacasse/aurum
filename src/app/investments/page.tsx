@@ -227,7 +227,11 @@ export default function InvestmentsPage() {
     const totalValue = open.reduce((s, r) => s + r.marketValue, 0);
     const totalCost = open.reduce((s, r) => s + r.costBasis, 0);
     const totalDividends = open.reduce((s, r) => s + r.totalDividends, 0);
-    const best = [...open].sort((a, b) => b.mwrr - a.mwrr)[0];
+    // Only positions with a measurable return can be "best"; one entered by
+    // hand has no flows and therefore no MWRR at all.
+    const best = [...open]
+      .filter((r) => r.mwrr !== null)
+      .sort((a, b) => (b.mwrr ?? 0) - (a.mwrr ?? 0))[0];
     // Independent of the table's sort: the chart shows the ten largest
     // positions, and should not reshuffle when a column header is clicked.
     const gainBars = [...open]
@@ -370,7 +374,7 @@ export default function InvestmentsPage() {
           <StatCard
             label="Best performer"
             value={data.best ? data.best.ticker : "—"}
-            delta={data.best?.mwrr}
+            delta={data.best?.mwrr ?? undefined}
             deltaLabel={data.best ? fmtSignedCAD(data.best.totalReturn) : "no holdings yet"}
             tone="positive"
           />
@@ -648,12 +652,24 @@ export default function InvestmentsPage() {
                       {fmtSignedCAD(r.totalReturn)}
                     </td>
                     <td
-                      className={
-                        "px-3 py-2.5 text-right tabular-nums font-medium " +
-                        (r.mwrr >= 0 ? "text-positive" : "text-negative")
-                      }
+                      className={cn(
+                        "px-3 py-2.5 text-right tabular-nums font-medium",
+                        r.mwrr === null
+                          ? "text-ink-faint"
+                          : r.mwrr >= 0
+                            ? "text-positive"
+                            : "text-negative",
+                      )}
                     >
-                      {fmtPct(r.mwrr)}
+                      {/* A dash, not a zero: no trade history means the return
+                          is unknown, which is not the same as no return. */}
+                      {r.mwrr === null ? (
+                        <span title="No trade history for this position — import trades or log them to measure a return">
+                          —
+                        </span>
+                      ) : (
+                        fmtPct(r.mwrr)
+                      )}
                     </td>
                     <td className="hidden px-3 py-2.5 xl:table-cell">
                       <div className="flex items-center gap-2">

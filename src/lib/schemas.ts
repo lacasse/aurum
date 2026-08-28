@@ -182,6 +182,18 @@ export const holdingSchema = z
     avgCostCAD: optionalNumber,
     dividendsReceivedCAD: optionalNumber,
     historyCAD: numberArray,
+    // A malformed flow list costs the return figures, not the holding, so it
+    // is dropped rather than failing the whole record.
+    flows: z
+      .array(
+        z.object({
+          date: z.string().regex(DATE, "flow date must be YYYY-MM-DD"),
+          kind: z.enum(["buy", "sell", "dividend"]),
+          amount: z.coerce.number().finite(),
+          shares: z.coerce.number().finite(),
+        }),
+      )
+      .catch([]),
   })
   // Cross-field defaults: the CAD mirror of each figure falls back to the
   // listing-currency figure, and name/sector fall back to ticker/assetClass.
@@ -202,6 +214,7 @@ export const holdingSchema = z
     avgCostCAD: h.avgCostCAD ?? h.avgCost,
     dividendsReceivedCAD: h.dividendsReceivedCAD ?? h.dividendsReceived,
     historyCAD: h.historyCAD.length > 0 ? h.historyCAD : h.history,
+    flows: h.flows,
   }));
 
 export const snapshotSchema = z

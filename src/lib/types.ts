@@ -69,6 +69,20 @@ export type AssetClass = "US Equity" | "Intl Equity" | "Bonds" | "Crypto";
 
 export type Currency = "CAD" | "USD";
 
+/**
+ * One dated movement of money in or out of a position, in CAD.
+ *
+ * `shares` is the quantity the flow moved: positive on a buy, negative on a
+ * sale, zero for a dividend. `amount` is always the cash that changed hands,
+ * unsigned — the kind carries the direction.
+ */
+export interface CashFlow {
+  date: string; // YYYY-MM-DD
+  kind: "buy" | "sell" | "dividend";
+  amount: number; // CAD, unsigned
+  shares: number;
+}
+
 export interface Holding {
   id: string;
   ticker: string;
@@ -91,6 +105,12 @@ export interface Holding {
   dividendsReceivedCAD: number;
   /** Monthly prices converted to CAD. Same as history when currency is CAD. */
   historyCAD: number[];
+  /**
+   * Every buy, sell and dividend, in CAD, with its date. Empty for positions
+   * entered by hand, which have no trade history to replay — realized gain and
+   * MWRR are then unknown rather than zero.
+   */
+  flows: CashFlow[];
 }
 
 export const REGISTRATIONS: Registration[] = [

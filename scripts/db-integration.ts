@@ -412,11 +412,22 @@ async function main() {
         avgCostCAD: 100,
         dividendsReceivedCAD: 0,
         historyCAD: [90, 100, 110],
+        flows: [
+          { date: "2025-01-10", kind: "buy", amount: 200, shares: 2 },
+          { date: "2025-06-10", kind: "dividend", amount: 5, shares: 0 },
+        ],
       },
       99,
     );
     state = await repo.getState();
     expect(state.holdings.some((h) => h.id === "test-hold-1" && h.price === 110), "holding inserted");
+    {
+      // Flows are what realized gain and MWRR are derived from, so they have to
+      // survive the round trip intact.
+      const stored = state.holdings.find((h) => h.id === "test-hold-1");
+      expect(stored?.flows.length === 2, `flows round-trip (got ${stored?.flows.length})`);
+      expect(stored?.flows[0].kind === "buy" && stored?.flows[0].amount === 200, "flow detail kept");
+    }
     await repo.deleteHoldingRow("test-hold-1");
     state = await repo.getState();
     expect(!state.holdings.some((h) => h.id === "test-hold-1"), "holding deleted");

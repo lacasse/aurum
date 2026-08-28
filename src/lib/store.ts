@@ -4,6 +4,7 @@ import { create } from "zustand";
 import {
   Account,
   Budget,
+  CashFlow,
   FinanceData,
   Holding,
   MonthlySnapshot,
@@ -30,8 +31,8 @@ export type RecurringInput = Omit<RecurringRule, "id" | "nextDate"> & {
 };
 export type HoldingInput = Omit<
   Holding,
-  "id" | "history" | "historyCAD" | "priceCAD" | "avgCostCAD" | "dividendsReceivedCAD"
-> & {
+  "id" | "history" | "historyCAD" | "priceCAD" | "avgCostCAD" | "dividendsReceivedCAD" | "flows"
+> & { flows?: CashFlow[] } & {
   /*
    * What the position actually cost in CAD, when that is known exactly.
    *
@@ -188,15 +189,22 @@ function computeCadFields(
 ) {
   const isUSD = h.currency === "USD";
   const convert = (v: number) => Math.round(v * rate * 100) / 100;
+  /*
+   * A per-share average is not a money total. Rounding it to cents throws away
+   * real precision — at 592 shares, a cost of 21.0724 rounded to 21.07 shifts
+   * the basis by two dollars — and it made avgCost and avgCostCAD disagree on
+   * a CAD holding, where they are by definition the same number.
+   */
+  const perShare = (v: number) => Math.round(v * 1e6) / 1e6;
   return {
     priceCAD: isUSD ? convert(h.price) : h.price,
     // An imported cost basis is the rate that was actually paid, so it beats
     // re-converting at today's rate. Only used when one was supplied.
     avgCostCAD:
       h.avgCostCADOverride != null && h.avgCostCADOverride > 0
-        ? Math.round(h.avgCostCADOverride * 100) / 100
+        ? perShare(h.avgCostCADOverride)
         : isUSD
-          ? convert(h.avgCost)
+          ? perShare(h.avgCost * rate)
           : h.avgCost,
     dividendsReceivedCAD:
       h.dividendsReceivedCADOverride != null && h.dividendsReceivedCADOverride > 0
@@ -368,6 +376,7 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
         const { avgCostCADOverride: _a, dividendsReceivedCADOverride: _d, ...rest } = input;
         const holding: Holding = {
           ...rest,
+          flows: input.flows ?? [],
           id: uid(),
           history,
           ...cadFields,
@@ -386,7 +395,9 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
             if (history.length > 0) history[history.length - 1] = input.price;
             const cadFields = computeCadFields({ ...h, ...input, history }, rate);
             const { avgCostCADOverride: _a, dividendsReceivedCADOverride: _d, ...rest } = input;
-            updated = { ...h, ...rest, history, ...cadFields };
+            // Flows are only replaced when the caller supplies them, so an
+            // edit through the holding form does not wipe the trade history.
+            updated = { ...h, ...rest, flows: input.flows ?? h.flows ?? [], history, ...cadFields };
             return updated;
           }),
         }));

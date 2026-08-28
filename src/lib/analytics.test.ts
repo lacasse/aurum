@@ -4,6 +4,7 @@ import {
   budgetRows,
   cashflowSeries,
   consolidateHoldings,
+  replayFlows,
   sortHoldingRows,
   monthTotals,
   spendByCategory,
@@ -144,6 +145,7 @@ describe("consolidateHoldings", () => {
       avgCostCAD: 30,
       dividendsReceivedCAD: 0,
       historyCAD: [38, 40],
+      flows: [],
       ...over,
     }) as Holding;
 
@@ -181,7 +183,7 @@ describe("consolidateHoldings", () => {
     // account doubled and the other lost a third.
     assert.equal(pooled.costBasis, 800);
     assert.equal(pooled.marketValue, 800);
-    assert.equal(Math.round(pooled.mwrr), 0);
+    assert.equal(pooled.mwrr, null, "no flows means no measurable return");
   });
 
   test("weights are shares of the whole portfolio and sum to 100", () => {
@@ -230,6 +232,7 @@ describe("sortHoldingRows", () => {
       avgCostCAD: 30,
       dividendsReceivedCAD: 0,
       historyCAD: [38, 40],
+      flows: [],
       ...over,
     }) as Holding;
 
@@ -305,6 +308,7 @@ describe("closed positions", () => {
       avgCostCAD: 30,
       dividendsReceivedCAD: 0,
       historyCAD: [38, 40],
+      flows: [],
       ...over,
     }) as Holding;
 
@@ -341,5 +345,178 @@ describe("closed positions", () => {
     ]);
     assert.equal(row.closed, true);
     assert.deepEqual(row.accountIds, ["acc-tfsa", "acc-rrsp"]);
+  });
+});
+
+describe("replayFlows", () => {
+  test("a straight buy leaves cost and no realized gain", () => {
+    const r = replayFlows([{ date: "2025-01-01", kind: "buy", amount: 300, shares: 10 }]);
+    assert.equal(r.shares, 10);
+    assert.equal(r.costCAD, 300);
+    assert.equal(r.realizedGainCAD, 0, "nothing sold, nothing realized");
+  });
+
+  test("a partial sale realizes the gain on the shares that left", () => {
+    // Bought 10 at 30. Sold 4 for 200, which had cost 120.
+    const r = replayFlows([
+      { date: "2025-01-01", kind: "buy", amount: 300, shares: 10 },
+      { date: "2025-06-01", kind: "sell", amount: 200, shares: -4 },
+    ]);
+    assert.equal(r.shares, 6);
+    assert.equal(r.realizedGainCAD, 80, "200 proceeds less 120 of cost");
+    assert.equal(r.costCAD, 180, "the remaining six still cost 30 each");
+  });
+
+  test("a full sale realizes everything and leaves no basis", () => {
+    const r = replayFlows([
+      { date: "2025-01-01", kind: "buy", amount: 300, shares: 10 },
+      { date: "2025-06-01", kind: "sell", amount: 500, shares: -10 },
+    ]);
+    assert.equal(r.shares, 0);
+    assert.equal(r.costCAD, 0);
+    assert.equal(r.realizedGainCAD, 200);
+  });
+
+  test("a realized loss is negative", () => {
+    const r = replayFlows([
+      { date: "2025-01-01", kind: "buy", amount: 300, shares: 10 },
+      { date: "2025-06-01", kind: "sell", amount: 100, shares: -10 },
+    ]);
+    assert.equal(r.realizedGainCAD, -200);
+  });
+
+  test("buys at different prices are disposed of at the average", () => {
+    const r = replayFlows([
+      { date: "2025-01-01", kind: "buy", amount: 100, shares: 10 },
+      { date: "2025-02-01", kind: "buy", amount: 300, shares: 10 },
+      { date: "2025-06-01", kind: "sell", amount: 250, shares: -10 },
+    ]);
+    // Average cost is 20; ten shares cost 200 and fetched 250.
+    assert.equal(r.realizedGainCAD, 50);
+    assert.equal(r.costCAD, 200, "the remaining ten keep the same average");
+  });
+
+  test("dividends accumulate without touching the basis", () => {
+    const r = replayFlows([
+      { date: "2025-01-01", kind: "buy", amount: 300, shares: 10 },
+      { date: "2025-03-01", kind: "dividend", amount: 12, shares: 0 },
+    ]);
+    assert.equal(r.dividendsCAD, 12);
+    assert.equal(r.costCAD, 300);
+    assert.equal(r.realizedGainCAD, 0);
+  });
+
+  test("flows out of order are replayed chronologically", () => {
+    const r = replayFlows([
+      { date: "2025-06-01", kind: "sell", amount: 200, shares: -4 },
+      { date: "2025-01-01", kind: "buy", amount: 300, shares: 10 },
+    ]);
+    assert.equal(r.shares, 6, "the sale cannot be applied before the purchase");
+    assert.equal(r.realizedGainCAD, 80);
+  });
+
+  test("no flows means nothing, not a crash", () => {
+    assert.deepEqual(replayFlows([]), {
+      shares: 0,
+      costCAD: 0,
+      realizedGainCAD: 0,
+      dividendsCAD: 0,
+    });
+  });
+});
+
+describe("realized gain and MWRR on a row", () => {
+  const withFlows = (over: Partial<Holding>): Holding =>
+    ({
+      id: "h",
+      ticker: "XEQT",
+      name: "XEQT",
+      assetClass: "US Equity",
+      sector: "Other",
+      shares: 0,
+      avgCost: 0,
+      price: 40,
+      history: [40],
+      dividendsReceived: 0,
+      accountId: "acc-tfsa",
+      currency: "CAD",
+      priceCAD: 40,
+      avgCostCAD: 0,
+      dividendsReceivedCAD: 0,
+      historyCAD: [40],
+      flows: [],
+      ...over,
+    }) as Holding;
+
+  test("a closed position reports what it actually made", () => {
+    // Previously this showed a gain of zero: proceeds were discarded, so
+    // every closed position looked like it had made nothing.
+    const [row] = consolidateHoldings(
+      [
+        withFlows({
+          shares: 0,
+          dividendsReceivedCAD: 20,
+          flows: [
+            { date: "2024-01-01", kind: "buy", amount: 1000, shares: 50 },
+            { date: "2024-07-01", kind: "dividend", amount: 20, shares: 0 },
+            { date: "2025-01-01", kind: "sell", amount: 1400, shares: -50 },
+          ],
+        }),
+      ],
+      "2026-01-01",
+    );
+    assert.equal(row.gain, 0, "nothing is still held, so nothing is unrealized");
+    assert.equal(row.realizedGain, 400, "1400 out against 1000 of cost");
+    assert.equal(row.totalReturn, 420, "realized plus dividends");
+  });
+
+  test("MWRR reflects the actual holding period, not a fixed window", () => {
+    const [row] = consolidateHoldings(
+      [
+        withFlows({
+          shares: 0,
+          flows: [
+            { date: "2025-01-01", kind: "buy", amount: 100, shares: 10 },
+            { date: "2026-01-01", kind: "sell", amount: 200, shares: -10 },
+          ],
+        }),
+      ],
+      "2026-01-01",
+    );
+    assert.ok(
+      row.mwrr !== null && Math.abs(row.mwrr - 100) < 0.5,
+      `doubling over exactly one year is ~100%, got ${row.mwrr}`,
+    );
+  });
+
+  test("a position with no trade history has no MWRR rather than zero", () => {
+    const [row] = consolidateHoldings([withFlows({ shares: 10, avgCostCAD: 30 })], "2026-01-01");
+    assert.equal(row.mwrr, null);
+    assert.equal(row.realizedGain, 0);
+  });
+
+  test("realized gain pools across accounts", () => {
+    const [row] = consolidateHoldings(
+      [
+        withFlows({
+          id: "a",
+          accountId: "acc-tfsa",
+          flows: [
+            { date: "2024-01-01", kind: "buy", amount: 100, shares: 10 },
+            { date: "2025-01-01", kind: "sell", amount: 150, shares: -10 },
+          ],
+        }),
+        withFlows({
+          id: "b",
+          accountId: "acc-rrsp",
+          flows: [
+            { date: "2024-01-01", kind: "buy", amount: 100, shares: 10 },
+            { date: "2025-01-01", kind: "sell", amount: 60, shares: -10 },
+          ],
+        }),
+      ],
+      "2026-01-01",
+    );
+    assert.equal(row.realizedGain, 10, "+50 in one account, -40 in the other");
   });
 });

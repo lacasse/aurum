@@ -240,6 +240,7 @@ export function generateSampleData(): FinanceData {
       avgCostCAD: isUSD ? round2(s.avgCost * FX) : s.avgCost,
       dividendsReceivedCAD: isUSD ? round2(s.dividends * FX) : s.dividends,
       historyCAD: isUSD ? norm.map((v) => round2(v * FX)) : norm,
+    flows: [],
     };
   });
 

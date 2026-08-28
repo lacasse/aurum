@@ -85,6 +85,7 @@ function toHolding(row: HoldingRow): Holding {
     avgCostCAD: row.avgCostCAD ?? row.avgCost,
     dividendsReceivedCAD: row.dividendsReceivedCAD ?? row.dividendsReceived ?? 0,
     historyCAD: row.historyCAD ?? row.history,
+    flows: row.flows ?? [],
   };
 }
 
@@ -222,6 +223,7 @@ export async function seed(data: FinanceData): Promise<void> {
         avgCostCAD: h.avgCostCAD ?? h.avgCost,
         dividendsReceivedCAD: h.dividendsReceivedCAD ?? h.dividendsReceived ?? 0,
         historyCAD: h.historyCAD ?? h.history,
+        flows: h.flows ?? [],
         position: i,
       })),
     );
@@ -618,6 +620,7 @@ export async function insertHolding(h: Holding, position: number): Promise<void>
     avgCostCAD: h.avgCostCAD ?? h.avgCost,
     dividendsReceivedCAD: h.dividendsReceivedCAD ?? h.dividendsReceived ?? 0,
     historyCAD: h.historyCAD ?? h.history,
+    flows: h.flows ?? [],
     position,
   });
 }
@@ -641,6 +644,7 @@ export async function replaceHolding(h: Holding): Promise<void> {
       avgCostCAD: h.avgCostCAD ?? h.avgCost,
       dividendsReceivedCAD: h.dividendsReceivedCAD ?? h.dividendsReceived ?? 0,
       historyCAD: h.historyCAD ?? h.history,
+      flows: h.flows ?? [],
     })
     .where(eq(holdings.id, h.id));
 }
