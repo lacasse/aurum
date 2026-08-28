@@ -13,3 +13,7 @@ tsconfig.tsbuildinfo
 *.sql
 backup/
 nginx/
+# Secrets: never bake into image layers / build context
+.env
+.env.*
+!.env.example

@@ -24,7 +24,7 @@ async function send<T>(url: string, method: string, body?: unknown): Promise<T> 
 
 export const api = {
   loadData: () => send<ServerState>("/api/data", "GET"),
-  reset: () => send<ServerState>("/api/reset", "POST"),
+  reset: () => send<ServerState>("/api/reset", "POST", { confirm: "RESET" }),
 
   createAccount: (account: Account) => send("/api/accounts", "POST", account),
   updateAccount: (account: Account) =>

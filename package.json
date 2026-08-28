@@ -9,7 +9,9 @@
     "lint": "eslint",
     "test:csv": "tsx scripts/csv-test.ts",
     "db:generate": "drizzle-kit generate",
-    "test:db": "tsx scripts/db-integration.ts"
+    "test:db": "tsx scripts/db-integration.ts",
+    "hash-password": "tsx scripts/hash-password.ts",
+    "check:security": "node scripts/check-security.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
