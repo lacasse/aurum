@@ -10,9 +10,9 @@ import {
   LayoutDashboard,
   Menu,
   Moon,
-  RefreshCcw,
   Sun,
   Target,
+  Trash2,
   TrendingUp,
   Upload,
   UploadCloud,
@@ -20,7 +20,7 @@ import {
   X,
   LogOut,
 } from "lucide-react";
-import { Button, Input, Modal } from "./ui";
+import { Button, Modal } from "./ui";
 import { useFinance } from "@/lib/store";
 import { useMounted } from "@/lib/hooks";
 import { cn } from "./ui";
@@ -54,59 +54,60 @@ function ThemeToggle() {
   );
 }
 
-function ResetDemo() {
+/**
+ * Offers a one-time cleanup of the sample data the app seeds on first deploy.
+ * It disappears for good once that data is gone — there is nothing left to
+ * delete, and the server will not seed it again.
+ */
+function DeleteDemo() {
   const [open, setOpen] = useState(false);
-  const [confirm, setConfirm] = useState("");
-  const resetDemo = useFinance((s) => s.resetDemo);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const demoPresent = useFinance((s) => s.demoPresent);
+  const deleteDemo = useFinance((s) => s.deleteDemo);
+
+  if (!demoPresent) return null;
+
+  const close = () => {
+    setOpen(false);
+    setError("");
+  };
+
+  const run = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await deleteDemo();
+      setOpen(false);
+    } catch {
+      setError("Could not delete the demo data. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <button
         onClick={() => setOpen(true)}
         className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
       >
-        <RefreshCcw size={14} />
-        Reset demo data
+        <Trash2 size={14} />
+        Delete demo data
       </button>
-      <Modal
-        open={open}
-        onClose={() => {
-          setOpen(false);
-          setConfirm("");
-        }}
-        title="Reset demo data"
-      >
+      <Modal open={open} onClose={close} title="Delete demo data">
         <p className="text-sm text-ink-dim">
-          This restores the original sample accounts, transactions, holdings and
-          budgets, discarding every change you made. To continue, type{" "}
-          <span className="font-mono text-ink">RESET</span>.
+          This permanently removes the sample accounts, transactions, holdings
+          and budgets that came with the app. Anything you have added yourself
+          is kept, as is your category list. This cannot be undone.
         </p>
-        <Input
-          className="mt-3"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          placeholder="Type RESET to confirm"
-          autoComplete="off"
-        />
+        {error ? <p className="mt-3 text-sm text-negative">{error}</p> : null}
         <div className="mt-5 flex justify-end gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setOpen(false);
-              setConfirm("");
-            }}
-          >
+          <Button variant="secondary" onClick={close} disabled={busy}>
             Cancel
           </Button>
-          <Button
-            variant="danger"
-            disabled={confirm.trim().toUpperCase() !== "RESET"}
-            onClick={() => {
-              resetDemo();
-              setOpen(false);
-              setConfirm("");
-            }}
-          >
-            Reset everything
+          <Button variant="danger" onClick={run} disabled={busy}>
+            {busy ? "Deleting…" : "Delete demo data"}
           </Button>
         </div>
       </Modal>
@@ -169,7 +170,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           </span>
           <ThemeToggle />
         </div>
-        <ResetDemo />
+        <DeleteDemo />
         <button
           onClick={logout}
           className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"

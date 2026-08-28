@@ -4,6 +4,8 @@ import type { Account, FinanceData, Holding, MonthlySnapshot, Transaction } from
 
 export interface ServerState extends FinanceData {
   merchantRules: Record<string, string>;
+  /** Whether any seeded demo row is still in the database. */
+  demoPresent: boolean;
 }
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
@@ -24,7 +26,7 @@ async function send<T>(url: string, method: string, body?: unknown): Promise<T> 
 
 export const api = {
   loadData: () => send<ServerState>("/api/data", "GET"),
-  reset: () => send<ServerState>("/api/reset", "POST", { confirm: "RESET" }),
+  deleteDemo: () => send<ServerState>("/api/demo", "DELETE", { confirm: "DELETE" }),
 
   createAccount: (account: Account) => send("/api/accounts", "POST", account),
   updateAccount: (account: Account) =>

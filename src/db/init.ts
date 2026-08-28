@@ -1,7 +1,7 @@
 import path from "node:path";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db } from "./index";
-import { isSeeded, seed } from "./repo";
+import { isDemoDeleted, isSeeded, seed } from "./repo";
 import { generateSampleData } from "@/lib/sample";
 
 let readyPromise: Promise<void> | null = null;
@@ -10,7 +10,10 @@ async function init(): Promise<void> {
   await migrate(db, {
     migrationsFolder: path.join(process.cwd(), "drizzle"),
   });
-  if (!(await isSeeded())) {
+  // Seed only a database that has never held data. Once the user has deleted
+  // the demo data, an empty database is a deliberate state: re-seeding it
+  // would hand back the very rows they asked us to remove.
+  if (!(await isSeeded()) && !(await isDemoDeleted())) {
     await seed(generateSampleData());
   }
 }
