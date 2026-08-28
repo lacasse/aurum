@@ -18,6 +18,32 @@
 /** The provider's free-plan allowance. Overridable so CI can pin it to zero. */
 export const EODHD_DAY_LIMIT = Number(process.env.EODHD_DAY_LIMIT ?? 20);
 
+/**
+ * Calls held back from type-ahead ticker validation.
+ *
+ * Validation and the price refresh draw on the same 20 calls a day, but they
+ * are not worth the same: a stale price is visible on every holding, while a
+ * validation tick is a convenience on one field. Left unchecked the former
+ * loses, because validation fires on a debounce as somebody types and the
+ * refresh runs once. Validation therefore stops short of the last few calls
+ * and reports that it could not check, rather than spending the allowance the
+ * prices need.
+ */
+export const EODHD_VALIDATE_RESERVE = Number(
+  process.env.EODHD_VALIDATE_RESERVE ?? 5,
+);
+
+/**
+ * The ceiling type-ahead validation may spend up to, never below zero so a
+ * small or pinned `EODHD_DAY_LIMIT` cannot turn into a negative budget.
+ */
+export function validateLimit(
+  limit: number = EODHD_DAY_LIMIT,
+  reserve: number = EODHD_VALIDATE_RESERVE,
+): number {
+  return Math.max(0, limit - Math.max(0, reserve));
+}
+
 /** `app_meta` key holding "YYYY-MM-DD:used". */
 export const EODHD_QUOTA_KEY = "eodhd_quota";
 

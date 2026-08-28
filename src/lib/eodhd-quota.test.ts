@@ -1,6 +1,13 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { grant, resetsAt, selectEodhdDue, usedFrom, utcDay } from "./eodhd-quota";
+import {
+  grant,
+  resetsAt,
+  selectEodhdDue,
+  usedFrom,
+  utcDay,
+  validateLimit,
+} from "./eodhd-quota";
 
 /*
  * These tests never make a network request. That is the point: the allowance
@@ -138,5 +145,32 @@ describe("selectEodhdDue", () => {
     // …so day two must reach the two that were missed, not repeat A and B.
     const day2 = selectEodhdDue(items, seen, "2026-08-28").slice(0, budget);
     assert.deepEqual(day2.map((i) => i.ticker), ["C", "D"]);
+  });
+});
+
+describe("validateLimit", () => {
+  test("holds calls back from type-ahead validation", () => {
+    assert.equal(validateLimit(20, 5), 15);
+  });
+
+  test("validation stops while the refresh can still spend", () => {
+    // 16 calls gone: past validation's ceiling, but the price refresh — which
+    // draws on the full allowance — still has four to reach stale holdings.
+    const today = "2026-08-28";
+    const ledger = `${today}:16`;
+    assert.equal(grant(ledger, today, 1, validateLimit(20, 5)).granted, 0);
+    assert.equal(grant(ledger, today, 1, 20).granted, 1);
+  });
+
+  test("never goes negative, so a pinned limit cannot invert the budget", () => {
+    // CI pins EODHD_DAY_LIMIT to 0; a naive subtraction would give -5, and a
+    // negative ceiling is not a smaller budget, it is an unguarded one.
+    assert.equal(validateLimit(0, 5), 0);
+    assert.equal(validateLimit(3, 5), 0);
+    assert.equal(validateLimit(20, -5), 20);
+  });
+
+  test("a zeroed validation budget grants nothing", () => {
+    assert.equal(grant(undefined, "2026-08-28", 1, validateLimit(0, 5)).granted, 0);
   });
 });

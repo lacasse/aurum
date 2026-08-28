@@ -20,12 +20,21 @@ const LAST_FETCH_KEY = "eodhd_last_fetch";
  * so two concurrent price refreshes cannot both see the same remaining
  * allowance and jointly exceed it. The row is created first (outside the lock)
  * because `FOR UPDATE` cannot lock a row that does not exist yet.
+ *
+ * `limit` lets a caller draw against a ceiling below the day's full allowance,
+ * so a low-priority use (type-ahead validation) stops before it can starve the
+ * price refresh. It never raises the cap: the ledger it writes is shared, so a
+ * limit above `EODHD_DAY_LIMIT` would let the next caller overspend.
  */
 export async function reserveEodhdCalls(
   want: number,
   now: Date = new Date(),
+  limit: number = EODHD_DAY_LIMIT,
 ): Promise<number> {
-  if (!Number.isFinite(want) || want <= 0 || EODHD_DAY_LIMIT <= 0) return 0;
+  // Clamped, not trusted: a caller may lower its own ceiling but never lift
+  // the day's, which is what makes the comment above true rather than a hope.
+  const cap = Math.min(limit, EODHD_DAY_LIMIT);
+  if (!Number.isFinite(want) || want <= 0 || cap <= 0) return 0;
   const today = utcDay(now);
 
   await db
@@ -40,7 +49,7 @@ export async function reserveEodhdCalls(
       .where(eq(appMeta.key, EODHD_QUOTA_KEY))
       .for("update");
 
-    const { granted, nextValue } = grant(row?.value, today, want);
+    const { granted, nextValue } = grant(row?.value, today, want, cap);
     if (granted > 0) {
       await tx
         .update(appMeta)
