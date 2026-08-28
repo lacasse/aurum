@@ -57,6 +57,13 @@ export default function InvestmentsPage() {
   const [benchmark, setBenchmark] = useState<BenchmarkData | null>(null);
   const [lastPriceUpdate, setLastPriceUpdate] = useState<Date | null>(null);
   const [priceRefreshing, setPriceRefreshing] = useState(false);
+  const [staleTickers, setStaleTickers] = useState<Set<string>>(new Set());
+  const [quota, setQuota] = useState<{
+    used: number;
+    limit: number;
+    remaining: number;
+    resetsAt: string;
+  } | null>(null);
   const mountedRef = useRef(true);
 
   /* ---- live price polling ---- */
@@ -72,11 +79,17 @@ export default function InvestmentsPage() {
         { cache: "no-store" },
       );
       if (!res.ok) return;
-      const { prices } = (await res.json()) as {
+      const { prices, stale, quota: q } = (await res.json()) as {
         prices: Record<string, number>;
+        stale?: string[];
+        quota?: { used: number; limit: number; remaining: number; resetsAt: string };
         ts: number;
       };
       if (!mountedRef.current) return;
+      // Prices we could not refresh keep their last known value; the badge is
+      // what tells you the figure is not from today.
+      setStaleTickers(new Set(stale ?? []));
+      setQuota(q ?? null);
       for (const h of holdings) {
         const px = prices[h.ticker];
         if (px != null && px > 0 && px !== h.price) {
@@ -220,6 +233,23 @@ export default function InvestmentsPage() {
       }
     >
       <div className="space-y-4">
+        {staleTickers.size > 0 && (
+          <Card className="border-amber-500/40 bg-amber-500/5 p-4">
+            <p className="text-sm font-medium text-amber-400">
+              {staleTickers.size} price{staleTickers.size === 1 ? "" : "s"} not
+              updated today
+            </p>
+            <p className="mt-1 text-xs text-ink-dim">
+              Showing the last known price for these holdings.{" "}
+              {quota
+                ? `The EODHD free plan allows ${quota.limit} price lookups a day and ${quota.used} have been used. `
+                : ""}
+              Prices update automatically after the daily limit resets
+              {quota ? ` at ${new Date(quota.resetsAt).toLocaleString()}` : " at 00:00 GMT"}
+              .
+            </p>
+          </Card>
+        )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Portfolio value"
@@ -437,6 +467,14 @@ export default function InvestmentsPage() {
                             <span className="shrink-0 rounded bg-elevated px-1 py-px text-[8px] font-medium text-ink-faint">
                               {accountLabel(r.holding.accountId)}
                             </span>
+                            {staleTickers.has(r.holding.ticker) && (
+                              <span
+                                className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[8px] font-medium text-amber-400"
+                                title="Last known price — the daily EODHD limit is used up, this updates automatically after 00:00 GMT"
+                              >
+                                STALE
+                              </span>
+                            )}
                             {r.holding.currency === "USD" && (
                               <span className="shrink-0 rounded bg-elevated px-1 py-px text-[8px] font-medium text-amber-400">
                                 USD

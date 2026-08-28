@@ -1,4 +1,11 @@
 import { handle } from "@/db/http";
+import {
+  eodhdLastFetched,
+  eodhdUsage,
+  recordEodhdFetched,
+  reserveEodhdCalls,
+} from "@/db/eodhd";
+import { selectEodhdDue, utcDay } from "@/lib/eodhd-quota";
 import { priceSource, toEodhdSymbol, toTwelveDataSymbol } from "@/lib/market";
 import { reserveTwelveDataCredits } from "@/lib/ratelimit";
 import type { AssetClass, Currency } from "@/lib/types";
@@ -64,6 +71,7 @@ async function fetchEodhd(
 ): Promise<Map<string, number>> {
   if (items.length === 0 || !EODHD_TOKEN) return new Map();
   const out = new Map<string, number>();
+  const fetched: string[] = [];
 
   const to = new Date();
   const from = new Date(to);
@@ -86,12 +94,16 @@ async function fetchEodhd(
       const px = last?.close;
       if (px != null && Number.isFinite(px) && px > 0) {
         out.set(item.ticker, Math.round(px * 100) / 100);
+        fetched.push(item.ticker);
       }
     } catch {
       console.warn(`[prices] EODHD fetch failed for ${item.symbol}`);
     }
     if (items.length > 1) await new Promise((r) => setTimeout(r, 250));
   }
+  // Record only what actually came back, so a failed call does not mark a
+  // ticker as done for the day.
+  await recordEodhdFetched(fetched);
   return out;
 }
 
@@ -168,23 +180,34 @@ export async function GET(req: Request) {
       }
 
       if (source === "eodhd") {
-        // Existing Canadian holdings: only re-fetch after the market close so
-        // we capture the day's final close once and don't burn the EODHD quota.
-        // However, a ticker with no cached value is effectively "new" being
-        // added, so fetch it immediately from EODHD regardless of time.
-        if (afterClose || !cached) {
-          eodhdItems.push({ ticker: tickers[i], symbol: toEodhdSymbol(tickers[i]) });
-        } else {
-          cachedPrices[tickers[i]] = cached.price;
-        }
+        // Deliberately no "fetch immediately when uncached" escape hatch here.
+        // The cache is per-process, so after a restart every ticker looks new,
+        // and with a 20-call day that one bypass could spend the entire
+        // allowance in a single page load. A brand-new holding still gets a
+        // price the moment it is added, from /api/prices/validate.
+        eodhdItems.push({ ticker: tickers[i], symbol: toEodhdSymbol(tickers[i]) });
       } else {
         twelveDataItems.push({ ticker: tickers[i], symbol: toTwelveDataSymbol(tickers[i], ac) });
       }
     }
 
+    /*
+     * Spend the day's remaining EODHD calls on the tickers that have gone
+     * longest without a refresh. With far more holdings than calls, taking
+     * them in request order would refresh the same handful every day and
+     * leave the rest permanently stale.
+     */
+    const lastFetched = await eodhdLastFetched();
+    const eodhdDue = selectEodhdDue(eodhdItems, lastFetched, utcDay(nowDate));
+
+    // EOD data only changes after the close, so before it there is nothing new
+    // to buy with the allowance.
+    const budget = afterClose ? await reserveEodhdCalls(eodhdDue.length) : 0;
+    const eodhdToFetch = eodhdDue.slice(0, budget);
+
     const [twelvePrices, eodhdPrices] = await Promise.all([
       fetchTwelveData(twelveDataItems),
-      fetchEodhd(eodhdItems),
+      fetchEodhd(eodhdToFetch),
     ]);
 
     for (const [ticker, price] of twelvePrices)
@@ -196,6 +219,21 @@ export async function GET(req: Request) {
     for (const [ticker, price] of twelvePrices) prices[ticker] = price;
     for (const [ticker, price] of eodhdPrices) prices[ticker] = price;
 
-    return { prices, ts: now, afterClose };
+    /*
+     * Anything routed to EODHD that we could not price now keeps whatever the
+     * client already holds — its last known price — and is reported as stale so
+     * the UI can say so rather than showing a figure that looks current.
+     */
+    const stale = eodhdItems
+      .map((i) => i.ticker)
+      .filter((ticker) => prices[ticker] === undefined);
+
+    return {
+      prices,
+      stale,
+      quota: await eodhdUsage(nowDate),
+      ts: now,
+      afterClose,
+    };
   });
 }
