@@ -1,4 +1,5 @@
 import { handle } from "@/db/http";
+import { eodhdUsage, recordEodhdFetched, reserveEodhdCalls } from "@/db/eodhd";
 import { priceSource, toEodhdSymbol, toTwelveDataSymbol } from "@/lib/market";
 import { reserveTwelveDataCredits } from "@/lib/ratelimit";
 import type { AssetClass, Currency } from "@/lib/types";
@@ -27,6 +28,8 @@ async function fetchTwelveDataPrice(symbol: string): Promise<number | null> {
 
 async function fetchEodhdPrice(symbol: string): Promise<number | null> {
   if (!EODHD_TOKEN) return null;
+  // Validating a ticker spends one of the 20 daily calls like any other.
+  if ((await reserveEodhdCalls(1)) < 1) return null;
   const to = new Date();
   const from = new Date(to);
   from.setDate(from.getDate() - 7);
@@ -59,17 +62,24 @@ export async function GET(req: Request) {
     }
 
     let price: number | null = null;
+    const usesEodhd = priceSource(ac, cu) === "eodhd";
 
-    if (priceSource(ac, cu) === "eodhd") {
+    if (usesEodhd) {
       price = await fetchEodhdPrice(toEodhdSymbol(ticker));
+      if (price != null) await recordEodhdFetched([ticker]);
     } else {
       price = await fetchTwelveDataPrice(toTwelveDataSymbol(ticker, ac));
     }
 
+    const quota = usesEodhd ? await eodhdUsage() : undefined;
     return {
       valid: price != null && price > 0,
       price: price != null && price > 0 ? price : null,
       ticker,
+      // Lets the form distinguish "no such ticker" from "no calls left today",
+      // which look identical from a null price.
+      quotaExhausted: usesEodhd && price == null && (quota?.remaining ?? 1) === 0,
+      quota,
     };
   });
 }

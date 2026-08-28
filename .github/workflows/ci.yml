@@ -10,6 +10,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The EODHD free plan allows 20 calls a day for the whole account, so CI must
+# never spend one. No test calls the provider, and pinning the cap to zero means
+# a future one still could not: every call site reserves against this limit
+# first and a zero limit refuses every reservation.
+env:
+  EODHD_DAY_LIMIT: "0"
+
 jobs:
   check:
     name: Lint, typecheck, unit tests, build

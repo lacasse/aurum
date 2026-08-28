@@ -208,6 +208,58 @@ async function main() {
       }
     }
 
+    console.log("EODHD daily cap (never touches the network)");
+    {
+      const eodhd = await import("../src/db/eodhd");
+      const day = new Date("2026-08-28T12:00:00Z");
+      await eodhd.__resetEodhdLedgerForTests();
+
+      const first = await eodhd.reserveEodhdCalls(5, day);
+      expect(first === 5, `grants 5 of 20 (got ${first})`);
+
+      // The ledger is in the database, so this is what a container restart
+      // sees — an in-memory counter would have reset to zero here.
+      const usage = await eodhd.eodhdUsage(day);
+      expect(usage.used === 5 && usage.remaining === 15, "usage persists to the database");
+
+      const rest = await eodhd.reserveEodhdCalls(219, day);
+      expect(rest === 15, `a 219-ticker refresh gets only the 15 left (got ${rest})`);
+      expect((await eodhd.reserveEodhdCalls(1, day)) === 0, "further calls are refused");
+
+      const spent = (await eodhd.eodhdUsage(day)).used;
+      expect(spent === 20, `exactly 20 calls were ever granted (got ${spent})`);
+
+      // Concurrent refreshes must not both see the same headroom.
+      await eodhd.__resetEodhdLedgerForTests();
+      const races = await Promise.all(
+        Array.from({ length: 10 }, () => eodhd.reserveEodhdCalls(4, day)),
+      );
+      const totalGranted = races.reduce((a, b) => a + b, 0);
+      expect(
+        totalGranted === 20,
+        `10 concurrent 4-call requests grant 20 in total, not more (got ${totalGranted})`,
+      );
+
+      const nextDay = new Date("2026-08-29T00:00:01Z");
+      expect(
+        (await eodhd.eodhdUsage(nextDay)).used === 0,
+        "the allowance resets at 00:00 GMT",
+      );
+      expect(
+        (await eodhd.reserveEodhdCalls(20, nextDay)) === 20,
+        "a full allowance is available the next day",
+      );
+
+      // Per-ticker fetch dates drive which holdings spend tomorrow's calls.
+      await eodhd.recordEodhdFetched(["XEQT.TO", "VFV.TO"], day);
+      const seen = await eodhd.eodhdLastFetched();
+      expect(
+        seen.get("XEQT.TO") === "2026-08-28" && seen.get("VFV.TO") === "2026-08-28",
+        "records which tickers were priced today",
+      );
+      await eodhd.__resetEodhdLedgerForTests();
+    }
+
     console.log("budgets / categories");
     await repo.upsertBudget("Coffee", 42.5);
     state = await repo.getState();
