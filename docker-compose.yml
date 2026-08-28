@@ -19,22 +19,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-aurum}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-aurum}
-    command:
-      - postgres
-      - -c
-      - shared_buffers=128MB
-      - -c
-      - effective_cache_size=384MB
-      - -c
-      - maintenance_work_mem=64MB
-      - -c
-      - work_mem=4MB
-      - -c
-      - max_connections=20
-      - -c
-      - synchronous_commit=off
-    mem_limit: 512m
-    pids_limit: 512
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -56,7 +40,6 @@ services:
       - SETUID
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-aurum}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-aurum}
-      NODE_OPTIONS: --max-old-space-size=256
       TWELVEDATA_API_KEY: ${TWELVEDATA_API_KEY:?set TWELVEDATA_API_KEY in .env}
       EODHD_API_KEY: ${EODHD_API_KEY:?set EODHD_API_KEY in .env}
       AUTH_USERNAME: ${AUTH_USERNAME:?set AUTH_USERNAME in .env}
@@ -66,8 +49,6 @@ services:
       TWELVEDATA_DAY_LIMIT: ${TWELVEDATA_DAY_LIMIT:-800}
       TWELVEDATA_MINUTE_RESERVE: ${TWELVEDATA_MINUTE_RESERVE:-1}
       TWELVEDATA_DAY_RESERVE: ${TWELVEDATA_DAY_RESERVE:-100}
-    mem_limit: 512m
-    pids_limit: 256
     expose:
       - "3000"
     volumes:
@@ -90,8 +71,6 @@ services:
     environment:
       ADMINER_DEFAULT_SERVER: db
       ADMINER_DESIGN: dracula
-    mem_limit: 128m
-    pids_limit: 128
     expose:
       - "8080"
     depends_on:
@@ -114,8 +93,6 @@ services:
       - NET_BIND_SERVICE
       - KILL
     entrypoint: ["/bin/sh", "/backup.sh"]
-    mem_limit: 128m
-    pids_limit: 128
     environment:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
@@ -147,8 +124,6 @@ services:
       - SETGID
       - SETUID
       - NET_BIND_SERVICE
-    mem_limit: 128m
-    pids_limit: 128
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/entrypoint.sh:/entrypoint.sh:ro
