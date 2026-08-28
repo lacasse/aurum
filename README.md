@@ -59,8 +59,8 @@ existing session cookie (they are signed with a key derived from the current cre
 
 The session cookie is `HttpOnly`, `Secure` (when NODE_ENV=production), and `SameSite=Lax`.
 
-**Reset demo data** in the sidebar now requires typing `RESET` to confirm before the server
-will wipe the database (it rejects the request otherwise).
+**Delete demo data** in the sidebar is destructive, so the server rejects the request
+unless the body carries an explicit `{"confirm":"DELETE"}`.
 
 Migrations run and demo data seeds automatically on first request. `docker compose down`
 keeps your data (no flags). **Never run `docker compose down -v` or `docker volume prune`**
@@ -128,7 +128,7 @@ skipped with console errors).
 - [Next.js](https://nextjs.org) 16 (App Router, Turbopack) + React 19 + TypeScript
 - [PostgreSQL](https://www.postgresql.org) 17 + [Drizzle ORM](https://orm.drizzle.team) (migrations in `drizzle/`, applied at startup)
 - [Zod](https://zod.dev) for request-body validation — schemas are declared once in `src/lib/schemas.ts` and shared by every route
-- Route Handlers under `src/app/api` expose the data (accounts, transactions, holdings, budgets, categories, merchant rules, reset)
+- Route Handlers under `src/app/api` expose the data (accounts, transactions, holdings, budgets, categories, merchant rules, demo-data deletion)
 - [Tailwind CSS](https://tailwindcss.com) v4 (semantic design tokens, dark theme by default with a light-mode toggle)
 - [Recharts](https://recharts.org) for all charts
 - [Zustand](https://zustand.docs.pmnd.rs) as the client cache — optimistic updates with fire-and-forget persistence to the API
@@ -188,5 +188,16 @@ and runs `node --test`, so there is no extra test-framework dependency.
 Every one of the above runs in CI on push and pull request
 (`.github/workflows/ci.yml`), along with a Docker image build.
 
-Demo data is regenerated deterministically; use **Reset demo data** in the sidebar to
-start over (server-side reset).
+## Demo data
+
+A fresh deployment seeds 18 months of deterministic sample data so the app is not empty
+on first run. Once you start entering your own figures it is just noise, so the sidebar
+offers **Delete demo data** — a one-time cleanup that removes the seeded accounts,
+transactions, holdings and budgets while keeping anything you added yourself, along with
+your category list.
+
+The seeded rows are recognised by their id prefixes (`acc-`, `hold-`, `txn-`); rows you
+create are assigned UUIDs and so are never matched. After the deletion the app records a
+`demo_data_deleted` marker in `app_meta`, which stops first-run seeding from putting the
+sample data back if you later empty the database. The button disappears once there is
+nothing left to delete.

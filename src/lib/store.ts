@@ -56,7 +56,14 @@ interface FinanceStore extends FinanceData {
   renameCategory: (oldName: string, newName: string) => boolean;
   /** Deletes a category, its budget, and moves its transactions to "Other". */
   deleteCategory: (name: string) => void;
-  resetDemo: () => void;
+  /**
+   * Whether the seeded demo rows are still in the database. False until the
+   * first load from the server, so the sidebar never offers to delete demo
+   * data before it knows any is there.
+   */
+  demoPresent: boolean;
+  /** Deletes the seeded demo rows, keeping everything the user created. */
+  deleteDemo: () => Promise<void>;
   /** Monthly snapshots for the checklist feature. */
   snapshots: MonthlySnapshot[];
   snapshotMonth: string;
@@ -146,6 +153,7 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
   hydrated: false,
   usdCadRate: 1.37,
   merchantRules: {},
+  demoPresent: false,
   categories: [...generateSampleData().categories],
   snapshots: [],
   snapshotMonth: "",
@@ -391,13 +399,15 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
         api.deleteCategory(name).catch(report);
       },
 
-      resetDemo: () => {
-        const fresh = generateSampleData();
-        set({ ...fresh, merchantRules: {} });
-        api
-          .reset()
-          .then((data) => set({ ...data }))
-          .catch(report);
+      deleteDemo: async () => {
+        // Deliberately not optimistic: the server decides which rows are demo
+        // rows, so the store takes the state it returns rather than guessing.
+        try {
+          set({ ...(await api.deleteDemo()) });
+        } catch (err) {
+          report(err);
+          throw err;
+        }
       },
     }),
 );

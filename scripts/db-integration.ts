@@ -182,6 +182,48 @@ async function main() {
     expect(!state.budgets.some((b) => b.category === "Coffee"), "reset clears added budgets");
     expect(!("test cafe" in state.merchantRules), "reset clears merchant rules");
 
+    console.log("delete demo data");
+    state = await repo.getState();
+    expect(state.demoPresent, "demo data reported present while seeded");
+
+    // A row the user created: it must survive the deletion untouched.
+    await repo.insertAccount(
+      {
+        id: "user-account-1",
+        name: "My Real Bank",
+        institution: "Tangerine",
+        kind: "checking",
+        balance: 1234.56,
+        history: [{ month: "2026-08", value: 1234.56 }],
+      },
+      99,
+    );
+    await repo.upsertBudget("Fees", 25);
+
+    await repo.deleteDemoData();
+    state = await repo.getState();
+    expect(!state.demoPresent, "demo data reported absent after deletion");
+    expect(
+      state.accounts.length === 1 && state.accounts[0].id === "user-account-1",
+      `only the user's account survives (got ${state.accounts.length})`,
+    );
+    expect(state.transactions.length === 0, `demo transactions deleted (${state.transactions.length} left)`);
+    expect(state.holdings.length === 0, `demo holdings deleted (${state.holdings.length} left)`);
+    expect(
+      state.budgets.length === 1 && state.budgets[0].category === "Fees",
+      `demo budgets deleted, the user's kept (got ${JSON.stringify(state.budgets)})`,
+    );
+    expect(state.categories.length === 13, "category list is kept");
+    expect(await repo.isDemoDeleted(), "deletion is recorded in app_meta");
+
+    // The regression this marker exists for: an emptied database must not be
+    // mistaken for a first run and re-seeded. ensureDb() memoises its first
+    // run, so assert the two conditions it seeds on rather than calling it
+    // again, which would return the cached promise and prove nothing.
+    await repo.deleteAccountRow("user-account-1");
+    expect(!(await repo.isSeeded()), "an emptied database looks unseeded…");
+    expect(await repo.isDemoDeleted(), "…but the demo-deleted marker suppresses re-seeding");
+
     if (failures > 0) {
       console.error(`\n${failures} test(s) failed`);
       process.exitCode = 1;

@@ -81,6 +81,18 @@ export const merchantRules = pgTable("merchant_rules", {
   category: text("category").notNull(),
 });
 
+/*
+ * Small key/value table for facts about the deployment itself rather than the
+ * user's finances. It exists because some state cannot be inferred from the
+ * rows: once the demo data is deleted the database may legitimately be empty,
+ * and without a marker the first-run seed would put the demo data straight
+ * back (see `src/db/init.ts`).
+ */
+export const appMeta = pgTable("app_meta", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
 export const monthlySnapshots = pgTable(
   "monthly_snapshots",
   {

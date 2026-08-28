@@ -195,8 +195,8 @@ export const merchantRuleSchema = z.object({
   category: requiredString,
 });
 
-export const resetSchema = z.object({
-  confirm: z.literal("RESET"),
+export const deleteDemoSchema = z.object({
+  confirm: z.literal("DELETE"),
 });
 
 export const loginSchema = z.object({

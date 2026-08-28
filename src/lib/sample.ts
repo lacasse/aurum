@@ -7,6 +7,35 @@ import {
 } from "./types";
 import { lastMonthKeys } from "./format";
 
+/*
+ * Every row this generator creates carries an id with one of these prefixes,
+ * while rows the user creates are assigned a UUID (`uid()` in store.ts). That
+ * difference is what lets "Delete demo data" remove the sample rows and only
+ * the sample rows — see `deleteDemoData()` in src/db/repo.ts.
+ *
+ * Matching on the prefix rather than on a regenerated list of ids matters:
+ * the generator's output is keyed to the trailing 18 months, so an id list
+ * regenerated later would no longer name every row that was actually seeded.
+ */
+export const DEMO_ACCOUNT_ID_PREFIX = "acc-";
+export const DEMO_HOLDING_ID_PREFIX = "hold-";
+export const DEMO_TRANSACTION_ID_PREFIX = "txn-";
+
+/** Budgets are keyed by category name, so the demo rows are named outright. */
+export const SAMPLE_BUDGETS: Budget[] = [
+  { category: "Housing", limit: 2200 },
+  { category: "Groceries", limit: 650 },
+  { category: "Dining", limit: 380 },
+  { category: "Transport", limit: 220 },
+  { category: "Utilities", limit: 330 },
+  { category: "Subscriptions", limit: 130 },
+  { category: "Entertainment", limit: 200 },
+  { category: "Shopping", limit: 280 },
+  { category: "Health", limit: 130 },
+  { category: "Travel", limit: 350 },
+  { category: "Insurance", limit: 150 },
+];
+
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -292,19 +321,7 @@ export function generateSampleData(): FinanceData {
 
   transactions.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
-  const budgets: Budget[] = [
-    { category: "Housing", limit: 2200 },
-    { category: "Groceries", limit: 650 },
-    { category: "Dining", limit: 380 },
-    { category: "Transport", limit: 220 },
-    { category: "Utilities", limit: 330 },
-    { category: "Subscriptions", limit: 130 },
-    { category: "Entertainment", limit: 200 },
-    { category: "Shopping", limit: 280 },
-    { category: "Health", limit: 130 },
-    { category: "Travel", limit: 350 },
-    { category: "Insurance", limit: 150 },
-  ];
+  const budgets: Budget[] = SAMPLE_BUDGETS.map((b) => ({ ...b }));
 
   return { accounts, transactions, holdings, budgets, categories: [...EXPENSE_CATEGORIES] };
 }

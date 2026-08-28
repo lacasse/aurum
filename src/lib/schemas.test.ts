@@ -6,8 +6,8 @@ import {
   formatIssues,
   holdingSchema,
   loginSchema,
+  deleteDemoSchema,
   merchantRuleSchema,
-  resetSchema,
   snapshotSchema,
   transactionSchema,
 } from "./schemas";
@@ -221,10 +221,10 @@ describe("smaller route bodies", () => {
     assert.equal(r.category, "Shopping");
   });
 
-  test("resetSchema demands the exact confirmation phrase", () => {
-    assert.equal(resetSchema.safeParse({ confirm: "RESET" }).success, true);
-    assert.equal(resetSchema.safeParse({ confirm: "reset" }).success, false);
-    assert.equal(resetSchema.safeParse({}).success, false);
+  test("deleteDemoSchema demands the exact confirmation phrase", () => {
+    assert.equal(deleteDemoSchema.safeParse({ confirm: "DELETE" }).success, true);
+    assert.equal(deleteDemoSchema.safeParse({ confirm: "delete" }).success, false);
+    assert.equal(deleteDemoSchema.safeParse({}).success, false);
   });
 
   test("loginSchema requires both fields to be non-blank", () => {

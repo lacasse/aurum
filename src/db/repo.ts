@@ -1,7 +1,8 @@
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { asc, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   accounts,
+  appMeta,
   budgets,
   categories,
   holdings,
@@ -21,6 +22,12 @@ import {
   isLiability,
 } from "@/lib/types";
 import { addMoney } from "@/lib/money";
+import {
+  DEMO_ACCOUNT_ID_PREFIX,
+  DEMO_HOLDING_ID_PREFIX,
+  DEMO_TRANSACTION_ID_PREFIX,
+  SAMPLE_BUDGETS,
+} from "@/lib/sample";
 import { z } from "zod";
 import {
   accountSchema,
@@ -92,17 +99,25 @@ function toTransaction(row: typeof transactions.$inferSelect): Transaction {
 /* ------------------------------------------------------------------ */
 
 export async function getState(): Promise<
-  FinanceData & { merchantRules: Record<string, string> }
+  FinanceData & { merchantRules: Record<string, string>; demoPresent: boolean }
 > {
-  const [accountRows, txnRows, holdingRows, budgetRows, categoryRows, ruleRows] =
-    await Promise.all([
-      db.select().from(accounts).orderBy(asc(accounts.position)),
-      db.select().from(transactions).orderBy(desc(transactions.date), desc(transactions.id)),
-      db.select().from(holdings).orderBy(asc(holdings.position)),
-      db.select().from(budgets),
-      db.select().from(categories).orderBy(asc(categories.position)),
-      db.select().from(merchantRules),
-    ]);
+  const [
+    accountRows,
+    txnRows,
+    holdingRows,
+    budgetRows,
+    categoryRows,
+    ruleRows,
+    demoPresent,
+  ] = await Promise.all([
+    db.select().from(accounts).orderBy(asc(accounts.position)),
+    db.select().from(transactions).orderBy(desc(transactions.date), desc(transactions.id)),
+    db.select().from(holdings).orderBy(asc(holdings.position)),
+    db.select().from(budgets),
+    db.select().from(categories).orderBy(asc(categories.position)),
+    db.select().from(merchantRules),
+    hasDemoData(),
+  ]);
 
   return {
     accounts: accountRows.map(toAccount),
@@ -111,6 +126,7 @@ export async function getState(): Promise<
     budgets: budgetRows.map((b) => ({ category: b.category, limit: b.max })),
     categories: categoryRows.map((c) => c.name),
     merchantRules: Object.fromEntries(ruleRows.map((r) => [r.merchant, r.category])),
+    demoPresent,
   };
 }
 
@@ -200,6 +216,94 @@ export async function wipe(): Promise<void> {
 export async function resetToSample(data: FinanceData): Promise<void> {
   await wipe();
   await seed(data);
+}
+
+/* ------------------------------------------------------------------ */
+/* Demo data                                                           */
+/* ------------------------------------------------------------------ */
+
+/** `app_meta` key recording that the user deleted the seeded demo data. */
+const DEMO_DELETED_KEY = "demo_data_deleted";
+
+/** Escape LIKE wildcards so a prefix is matched literally. */
+const startsWith = (prefix: string) =>
+  `${prefix.replace(/([%_\\])/g, "\\$1")}%`;
+
+/**
+ * True once the user has deleted the demo data. Checked before first-run
+ * seeding so an emptied database is not re-populated with samples.
+ */
+export async function isDemoDeleted(): Promise<boolean> {
+  const [row] = await db
+    .select()
+    .from(appMeta)
+    .where(eq(appMeta.key, DEMO_DELETED_KEY));
+  return row !== undefined;
+}
+
+/**
+ * True while any seeded demo row survives. Drives the sidebar's "Delete demo
+ * data" button, which is hidden once there is nothing left to delete.
+ */
+export async function hasDemoData(): Promise<boolean> {
+  const count = sql<number>`count(*)::int`;
+  const [demoAccounts, demoHoldings, demoTransactions] = await Promise.all([
+    db
+      .select({ count })
+      .from(accounts)
+      .where(like(accounts.id, startsWith(DEMO_ACCOUNT_ID_PREFIX))),
+    db
+      .select({ count })
+      .from(holdings)
+      .where(like(holdings.id, startsWith(DEMO_HOLDING_ID_PREFIX))),
+    db
+      .select({ count })
+      .from(transactions)
+      .where(like(transactions.id, startsWith(DEMO_TRANSACTION_ID_PREFIX))),
+  ]);
+  return (
+    (demoAccounts[0]?.count ?? 0) > 0 ||
+    (demoHoldings[0]?.count ?? 0) > 0 ||
+    (demoTransactions[0]?.count ?? 0) > 0
+  );
+}
+
+/**
+ * Delete the seeded sample rows, leaving anything the user created.
+ *
+ * Accounts, holdings and transactions are matched on their demo id prefix;
+ * user rows carry a UUID and so never match. Budgets have no id, so the demo
+ * ones are matched by the category names the generator seeds.
+ *
+ * The category list is deliberately kept: it is the taxonomy the user's own
+ * transactions are filed under, not sample data, and it is already editable
+ * on the Budgets page.
+ */
+export async function deleteDemoData(): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(monthlySnapshots)
+      .where(like(monthlySnapshots.holdingId, startsWith(DEMO_HOLDING_ID_PREFIX)));
+    await tx
+      .delete(transactions)
+      .where(like(transactions.id, startsWith(DEMO_TRANSACTION_ID_PREFIX)));
+    await tx
+      .delete(holdings)
+      .where(like(holdings.id, startsWith(DEMO_HOLDING_ID_PREFIX)));
+    await tx
+      .delete(accounts)
+      .where(like(accounts.id, startsWith(DEMO_ACCOUNT_ID_PREFIX)));
+    await tx.delete(budgets).where(
+      inArray(
+        budgets.category,
+        SAMPLE_BUDGETS.map((b) => b.category),
+      ),
+    );
+    await tx
+      .insert(appMeta)
+      .values({ key: DEMO_DELETED_KEY, value: new Date().toISOString() })
+      .onConflictDoNothing();
+  });
 }
 
 /* ------------------------------------------------------------------ */
