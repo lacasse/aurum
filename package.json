@@ -13,7 +13,8 @@
     "db:generate": "drizzle-kit generate",
     "test:db": "tsx scripts/db-integration.ts",
     "hash-password": "tsx scripts/hash-password.ts",
-    "check:security": "node scripts/check-security.mjs"
+    "check:security": "node scripts/check-security.mjs",
+    "test:smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

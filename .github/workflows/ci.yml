@@ -75,6 +75,62 @@ jobs:
       - name: Integration tests
         run: npm run test:db
 
+  smoke:
+    name: API smoke test (real server + PostgreSQL)
+    runs-on: ubuntu-latest
+
+    # Exercises the seam unit tests and the repository tests both miss: a real
+    # HTTP request, through a route handler, against a real database.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: aurum
+          POSTGRES_PASSWORD: aurum
+          POSTGRES_DB: aurum
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aurum"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://aurum:aurum@127.0.0.1:5432/aurum
+      AUTH_USERNAME: ci
+      AUTH_PASSWORD: ci-smoke-only-not-a-real-password
+      AUTH_SECRET: ci-smoke-only-not-a-real-secret
+      BASE_URL: http://127.0.0.1:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Started detached; the smoke script polls until the server answers. No
+      # EODHD_API_KEY is set and the cap is pinned to 0, so nothing can reach
+      # the provider even if a code path tried.
+      - name: Start the app
+        run: npm start > server.log 2>&1 &
+
+      - name: Smoke test
+        run: npm run test:smoke
+
+      # The assertions report which check failed; the server log says why.
+      - name: Server log on failure
+        if: failure()
+        run: cat server.log || true
+
   docker:
     name: Docker image builds
     runs-on: ubuntu-latest
