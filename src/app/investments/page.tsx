@@ -1,7 +1,16 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Flame, Pencil, Plus, RefreshCw, Trash2, TrendingUp } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronRight,
+  Flame,
+  Pencil,
+  Plus,
+  RefreshCw,
+  TrendingUp,
+} from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
 import { Badge, Button, Card, CardHeader, Progress, cn } from "@/components/ui";
@@ -13,12 +22,14 @@ import {
   SignedHBars,
   TwrChart,
 } from "@/components/charts";
-import { ConfirmDelete, HoldingForm, TradeEntry } from "@/components/forms";
+import { HoldingForm, TradeEntry } from "@/components/forms";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
+import type { SortKey } from "@/lib/analytics";
 import {
   allocationByClass,
   holdingRows,
+  sortHoldingRows,
   portfolioSeries,
   sectorExposure,
 } from "@/lib/analytics";
@@ -34,11 +45,54 @@ interface BenchmarkData {
   series: { month: string; price: number }[];
 }
 
+/**
+ * A column header that sorts. The arrow only appears on the active column, so
+ * the header row stays quiet until it is being used.
+ */
+function SortHeader({
+  label,
+  unit,
+  sortKey,
+  sort,
+  onSort,
+  align = "left",
+  className,
+}: {
+  label: string;
+  unit?: string;
+  sortKey: SortKey;
+  sort: { key: SortKey; dir: "asc" | "desc" };
+  onSort: (key: SortKey) => void;
+  align?: "left" | "right";
+  className?: string;
+}) {
+  const active = sort.key === sortKey;
+  const Arrow = sort.dir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <th
+      className={cn("px-3 py-2.5 font-medium", align === "right" && "text-right", className)}
+      aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={cn(
+          "inline-flex items-center gap-1 uppercase tracking-wider transition-colors hover:text-ink",
+          active && "text-ink",
+        )}
+      >
+        <span>{label}</span>
+        {unit && <span className="text-muted font-normal normal-case">{unit}</span>}
+        <Arrow size={10} className={cn("shrink-0", !active && "invisible")} />
+      </button>
+    </th>
+  );
+}
+
 export default function InvestmentsPage() {
   const ready = useReady();
   const holdings = useFinance((s) => s.holdings);
   const accounts = useFinance((s) => s.accounts);
-  const deleteHolding = useFinance((s) => s.deleteHolding);
   const updateHolding = useFinance((s) => s.updateHolding);
 
   /** Short label for the account a position sits in, e.g. "TFSA". */
@@ -52,12 +106,27 @@ export default function InvestmentsPage() {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Holding | null>(null);
-  const [deleting, setDeleting] = useState<Holding | null>(null);
   const [tradeOpen, setTradeOpen] = useState(false);
   const [benchmark, setBenchmark] = useState<BenchmarkData | null>(null);
   const [lastPriceUpdate, setLastPriceUpdate] = useState<Date | null>(null);
   const [priceRefreshing, setPriceRefreshing] = useState(false);
   const [staleTickers, setStaleTickers] = useState<Set<string>>(new Set());
+  /*
+   * Sort order for the holdings table. Value descending matches how a portfolio
+   * is usually read — biggest position first — so it stays the default.
+   */
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
+    key: "marketValue",
+    dir: "desc",
+  });
+  const toggleSort = (key: SortKey) =>
+    setSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : // Text reads naturally A-Z; numbers are most useful largest-first.
+          { key, dir: key === "name" ? "asc" : "desc" },
+    );
+
   /* Tickers whose per-account lots are shown; only ever set for pooled rows. */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpanded = (ticker: string) =>
@@ -140,7 +209,7 @@ export default function InvestmentsPage() {
   }, []);
 
   const data = useMemo(() => {
-    const rows = holdingRows(holdings);
+    const rows = sortHoldingRows(holdingRows(holdings), sort.key, sort.dir);
     const series = portfolioSeries(holdings, 18);
     const allocation = allocationByClass(holdings).sort((a, b) => b.value - a.value);
     const sectors = sectorExposure(holdings);
@@ -148,7 +217,10 @@ export default function InvestmentsPage() {
     const totalCost = rows.reduce((s, r) => s + r.costBasis, 0);
     const totalDividends = rows.reduce((s, r) => s + r.totalDividends, 0);
     const best = [...rows].sort((a, b) => b.mwrr - a.mwrr)[0];
-    const gainBars = rows
+    // Independent of the table's sort: the chart shows the ten largest
+    // positions, and should not reshuffle when a column header is clicked.
+    const gainBars = [...rows]
+      .sort((a, b) => b.marketValue - a.marketValue)
       .slice(0, 10)
       .map((r) => ({ label: r.ticker, gain: r.totalReturn }))
       .sort((a, b) => b.gain - a.gain);
@@ -163,7 +235,7 @@ export default function InvestmentsPage() {
       best,
       gainBars,
     };
-  }, [holdings]);
+  }, [holdings, sort]);
 
   const twr = useMemo(() => {
     if (!benchmark || benchmark.series.length < 2) return null;
@@ -444,15 +516,15 @@ export default function InvestmentsPage() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-line text-left text-[10px] uppercase tracking-wider text-ink-faint">
-                  <th className="px-3 py-2.5 font-medium">Position</th>
-                  <th className="hidden px-3 py-2.5 text-right font-medium md:table-cell">Shares</th>
-                  <th className="hidden px-3 py-2.5 text-right font-medium md:table-cell">Avg cost <span className="text-muted font-normal text-[10px]">(CAD)</span></th>
-                  <th className="px-3 py-2.5 text-right font-medium">Price <span className="text-muted font-normal text-[10px]">(CAD)</span></th>
-                  <th className="px-3 py-2.5 text-right font-medium">Value <span className="text-muted font-normal text-[10px]">(CAD)</span></th>
-                  <th className="hidden px-3 py-2.5 text-right font-medium lg:table-cell">Dividends</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Gain</th>
-                  <th className="px-3 py-2.5 text-right font-medium">MWRR</th>
-                  <th className="hidden px-3 py-2.5 font-medium xl:table-cell">Weight</th>
+                  <SortHeader label="Position" sortKey="name" sort={sort} onSort={toggleSort} />
+                  <SortHeader label="Shares" sortKey="shares" sort={sort} onSort={toggleSort} align="right" className="hidden md:table-cell" />
+                  <SortHeader label="Avg cost" unit="(CAD)" sortKey="avgCostCAD" sort={sort} onSort={toggleSort} align="right" className="hidden md:table-cell" />
+                  <SortHeader label="Price" unit="(CAD)" sortKey="priceCAD" sort={sort} onSort={toggleSort} align="right" />
+                  <SortHeader label="Value" unit="(CAD)" sortKey="marketValue" sort={sort} onSort={toggleSort} align="right" />
+                  <SortHeader label="Dividends" sortKey="totalDividends" sort={sort} onSort={toggleSort} align="right" className="hidden lg:table-cell" />
+                  <SortHeader label="Gain" sortKey="totalReturn" sort={sort} onSort={toggleSort} align="right" />
+                  <SortHeader label="MWRR" sortKey="mwrr" sort={sort} onSort={toggleSort} align="right" />
+                  <SortHeader label="Weight" sortKey="weightPct" sort={sort} onSort={toggleSort} className="hidden xl:table-cell" />
                   <th className="px-3 py-2.5 text-right font-medium">Actions</th>
                 </tr>
               </thead>
@@ -475,8 +547,8 @@ export default function InvestmentsPage() {
                           {r.ticker.slice(0, 3)}
                         </span>
                         <span className="min-w-0">
-                          <span className="flex items-center gap-1 font-semibold">
-                            <span className="truncate">{r.ticker}</span>
+                          <span className="flex items-center gap-1 font-semibold text-ink">
+                            <span className="truncate">{r.name || r.ticker}</span>
                             {pooled && (
                               <ChevronRight
                                 size={12}
@@ -488,7 +560,7 @@ export default function InvestmentsPage() {
                             )}
                           </span>
                           <span className="flex items-center gap-1 text-ink-faint">
-                            <span className="truncate max-w-[100px]">{r.name}</span>
+                            <span className="truncate max-w-[100px]">{r.ticker}</span>
                             {/* One tag per account the security sits in. */}
                             {r.accountIds.map((id) => (
                               <span
@@ -581,15 +653,6 @@ export default function InvestmentsPage() {
                           >
                             <Pencil size={14} />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Delete ${r.ticker}`}
-                            onClick={() => setDeleting(r.lots[0])}
-                            className="hover:text-negative"
-                          >
-                            <Trash2 size={14} />
-                          </Button>
                         </>
                       )}
                     </td>
@@ -631,15 +694,6 @@ export default function InvestmentsPage() {
                           >
                             <Pencil size={14} />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Delete ${r.ticker} in ${accountLabel(lot.accountId)}`}
-                            onClick={() => setDeleting(lot)}
-                            className="hover:text-negative"
-                          >
-                            <Trash2 size={14} />
-                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -679,13 +733,6 @@ export default function InvestmentsPage() {
           setFormOpen(false);
           setEditing(null);
         }}
-      />
-      <ConfirmDelete
-        open={deleting !== null}
-        onClose={() => setDeleting(null)}
-        onConfirm={() => deleting && deleteHolding(deleting.id)}
-        title="Delete holding"
-        message={`Remove ${deleting?.ticker ?? ""} from your portfolio? This cannot be undone.`}
       />
     </Shell>
   );

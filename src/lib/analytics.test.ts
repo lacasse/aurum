@@ -4,6 +4,7 @@ import {
   budgetRows,
   cashflowSeries,
   consolidateHoldings,
+  sortHoldingRows,
   monthTotals,
   spendByCategory,
 } from "./analytics";
@@ -207,5 +208,80 @@ describe("consolidateHoldings", () => {
       lot({ id: "b", accountId: "acc-rrsp", priceCAD: 40 }),
     ]);
     assert.equal(rows[0].priceCAD, 40);
+  });
+});
+
+describe("sortHoldingRows", () => {
+  const lot = (over: Partial<Holding>): Holding =>
+    ({
+      id: "h",
+      ticker: "XEQT",
+      name: "iShares Core Equity ETF",
+      assetClass: "US Equity",
+      sector: "Other",
+      shares: 10,
+      avgCost: 30,
+      price: 40,
+      history: [38, 40],
+      dividendsReceived: 0,
+      accountId: "acc-tfsa",
+      currency: "CAD",
+      priceCAD: 40,
+      avgCostCAD: 30,
+      dividendsReceivedCAD: 0,
+      historyCAD: [38, 40],
+      ...over,
+    }) as Holding;
+
+  const rows = consolidateHoldings([
+    lot({ id: "a", ticker: "AAA", name: "Zulu Corp", shares: 1, priceCAD: 500 }),
+    lot({ id: "b", ticker: "BBB", name: "Alpha Inc", shares: 10, priceCAD: 10 }),
+    lot({ id: "c", ticker: "CCC", name: "Midway Ltd", shares: 5, priceCAD: 40 }),
+  ]);
+
+  test("sorts by value in both directions", () => {
+    assert.deepEqual(
+      sortHoldingRows(rows, "marketValue", "desc").map((r) => r.ticker),
+      ["AAA", "CCC", "BBB"],
+    );
+    assert.deepEqual(
+      sortHoldingRows(rows, "marketValue", "asc").map((r) => r.ticker),
+      ["BBB", "CCC", "AAA"],
+    );
+  });
+
+  test("the position column sorts on the name, which is what it now leads with", () => {
+    assert.deepEqual(
+      sortHoldingRows(rows, "name", "asc").map((r) => r.name),
+      ["Alpha Inc", "Midway Ltd", "Zulu Corp"],
+    );
+  });
+
+  test("sorts by the other numeric columns", () => {
+    assert.deepEqual(
+      sortHoldingRows(rows, "shares", "desc").map((r) => r.ticker),
+      ["BBB", "CCC", "AAA"],
+    );
+    assert.deepEqual(
+      sortHoldingRows(rows, "priceCAD", "desc").map((r) => r.ticker),
+      ["AAA", "CCC", "BBB"],
+    );
+  });
+
+  test("ties break on value, so the order never wobbles between renders", () => {
+    const tied = consolidateHoldings([
+      lot({ id: "a", ticker: "AAA", shares: 1, priceCAD: 10, dividendsReceivedCAD: 0 }),
+      lot({ id: "b", ticker: "BBB", shares: 1, priceCAD: 90, dividendsReceivedCAD: 0 }),
+    ]);
+    const once = sortHoldingRows(tied, "totalDividends", "desc").map((r) => r.ticker);
+    const twice = sortHoldingRows(tied, "totalDividends", "desc").map((r) => r.ticker);
+    assert.deepEqual(once, ["BBB", "AAA"], "the larger position leads");
+    assert.deepEqual(once, twice);
+  });
+
+  test("does not mutate the rows it was given", () => {
+    const before = rows.map((r) => r.ticker);
+    sortHoldingRows(rows, "name", "asc");
+    assert.deepEqual(rows.map((r) => r.ticker), before);
   });
 });

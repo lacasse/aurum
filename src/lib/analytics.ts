@@ -316,6 +316,44 @@ export function holdingRows(holdings: Holding[]): HoldingRow[] {
   return consolidateHoldings(holdings);
 }
 
+/** The columns the holdings table can be ordered by. */
+export type SortKey =
+  | "name"
+  | "shares"
+  | "avgCostCAD"
+  | "priceCAD"
+  | "marketValue"
+  | "totalDividends"
+  | "totalReturn"
+  | "mwrr"
+  | "weightPct";
+
+/**
+ * Order rows by one column.
+ *
+ * The name column sorts on the security's name, since that is what the table
+ * now leads with, and falls back to the ticker for anything unnamed. Ties break
+ * on market value so the order is stable and predictable rather than depending
+ * on which lot happened to be stored first.
+ */
+export function sortHoldingRows(
+  rows: HoldingRow[],
+  key: SortKey,
+  dir: "asc" | "desc",
+): HoldingRow[] {
+  const sign = dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    if (key === "name") {
+      const cmp = (a.name || a.ticker).localeCompare(b.name || b.ticker, undefined, {
+        sensitivity: "base",
+      });
+      return cmp !== 0 ? cmp * sign : b.marketValue - a.marketValue;
+    }
+    const diff = a[key] - b[key];
+    return diff !== 0 ? diff * sign : b.marketValue - a.marketValue;
+  });
+}
+
 export interface BudgetRow {
   category: string;
   limit: number;
