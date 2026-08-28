@@ -1,8 +1,14 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { budgetRows, cashflowSeries, monthTotals, spendByCategory } from "./analytics";
+import {
+  budgetRows,
+  cashflowSeries,
+  consolidateHoldings,
+  monthTotals,
+  spendByCategory,
+} from "./analytics";
 import { currentMonthKey } from "./format";
-import type { Budget, Transaction } from "./types";
+import type { Budget, Holding, Transaction } from "./types";
 
 const MONTH = currentMonthKey();
 const DAY = `${MONTH}-05`;
@@ -115,5 +121,91 @@ describe("budgetRows", () => {
     assert.equal(row.spent, 0);
     assert.equal(row.remaining, 100);
     assert.equal(row.pct, 0);
+  });
+});
+
+describe("consolidateHoldings", () => {
+  const lot = (over: Partial<Holding>): Holding =>
+    ({
+      id: "h",
+      ticker: "XEQT",
+      name: "XEQT",
+      assetClass: "US Equity",
+      sector: "Other",
+      shares: 10,
+      avgCost: 30,
+      price: 40,
+      history: [38, 40],
+      dividendsReceived: 0,
+      accountId: "acc-tfsa",
+      currency: "CAD",
+      priceCAD: 40,
+      avgCostCAD: 30,
+      dividendsReceivedCAD: 0,
+      historyCAD: [38, 40],
+      ...over,
+    }) as Holding;
+
+  test("a ticker held in two accounts appears once, tagged with both", () => {
+    const rows = consolidateHoldings([
+      lot({ id: "a", accountId: "acc-tfsa" }),
+      lot({ id: "b", accountId: "acc-rrsp" }),
+    ]);
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].accountIds, ["acc-tfsa", "acc-rrsp"]);
+    assert.equal(rows[0].lots.length, 2, "the per-account detail is kept");
+  });
+
+  test("shares, cost and dividends are the combined totals", () => {
+    const rows = consolidateHoldings([
+      lot({ id: "a", shares: 10, avgCostCAD: 30, dividendsReceivedCAD: 5 }),
+      lot({ id: "b", accountId: "acc-rrsp", shares: 30, avgCostCAD: 50, dividendsReceivedCAD: 7 }),
+    ]);
+    const [r] = rows;
+    assert.equal(r.shares, 40);
+    assert.equal(r.costBasis, 10 * 30 + 30 * 50);
+    assert.equal(r.avgCostCAD, 45, "share-weighted, not the mean of 30 and 50");
+    assert.equal(r.marketValue, 40 * 40);
+    assert.equal(r.totalDividends, 12);
+    assert.equal(r.gain, 1600 - 1800);
+    assert.equal(r.totalReturn, -200 + 12);
+  });
+
+  test("MWRR reflects the pooled position, not one account's", () => {
+    const pooled = consolidateHoldings([
+      lot({ id: "a", shares: 10, avgCostCAD: 20 }),
+      lot({ id: "b", accountId: "acc-rrsp", shares: 10, avgCostCAD: 60 }),
+    ])[0];
+    // Pooled basis 800 against 800 of value is a flat return, even though one
+    // account doubled and the other lost a third.
+    assert.equal(pooled.costBasis, 800);
+    assert.equal(pooled.marketValue, 800);
+    assert.equal(Math.round(pooled.mwrr), 0);
+  });
+
+  test("weights are shares of the whole portfolio and sum to 100", () => {
+    const rows = consolidateHoldings([
+      lot({ id: "a", ticker: "XEQT", shares: 10 }),
+      lot({ id: "b", ticker: "XEQT", accountId: "acc-rrsp", shares: 10 }),
+      lot({ id: "c", ticker: "VFV", shares: 20 }),
+    ]);
+    assert.equal(rows.length, 2);
+    assert.equal(Math.round(rows.reduce((s, r) => s + r.weightPct, 0)), 100);
+  });
+
+  test("differing case in the ticker is still one security", () => {
+    const rows = consolidateHoldings([
+      lot({ id: "a", ticker: "xeqt" }),
+      lot({ id: "b", ticker: "XEQT", accountId: "acc-rrsp" }),
+    ]);
+    assert.equal(rows.length, 1);
+  });
+
+  test("an unpriced lot does not drag the price to zero", () => {
+    const rows = consolidateHoldings([
+      lot({ id: "a", priceCAD: 0, price: 0 }),
+      lot({ id: "b", accountId: "acc-rrsp", priceCAD: 40 }),
+    ]);
+    assert.equal(rows[0].priceCAD, 40);
   });
 });

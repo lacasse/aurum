@@ -28,7 +28,23 @@ export type TransactionInput = Omit<Transaction, "id">;
 export type RecurringInput = Omit<RecurringRule, "id" | "nextDate"> & {
   nextDate?: string;
 };
-export type HoldingInput = Omit<Holding, "id" | "history" | "historyCAD" | "priceCAD" | "avgCostCAD" | "dividendsReceivedCAD">;
+export type HoldingInput = Omit<
+  Holding,
+  "id" | "history" | "historyCAD" | "priceCAD" | "avgCostCAD" | "dividendsReceivedCAD"
+> & {
+  /*
+   * What the position actually cost in CAD, when that is known exactly.
+   *
+   * Current value should be converted at today's rate, but cost basis should
+   * not: a US position bought in 2024 cost the CAD that left the account then,
+   * not what it would cost today. Brokerage exports carry that figure, so when
+   * one is imported it is kept verbatim instead of being re-derived from the
+   * live rate. Omitted for positions entered by hand, which fall back to
+   * converting at the current rate.
+   */
+  avgCostCADOverride?: number;
+  dividendsReceivedCADOverride?: number;
+};
 export type AccountInput = {
   name: string;
   institution: string;
@@ -164,17 +180,31 @@ function toCad(value: number, currency: string, rate: number): number {
 
 /** Compute CAD fields for a holding given the current FX rate. */
 function computeCadFields(
-  h: Pick<Holding, "price" | "avgCost" | "dividendsReceived" | "history" | "currency">,
+  h: Pick<Holding, "price" | "avgCost" | "dividendsReceived" | "history" | "currency"> & {
+    avgCostCADOverride?: number;
+    dividendsReceivedCADOverride?: number;
+  },
   rate: number,
 ) {
   const isUSD = h.currency === "USD";
+  const convert = (v: number) => Math.round(v * rate * 100) / 100;
   return {
-    priceCAD: isUSD ? Math.round(h.price * rate * 100) / 100 : h.price,
-    avgCostCAD: isUSD ? Math.round(h.avgCost * rate * 100) / 100 : h.avgCost,
-    dividendsReceivedCAD: isUSD
-      ? Math.round(h.dividendsReceived * rate * 100) / 100
-      : h.dividendsReceived,
-    historyCAD: isUSD ? h.history.map((v) => Math.round(v * rate * 100) / 100) : h.history,
+    priceCAD: isUSD ? convert(h.price) : h.price,
+    // An imported cost basis is the rate that was actually paid, so it beats
+    // re-converting at today's rate. Only used when one was supplied.
+    avgCostCAD:
+      h.avgCostCADOverride != null && h.avgCostCADOverride > 0
+        ? Math.round(h.avgCostCADOverride * 100) / 100
+        : isUSD
+          ? convert(h.avgCost)
+          : h.avgCost,
+    dividendsReceivedCAD:
+      h.dividendsReceivedCADOverride != null && h.dividendsReceivedCADOverride > 0
+        ? Math.round(h.dividendsReceivedCADOverride * 100) / 100
+        : isUSD
+          ? convert(h.dividendsReceived)
+          : h.dividendsReceived,
+    historyCAD: isUSD ? h.history.map(convert) : h.history,
   };
 }
 
@@ -332,14 +362,14 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
 
       addHolding: (input) => {
         const rate = get().usdCadRate;
-        const cadFields = computeCadFields(
-          { ...input, history: synthHistory(input.ticker, input.price) },
-          rate,
-        );
+        const history = synthHistory(input.ticker, input.price);
+        const cadFields = computeCadFields({ ...input, history }, rate);
+        // The overrides feed computeCadFields; they are not part of a Holding.
+        const { avgCostCADOverride: _a, dividendsReceivedCADOverride: _d, ...rest } = input;
         const holding: Holding = {
-          ...input,
+          ...rest,
           id: uid(),
-          history: synthHistory(input.ticker, input.price),
+          history,
           ...cadFields,
         };
         set((s) => ({ holdings: [...s.holdings, holding] }));
@@ -354,11 +384,9 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
             if (h.id !== id) return h;
             const history = h.history.slice();
             if (history.length > 0) history[history.length - 1] = input.price;
-            const cadFields = computeCadFields(
-              { ...h, ...input, history },
-              rate,
-            );
-            updated = { ...h, ...input, history, ...cadFields };
+            const cadFields = computeCadFields({ ...h, ...input, history }, rate);
+            const { avgCostCADOverride: _a, dividendsReceivedCADOverride: _d, ...rest } = input;
+            updated = { ...h, ...rest, history, ...cadFields };
             return updated;
           }),
         }));
