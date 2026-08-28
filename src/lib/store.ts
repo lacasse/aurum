@@ -7,8 +7,9 @@ import {
   FinanceData,
   Holding,
   MonthlySnapshot,
+  RecurringRule,
   Transaction,
-  isLiability,
+  balanceDelta,
 } from "./types";
 import { generateSampleData } from "./sample";
 import { HISTORY_MONTHS } from "./types";
@@ -23,12 +24,17 @@ export function uid(): string {
 }
 
 export type TransactionInput = Omit<Transaction, "id">;
+/** A rule as the form supplies it; the store assigns the id and first due date. */
+export type RecurringInput = Omit<RecurringRule, "id" | "nextDate"> & {
+  nextDate?: string;
+};
 export type HoldingInput = Omit<Holding, "id" | "history" | "historyCAD" | "priceCAD" | "avgCostCAD" | "dividendsReceivedCAD">;
 export type AccountInput = {
   name: string;
   institution: string;
   kind: Account["kind"];
   balance: number;
+  registration?: Account["registration"];
 };
 
 interface FinanceStore extends FinanceData {
@@ -47,6 +53,16 @@ interface FinanceStore extends FinanceData {
   addAccount: (input: AccountInput) => void;
   updateAccount: (id: string, input: AccountInput) => void;
   deleteAccount: (id: string) => void;
+  /**
+   * Move an investment account's uninvested cash.
+   *
+   * Buying securities converts cash into holdings *inside the same account*,
+   * so the account's total value — and net worth — must not change. Holdings
+   * are valued separately from balances, so without this the money would be
+   * counted twice: once as cash sitting in the account and again as the
+   * position it bought.
+   */
+  adjustAccountCash: (accountId: string, delta: number) => void;
   addHolding: (input: HoldingInput) => void;
   updateHolding: (id: string, input: HoldingInput) => void;
   deleteHolding: (id: string) => void;
@@ -56,6 +72,11 @@ interface FinanceStore extends FinanceData {
   renameCategory: (oldName: string, newName: string) => boolean;
   /** Deletes a category, its budget, and moves its transactions to "Other". */
   deleteCategory: (name: string) => void;
+  /** Templates that post transactions on a schedule. */
+  recurring: RecurringRule[];
+  addRecurring: (input: RecurringInput) => void;
+  updateRecurring: (id: string, input: RecurringInput) => void;
+  deleteRecurring: (id: string) => void;
   /**
    * Whether the seeded demo rows are still in the database. False until the
    * first load from the server, so the sidebar never offers to delete demo
@@ -71,14 +92,23 @@ interface FinanceStore extends FinanceData {
   saveSnapshots: (snapshots: MonthlySnapshot[]) => Promise<void>;
 }
 
-/** Apply a transaction's effect on its account balance. sign=-1 reverts it. */
+/**
+ * Apply a transaction to both accounts it touches. sign=-1 reverts it.
+ * Mirrors `applyTxnEffect` in src/db/repo.ts so the optimistic update matches
+ * what the server will come back with.
+ */
 function applyTxn(accounts: Account[], txn: Transaction, sign: 1 | -1): Account[] {
   return accounts.map((acc) => {
-    if (acc.id !== txn.accountId) return acc;
-    const liability = isLiability(acc.kind);
-    let delta = txn.type === "income" ? txn.amount : -txn.amount;
-    if (liability) delta = -delta; // paying with credit increases what you owe
-    const balance = round2(acc.balance + delta * sign);
+    const side =
+      acc.id === txn.sourceAccountId
+        ? ("source" as const)
+        : acc.id === txn.destinationAccountId
+          ? ("destination" as const)
+          : null;
+    if (!side) return acc;
+    const balance = round2(
+      acc.balance + balanceDelta(acc.kind, side, txn.amount) * sign,
+    );
     const history = acc.history.slice();
     if (history.length > 0) {
       history[history.length - 1] = { ...history[history.length - 1], value: balance };
@@ -249,6 +279,7 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
           kind: input.kind,
           balance: input.balance,
           history: [{ month: currentMonthKey(), value: input.balance }],
+          registration: input.registration,
         };
         set((s) => ({ accounts: [...s.accounts, account] }));
         api.createAccount(account).catch(report);
@@ -265,6 +296,7 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
               institution: input.institution,
               kind: input.kind,
               balance: input.balance,
+              registration: input.registration,
             });
             return updated;
           }),
@@ -275,6 +307,27 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
       deleteAccount: (id) => {
         set((s) => ({ accounts: s.accounts.filter((a) => a.id !== id) }));
         api.deleteAccount(id).catch(report);
+      },
+
+      adjustAccountCash: (accountId, delta) => {
+        if (!accountId || !Number.isFinite(delta) || delta === 0) return;
+        let updated: Account | undefined;
+        set((s) => ({
+          accounts: s.accounts.map((a) => {
+            if (a.id !== accountId) return a;
+            const balance = round2(a.balance + delta);
+            const history = a.history.slice();
+            if (history.length > 0) {
+              history[history.length - 1] = {
+                ...history[history.length - 1],
+                value: balance,
+              };
+            }
+            updated = { ...a, balance, history };
+            return updated;
+          }),
+        }));
+        if (updated) api.updateAccount(updated).catch(report);
       },
 
       addHolding: (input) => {
@@ -397,6 +450,43 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
           };
         });
         api.deleteCategory(name).catch(report);
+      },
+
+      addRecurring: (input) => {
+        const rule: RecurringRule = {
+          ...input,
+          id: uid(),
+          nextDate: input.nextDate ?? input.startDate,
+        };
+        set((s) => ({ recurring: [...s.recurring, rule] }));
+        // The server posts any occurrences the rule already owes, so take the
+        // state it returns rather than assuming the rule changes nothing.
+        api
+          .createRecurring(rule)
+          .then((data) => set({ ...data }))
+          .catch(report);
+      },
+
+      updateRecurring: (id, input) => {
+        let updated: RecurringRule | undefined;
+        set((s) => ({
+          recurring: s.recurring.map((r) => {
+            if (r.id !== id) return r;
+            updated = { ...r, ...input, id, nextDate: input.nextDate ?? r.nextDate };
+            return updated;
+          }),
+        }));
+        if (updated) {
+          api
+            .updateRecurring(updated)
+            .then((data) => set({ ...data }))
+            .catch(report);
+        }
+      },
+
+      deleteRecurring: (id) => {
+        set((s) => ({ recurring: s.recurring.filter((r) => r.id !== id) }));
+        api.deleteRecurring(id).catch(report);
       },
 
       deleteDemo: async () => {

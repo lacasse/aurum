@@ -14,13 +14,15 @@
 import { z } from "zod";
 import {
   ACCOUNT_KINDS,
-  ACCOUNT_TYPES,
   ASSET_CLASSES,
   CURRENCIES,
+  RECURRENCE_FREQUENCIES,
+  REGISTRATIONS,
   type AccountKind,
-  type AccountType,
   type AssetClass,
   type Currency,
+  type RecurrenceFrequency,
+  type Registration,
 } from "./types";
 import { roundMoney } from "./money";
 
@@ -86,6 +88,12 @@ export const monthlyPointSchema = z.object({
 /* Entities                                                            */
 /* ------------------------------------------------------------------ */
 
+/** An optional account reference: absent, or a non-blank id. */
+const optionalAccountId = z
+  .unknown()
+  .optional()
+  .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined));
+
 export const accountSchema = z.object({
   id: requiredString,
   name: requiredString,
@@ -93,23 +101,55 @@ export const accountSchema = z.object({
   kind: enumWithDefault<AccountKind>(ACCOUNT_KINDS, "checking"),
   balance: moneyOrZero,
   history: z.array(monthlyPointSchema).catch([]),
+  registration: z
+    .enum(REGISTRATIONS as unknown as [Registration, ...Registration[]])
+    .optional()
+    .catch(undefined),
 });
 
-export const transactionSchema = z.object({
-  id: requiredString,
-  date: z.string().regex(DATE, "date must be YYYY-MM-DD"),
-  type: z.enum(["income", "expense"]),
-  amount: positiveNumber.transform(roundMoney),
-  category: coercedString("Other"),
-  accountId: coercedString(""),
-  payee: trimmedString(""),
-  // `.optional()` is required: in Zod 4 a bare `z.unknown()` key still
-  // rejects a missing property, which would refuse every note-less transaction.
-  note: z
-    .unknown()
-    .optional()
-    .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined)),
-});
+/**
+ * Every transaction must touch at least one of your accounts, and the type
+ * decides which side. Rejecting the mismatched shapes here keeps the balance
+ * arithmetic in the repository total: it never has to ask "what if neither
+ * side is set?".
+ */
+export const transactionSchema = z
+  .object({
+    id: requiredString,
+    date: z.string().regex(DATE, "date must be YYYY-MM-DD"),
+    type: z.enum(["income", "expense", "transfer"]),
+    amount: positiveNumber.transform(roundMoney),
+    category: coercedString("Other"),
+    sourceAccountId: optionalAccountId,
+    destinationAccountId: optionalAccountId,
+    payee: trimmedString(""),
+    // `.optional()` is required: in Zod 4 a bare `z.unknown()` key still
+    // rejects a missing property, which would refuse every note-less transaction.
+    note: z
+      .unknown()
+      .optional()
+      .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined)),
+    recurringId: optionalAccountId,
+  })
+  .superRefine((t, ctx) => {
+    const issue = (message: string, path: string) =>
+      ctx.addIssue({ code: "custom", message, path: [path] });
+    if (t.type === "expense" && !t.sourceAccountId) {
+      issue("an expense needs the account the money left", "sourceAccountId");
+    }
+    if (t.type === "income" && !t.destinationAccountId) {
+      issue("income needs the account the money arrived in", "destinationAccountId");
+    }
+    if (t.type === "transfer") {
+      if (!t.sourceAccountId) issue("a transfer needs a source account", "sourceAccountId");
+      if (!t.destinationAccountId) {
+        issue("a transfer needs a destination account", "destinationAccountId");
+      }
+      if (t.sourceAccountId && t.sourceAccountId === t.destinationAccountId) {
+        issue("a transfer must move money between two different accounts", "destinationAccountId");
+      }
+    }
+  });
 
 export const holdingSchema = z
   .object({
@@ -123,7 +163,7 @@ export const holdingSchema = z
     price: positiveNumber,
     history: numberArray,
     dividendsReceived: nonNegativeNumber,
-    accountType: enumWithDefault<AccountType>(ACCOUNT_TYPES, "non-registered"),
+    accountId: requiredString,
     currency: enumWithDefault<Currency>(CURRENCIES, "USD"),
     priceCAD: optionalNumber,
     avgCostCAD: optionalNumber,
@@ -143,7 +183,7 @@ export const holdingSchema = z
     price: h.price,
     history: h.history,
     dividendsReceived: h.dividendsReceived,
-    accountType: h.accountType,
+    accountId: h.accountId,
     currency: h.currency,
     priceCAD: h.priceCAD ?? h.price,
     avgCostCAD: h.avgCostCAD ?? h.avgCost,
@@ -175,6 +215,62 @@ export const snapshotsBodySchema = z.object({
 /* ------------------------------------------------------------------ */
 /* Smaller route bodies                                                */
 /* ------------------------------------------------------------------ */
+
+/**
+ * A recurring rule is a transaction template plus a schedule, so it carries
+ * the same source/destination rules. `nextDate` defaults to the start date:
+ * a new rule has not posted anything yet.
+ */
+export const recurringRuleSchema = z
+  .object({
+    id: requiredString,
+    type: z.enum(["income", "expense", "transfer"]),
+    amount: positiveNumber.transform(roundMoney),
+    category: coercedString("Other"),
+    sourceAccountId: optionalAccountId,
+    destinationAccountId: optionalAccountId,
+    payee: trimmedString(""),
+    note: z
+      .unknown()
+      .optional()
+      .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined)),
+    frequency: z.enum(
+      RECURRENCE_FREQUENCIES as unknown as [RecurrenceFrequency, ...RecurrenceFrequency[]],
+    ),
+    startDate: z.string().regex(DATE, "startDate must be YYYY-MM-DD"),
+    endDate: z
+      .unknown()
+      .optional()
+      .transform((v) => (typeof v === "string" && DATE.test(v) ? v : undefined)),
+    nextDate: z
+      .unknown()
+      .optional()
+      .transform((v) => (typeof v === "string" && DATE.test(v) ? v : undefined)),
+    active: z.coerce.boolean().catch(true),
+  })
+  .transform((r) => ({ ...r, nextDate: r.nextDate ?? r.startDate }))
+  .superRefine((r, ctx) => {
+    const issue = (message: string, path: string) =>
+      ctx.addIssue({ code: "custom", message, path: [path] });
+    if (r.type === "expense" && !r.sourceAccountId) {
+      issue("an expense needs the account the money leaves", "sourceAccountId");
+    }
+    if (r.type === "income" && !r.destinationAccountId) {
+      issue("income needs the account the money arrives in", "destinationAccountId");
+    }
+    if (r.type === "transfer") {
+      if (!r.sourceAccountId) issue("a transfer needs a source account", "sourceAccountId");
+      if (!r.destinationAccountId) {
+        issue("a transfer needs a destination account", "destinationAccountId");
+      }
+      if (r.sourceAccountId && r.sourceAccountId === r.destinationAccountId) {
+        issue("a transfer must move money between two different accounts", "destinationAccountId");
+      }
+    }
+    if (r.endDate && r.endDate < r.startDate) {
+      issue("the end date cannot precede the start date", "endDate");
+    }
+  });
 
 export const budgetSchema = z.object({
   category: requiredString,

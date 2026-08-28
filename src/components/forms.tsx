@@ -3,18 +3,28 @@
 import { useState } from "react";
 import { Check, Loader2, Plus, X } from "lucide-react";
 import {
+  ACCOUNT_KINDS,
   ACCOUNT_KIND_LABELS,
-  ACCOUNT_TYPES,
   ASSET_CLASSES,
   CURRENCIES,
+  RECURRENCE_FREQUENCIES,
+  RECURRENCE_LABELS,
+  REGISTRATIONS,
+  REGISTRATION_LABELS,
+  TRANSFER_CATEGORY,
   Account,
   AccountKind,
   AssetClass,
   Currency,
   Holding,
   INCOME_CATEGORIES,
+  RecurrenceFrequency,
+  RecurringRule,
+  Registration,
   Transaction,
   TxnType,
+  isInvestmentAccount,
+  supportsRegistration,
 } from "@/lib/types";
 import { todayISO } from "@/lib/format";
 import { useFinance } from "@/lib/store";
@@ -81,30 +91,56 @@ function TransactionFormInner({
   const [category, setCategory] = useState(
     initial?.category ?? firstCategory(initial?.type ?? "expense"),
   );
-  const [accountId, setAccountId] = useState(initial?.accountId ?? accounts[0]?.id ?? "");
+  const [sourceAccountId, setSourceAccountId] = useState(
+    initial?.sourceAccountId ?? accounts[0]?.id ?? "",
+  );
+  const [destinationAccountId, setDestinationAccountId] = useState(
+    initial?.destinationAccountId ?? accounts[0]?.id ?? "",
+  );
   const [payee, setPayee] = useState(initial?.payee ?? "");
   const [note, setNote] = useState(initial?.note ?? "");
   const [error, setError] = useState("");
 
   const switchType = (t: TxnType) => {
     setType(t);
-    if (!initial) setCategory(firstCategory(t));
+    if (initial) return;
+    setCategory(t === "transfer" ? TRANSFER_CATEGORY : firstCategory(t));
+    // A transfer needs two distinct accounts; nudge the destination off the
+    // source so the form does not open in an invalid state.
+    if (t === "transfer" && destinationAccountId === sourceAccountId) {
+      const other = accounts.find((a) => a.id !== sourceAccountId);
+      if (other) setDestinationAccountId(other.id);
+    }
   };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const amt = Number(amount);
-    if (!payee.trim()) return setError("Please enter a payee or source.");
     if (!Number.isFinite(amt) || amt <= 0)
       return setError("Amount must be greater than zero.");
-    if (!accountId) return setError("Please choose an account.");
+    if (type !== "transfer" && !payee.trim())
+      return setError("Please enter a payee or source.");
+    if (type !== "income" && !sourceAccountId)
+      return setError("Please choose the account the money came from.");
+    if (type !== "expense" && !destinationAccountId)
+      return setError("Please choose the account the money went to.");
+    if (type === "transfer" && sourceAccountId === destinationAccountId)
+      return setError("A transfer needs two different accounts.");
+
+    const source = accounts.find((a) => a.id === sourceAccountId);
+    const destination = accounts.find((a) => a.id === destinationAccountId);
     const payload = {
       date,
       type,
       amount: Math.round(amt * 100) / 100,
-      category,
-      accountId,
-      payee: payee.trim(),
+      category: type === "transfer" ? TRANSFER_CATEGORY : category,
+      sourceAccountId: type === "income" ? undefined : sourceAccountId,
+      destinationAccountId: type === "expense" ? undefined : destinationAccountId,
+      payee:
+        type === "transfer"
+          ? payee.trim() ||
+            `${source?.name ?? "Account"} → ${destination?.name ?? "Account"}`
+          : payee.trim(),
       note: note.trim() || undefined,
     };
     if (initial) updateTransaction(initial.id, payload);
@@ -112,10 +148,19 @@ function TransactionFormInner({
     onClose();
   };
 
+  const accountOptions = (exclude?: string) =>
+    accounts
+      .filter((a) => a.id !== exclude)
+      .map((a) => (
+        <option key={a.id} value={a.id}>
+          {a.name}
+        </option>
+      ));
+
   return (
     <form onSubmit={submit}>
-      <div className="mb-4 grid grid-cols-2 gap-2">
-        {(["expense", "income"] as TxnType[]).map((t) => (
+      <div className="mb-4 grid grid-cols-3 gap-2">
+        {(["expense", "income", "transfer"] as TxnType[]).map((t) => (
           <button
             key={t}
             type="button"
@@ -125,7 +170,9 @@ function TransactionFormInner({
               (type === t
                 ? t === "income"
                   ? "border-positive/60 bg-positive/10 text-positive"
-                  : "border-negative/60 bg-negative/10 text-negative"
+                  : t === "transfer"
+                    ? "border-brand/60 bg-brand/10 text-brand"
+                    : "border-negative/60 bg-negative/10 text-negative"
                 : "border-line bg-elevated text-ink-dim hover:text-ink")
             }
           >
@@ -149,31 +196,66 @@ function TransactionFormInner({
         <Field label="Date">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
-        <Field label={type === "income" ? "Source" : "Payee"}>
-          <Input
-            placeholder={type === "income" ? "Employer, client…" : "Merchant…"}
-            value={payee}
-            onChange={(e) => setPayee(e.target.value)}
-          />
-        </Field>
-        <Field label="Category">
-          <Select value={category} onChange={(e) => setCategory(e.target.value)}>
-            {optionsFor(type).map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Account" hint="Balance adjusts automatically">
-          <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
+
+        {/* Where the money came from */}
+        {type === "income" ? (
+          <Field label="From" hint="Outside your accounts">
+            <Input
+              placeholder="Employer, client…"
+              value={payee}
+              onChange={(e) => setPayee(e.target.value)}
+            />
+          </Field>
+        ) : (
+          <Field label="From account" hint="Balance adjusts automatically">
+            <Select
+              value={sourceAccountId}
+              onChange={(e) => setSourceAccountId(e.target.value)}
+            >
+              {accountOptions()}
+            </Select>
+          </Field>
+        )}
+
+        {/* Where it went */}
+        {type === "expense" ? (
+          <Field label="To" hint="Outside your accounts">
+            <Input
+              placeholder="Merchant…"
+              value={payee}
+              onChange={(e) => setPayee(e.target.value)}
+            />
+          </Field>
+        ) : (
+          <Field label="To account" hint="Balance adjusts automatically">
+            <Select
+              value={destinationAccountId}
+              onChange={(e) => setDestinationAccountId(e.target.value)}
+            >
+              {accountOptions(type === "transfer" ? sourceAccountId : undefined)}
+            </Select>
+          </Field>
+        )}
+
+        {type === "transfer" ? (
+          <Field label="Description (optional)" hint="Defaults to “From → To”">
+            <Input
+              placeholder="TFSA contribution"
+              value={payee}
+              onChange={(e) => setPayee(e.target.value)}
+            />
+          </Field>
+        ) : (
+          <Field label="Category">
+            <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+              {optionsFor(type).map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
         <Field label="Note (optional)">
           <Input
             placeholder="Anything worth remembering"
@@ -183,6 +265,12 @@ function TransactionFormInner({
         </Field>
       </div>
 
+      {type === "transfer" ? (
+        <p className="mt-3 text-[11px] text-ink-faint">
+          Transfers move money between your own accounts, so they are left out
+          of income, spending and budgets.
+        </p>
+      ) : null}
       {error ? <p className="mt-3 text-xs text-negative">{error}</p> : null}
       <FormActions onCancel={onClose} label={initial ? "Save changes" : "Add transaction"} />
     </form>
@@ -220,6 +308,9 @@ function AccountFormInner({
   const [name, setName] = useState(initial?.name ?? "");
   const [institution, setInstitution] = useState(initial?.institution ?? "");
   const [kind, setKind] = useState<AccountKind>(initial?.kind ?? "checking");
+  const [registration, setRegistration] = useState<Registration>(
+    initial?.registration ?? "non-registered",
+  );
   const [balance, setBalance] = useState(initial ? String(initial.balance) : "");
   const [error, setError] = useState("");
 
@@ -233,6 +324,9 @@ function AccountFormInner({
       institution: institution.trim() || "—",
       kind,
       balance: Math.round(bal * 100) / 100,
+      // Debts and property are never sheltered, so the field is not stored
+      // for them at all rather than being stored as a meaningless default.
+      registration: supportsRegistration(kind) ? registration : undefined,
     };
     if (initial) updateAccount(initial.id, payload);
     else addAccount(payload);
@@ -259,16 +353,34 @@ function AccountFormInner({
         </Field>
         <Field label="Type">
           <Select value={kind} onChange={(e) => setKind(e.target.value as AccountKind)}>
-            {(Object.keys(ACCOUNT_KIND_LABELS) as AccountKind[]).map((k) => (
+            {ACCOUNT_KINDS.map((k) => (
               <option key={k} value={k}>
                 {ACCOUNT_KIND_LABELS[k]}
               </option>
             ))}
           </Select>
         </Field>
+        {supportsRegistration(kind) ? (
+          <Field label="Registration" hint="Tax treatment of the account">
+            <Select
+              value={registration}
+              onChange={(e) => setRegistration(e.target.value as Registration)}
+            >
+              {REGISTRATIONS.map((r) => (
+                <option key={r} value={r}>
+                  {REGISTRATION_LABELS[r]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
         <Field
-          label="Current balance"
-          hint="For credit cards & loans, enter the amount owed"
+          label={isInvestmentAccount(kind) ? "Cash balance" : "Current balance"}
+          hint={
+            isInvestmentAccount(kind)
+              ? "Uninvested cash only — holdings are valued separately"
+              : "For credit cards & loans, enter the amount owed"
+          }
         >
           <Input
             type="number"
@@ -314,6 +426,8 @@ function HoldingFormInner({
   const addHolding = useFinance((s) => s.addHolding);
   const updateHolding = useFinance((s) => s.updateHolding);
   const usdCadRate = useFinance((s) => s.usdCadRate);
+  const accounts = useFinance((s) => s.accounts);
+  const investmentAccounts = accounts.filter((a) => isInvestmentAccount(a.kind));
 
   const [ticker, setTicker] = useState(initial?.ticker ?? "");
   const [name, setName] = useState(initial?.name ?? "");
@@ -327,7 +441,9 @@ function HoldingFormInner({
   const [dividendsReceived, setDividendsReceived] = useState(
     initial ? String(initial.dividendsReceived ?? 0) : "0",
   );
-  const [accountType, setAccountType] = useState(initial?.accountType ?? "non-registered");
+  const [accountId, setAccountId] = useState(
+    initial?.accountId ?? investmentAccounts[0]?.id ?? "",
+  );
   const [currency, setCurrency] = useState(initial?.currency ?? "USD");
   const [error, setError] = useState("");
 
@@ -351,6 +467,10 @@ function HoldingFormInner({
       return setError("Average cost must be greater than zero.");
     if (!Number.isFinite(px) || px <= 0)
       return setError("Price must be greater than zero.");
+    if (!accountId)
+      return setError(
+        "Add an investment account first — every holding belongs to one.",
+      );
     const payload = {
       ticker: ticker.trim().toUpperCase(),
       name: name.trim(),
@@ -360,7 +480,7 @@ function HoldingFormInner({
       avgCost: cost,
       price: px,
       dividendsReceived: Number.isFinite(divs) ? Math.max(0, divs) : 0,
-      accountType,
+      accountId,
       currency,
     };
     if (initial) updateHolding(initial.id, payload);
@@ -471,14 +591,25 @@ function HoldingFormInner({
             placeholder="0.00"
           />
         </Field>
-        <Field label="Account type">
-          <Select
-            value={accountType}
-            onChange={(e) => setAccountType(e.target.value as Holding["accountType"])}
-          >
-            {ACCOUNT_TYPES.map((a) => (
-              <option key={a} value={a}>
-                {a}
+        <Field
+          label="Account"
+          hint={
+            investmentAccounts.length === 0
+              ? "No investment accounts yet — add one on the Accounts page"
+              : "Its registration decides the tax treatment"
+          }
+        >
+          <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            {investmentAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+                {/* Only worth appending when it adds something the name does
+                    not already say — an account called "TFSA" needs no suffix. */}
+                {a.registration &&
+                a.registration !== "non-registered" &&
+                a.registration !== a.name
+                  ? ` · ${a.registration}`
+                  : ""}
               </option>
             ))}
           </Select>
@@ -496,6 +627,12 @@ function HoldingFormInner({
           </Select>
         </Field>
       </div>
+      <p className="mt-3 text-[11px] text-ink-faint">
+        This records a position you already hold, so the account&rsquo;s cash
+        balance is left alone. Use{" "}
+        <span className="text-ink-dim">Import trades</span>
+        {" "}to enter a purchase, which pays for the shares out of that cash.
+      </p>
       {error ? <p className="mt-3 text-xs text-negative">{error}</p> : null}
       <FormActions onCancel={onClose} label={initial ? "Save changes" : "Add holding"} />
     </form>
@@ -513,7 +650,7 @@ interface TradeRow {
   ticker: string;
   quantity: string;
   price: string;
-  accountType: string;
+  accountId: string;
   currency: string;
   cadAmount: string; // CAD equivalent for USD trades
 }
@@ -526,7 +663,7 @@ function emptyRow(): TradeRow {
     ticker: "",
     quantity: "",
     price: "",
-    accountType: "non-registered",
+    accountId: "",
     currency: "CAD",
     cadAmount: "",
   };
@@ -579,8 +716,14 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
   const addHolding = useFinance((s) => s.addHolding);
   const updateHolding = useFinance((s) => s.updateHolding);
   const usdCadRate = useFinance((s) => s.usdCadRate);
+  const accounts = useFinance((s) => s.accounts);
+  const adjustAccountCash = useFinance((s) => s.adjustAccountCash);
+  const investmentAccounts = accounts.filter((a) => isInvestmentAccount(a.kind));
+  const defaultAccountId = investmentAccounts[0]?.id ?? "";
 
-  const [rows, setRows] = useState<TradeRow[]>([emptyRow()]);
+  const [rows, setRows] = useState<TradeRow[]>([
+    { ...emptyRow(), accountId: defaultAccountId },
+  ]);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
 
@@ -630,6 +773,9 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
     setOk("");
     let created = 0;
     let updated = 0;
+    // Netted per account and applied once at the end, so a batch that buys and
+    // sells in the same account does not race itself through the API.
+    const cashDeltas = new Map<string, number>();
 
     for (const row of rows) {
       const ticker = row.ticker.trim().toUpperCase();
@@ -652,6 +798,12 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
           return;
         }
         const costCad = isUsd ? Number(row.cadAmount) || qty * px * usdCadRate : qty * px;
+        // The cash that paid for the shares leaves the account's balance; the
+        // shares themselves are valued from the holding.
+        cashDeltas.set(
+          row.accountId,
+          (cashDeltas.get(row.accountId) ?? 0) - Math.abs(costCad),
+        );
         const existing = holdings.find(
           (h) => h.ticker.toUpperCase() === ticker,
         );
@@ -665,7 +817,7 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
             ...existing,
             shares: Math.round(newShares * 1e8) / 1e8,
             avgCost: Math.round(newAvgCost * 10000) / 10000,
-            accountType: row.accountType as Holding["accountType"],
+            accountId: row.accountId,
             currency: row.currency as Holding["currency"],
           });
           updated++;
@@ -679,7 +831,7 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
             avgCost: Math.round((costCad / qty) * 10000) / 10000,
             price: px,
             dividendsReceived: 0,
-            accountType: row.accountType as Holding["accountType"],
+            accountId: row.accountId,
             currency: row.currency as Holding["currency"],
           });
           created++;
@@ -703,6 +855,13 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
           return;
         }
         const newShares = existing.shares - qty;
+        const proceedsCad = isUsd
+          ? Number(row.cadAmount) || qty * px * usdCadRate
+          : qty * px;
+        cashDeltas.set(
+          row.accountId,
+          (cashDeltas.get(row.accountId) ?? 0) + Math.abs(proceedsCad),
+        );
         updateHolding(existing.id, {
           ...existing,
           shares: Math.round(newShares * 1e8) / 1e8,
@@ -718,6 +877,10 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
           (h) => h.ticker.toUpperCase() === ticker,
         );
         if (existing) {
+          cashDeltas.set(
+            row.accountId,
+            (cashDeltas.get(row.accountId) ?? 0) + cadAmount,
+          );
           updateHolding(existing.id, {
             ...existing,
             dividendsReceived: existing.dividendsReceived + cadAmount,
@@ -730,12 +893,19 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
       }
     }
 
+    // Only applied once every row has validated: an early `return` above
+    // aborts the whole batch, and the cash must not move for a batch that
+    // never posted its trades.
+    for (const [accountId, delta] of cashDeltas) {
+      adjustAccountCash(accountId, Math.round(delta * 100) / 100);
+    }
+
     setOk(
       `Processed ${created + updated} trade${created + updated !== 1 ? "s" : ""}` +
         (created > 0 ? ` (${created} new)` : "") +
         (updated > 0 ? ` (${updated} updated)` : ""),
     );
-    setRows([emptyRow()]);
+    setRows([{ ...emptyRow(), accountId: defaultAccountId }]);
     onComplete?.();
   };
 
@@ -800,12 +970,12 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
           </Field>
           <Field label={idx === 0 ? "Account" : undefined}>
             <Select
-              value={row.accountType}
-              onChange={(e) => update(row.id, "accountType", e.target.value)}
+              value={row.accountId}
+              onChange={(e) => update(row.id, "accountId", e.target.value)}
             >
-              {ACCOUNT_TYPES.map((a) => (
-                <option key={a} value={a}>
-                  {a}
+              {investmentAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
                 </option>
               ))}
             </Select>
@@ -846,7 +1016,7 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
       {ok && <p className="text-xs text-positive">{ok}</p>}
 
       <div className="flex items-center gap-2">
-        <Button type="button" variant="secondary" onClick={() => setRows((prev) => [...prev, emptyRow()])}>
+        <Button type="button" variant="secondary" onClick={() => setRows((prev) => [...prev, { ...emptyRow(), accountId: defaultAccountId }])}>
           <Plus size={14} /> Add row
         </Button>
         <Button type="button" onClick={process}>
@@ -858,6 +1028,281 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
 }
 
 /* ---------------- Confirm delete ---------------- */
+
+/* ---------------- Recurring rule ---------------- */
+
+export function RecurringForm({
+  open,
+  onClose,
+  initial,
+}: {
+  open: boolean;
+  onClose: () => void;
+  initial?: RecurringRule | null;
+}) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={initial ? "Edit recurring transaction" : "New recurring transaction"}
+    >
+      <RecurringFormInner
+        key={initial?.id ?? "new"}
+        initial={initial ?? null}
+        onClose={onClose}
+      />
+    </Modal>
+  );
+}
+
+function RecurringFormInner({
+  initial,
+  onClose,
+}: {
+  initial: RecurringRule | null;
+  onClose: () => void;
+}) {
+  const accounts = useFinance((s) => s.accounts);
+  const addRecurring = useFinance((s) => s.addRecurring);
+  const updateRecurring = useFinance((s) => s.updateRecurring);
+  const userCategories = useFinance((s) => s.categories);
+
+  const firstCategory = (t: TxnType) =>
+    t === "income" ? INCOME_CATEGORIES[0] : userCategories[0] ?? "Other";
+  const optionsFor = (t: TxnType): readonly string[] =>
+    t === "income" ? INCOME_CATEGORIES : userCategories;
+
+  const [type, setType] = useState<TxnType>(initial?.type ?? "expense");
+  const [amount, setAmount] = useState(initial ? String(initial.amount) : "");
+  const [category, setCategory] = useState(
+    initial?.category ?? firstCategory(initial?.type ?? "expense"),
+  );
+  const [sourceAccountId, setSourceAccountId] = useState(
+    initial?.sourceAccountId ?? accounts[0]?.id ?? "",
+  );
+  const [destinationAccountId, setDestinationAccountId] = useState(
+    initial?.destinationAccountId ?? accounts[0]?.id ?? "",
+  );
+  const [payee, setPayee] = useState(initial?.payee ?? "");
+  const [note, setNote] = useState(initial?.note ?? "");
+  const [frequency, setFrequency] = useState<RecurrenceFrequency>(
+    initial?.frequency ?? "monthly",
+  );
+  const [startDate, setStartDate] = useState(initial?.startDate ?? todayISO());
+  const [endDate, setEndDate] = useState(initial?.endDate ?? "");
+  const [active, setActive] = useState(initial?.active ?? true);
+  const [error, setError] = useState("");
+
+  const switchType = (t: TxnType) => {
+    setType(t);
+    if (initial) return;
+    setCategory(t === "transfer" ? TRANSFER_CATEGORY : firstCategory(t));
+    if (t === "transfer" && destinationAccountId === sourceAccountId) {
+      const other = accounts.find((a) => a.id !== sourceAccountId);
+      if (other) setDestinationAccountId(other.id);
+    }
+  };
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt <= 0)
+      return setError("Amount must be greater than zero.");
+    if (type !== "transfer" && !payee.trim())
+      return setError("Please enter a payee or source.");
+    if (type !== "income" && !sourceAccountId)
+      return setError("Please choose the account the money comes from.");
+    if (type !== "expense" && !destinationAccountId)
+      return setError("Please choose the account the money goes to.");
+    if (type === "transfer" && sourceAccountId === destinationAccountId)
+      return setError("A transfer needs two different accounts.");
+    if (endDate && endDate < startDate)
+      return setError("The end date cannot be before the start date.");
+
+    const source = accounts.find((a) => a.id === sourceAccountId);
+    const destination = accounts.find((a) => a.id === destinationAccountId);
+    const payload = {
+      type,
+      amount: Math.round(amt * 100) / 100,
+      category: type === "transfer" ? TRANSFER_CATEGORY : category,
+      sourceAccountId: type === "income" ? undefined : sourceAccountId,
+      destinationAccountId: type === "expense" ? undefined : destinationAccountId,
+      payee:
+        type === "transfer"
+          ? payee.trim() ||
+            `${source?.name ?? "Account"} → ${destination?.name ?? "Account"}`
+          : payee.trim(),
+      note: note.trim() || undefined,
+      frequency,
+      startDate,
+      endDate: endDate || undefined,
+      active,
+    };
+    if (initial) updateRecurring(initial.id, payload);
+    else addRecurring(payload);
+    onClose();
+  };
+
+  const accountOptions = (exclude?: string) =>
+    accounts
+      .filter((a) => a.id !== exclude)
+      .map((a) => (
+        <option key={a.id} value={a.id}>
+          {a.name}
+        </option>
+      ));
+
+  return (
+    <form onSubmit={submit}>
+      <div className="mb-4 grid grid-cols-3 gap-2">
+        {(["expense", "income", "transfer"] as TxnType[]).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => switchType(t)}
+            className={
+              "rounded-lg border px-3 py-2 text-sm font-medium capitalize transition-colors " +
+              (type === t
+                ? t === "income"
+                  ? "border-positive/60 bg-positive/10 text-positive"
+                  : t === "transfer"
+                    ? "border-brand/60 bg-brand/10 text-brand"
+                    : "border-negative/60 bg-negative/10 text-negative"
+                : "border-line bg-elevated text-ink-dim hover:text-ink")
+            }
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Amount">
+          <Input
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="0.00"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            autoFocus
+          />
+        </Field>
+        <Field label="Repeats">
+          <Select
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value as RecurrenceFrequency)}
+          >
+            {RECURRENCE_FREQUENCIES.map((f) => (
+              <option key={f} value={f}>
+                {RECURRENCE_LABELS[f]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        {type === "income" ? (
+          <Field label="From" hint="Outside your accounts">
+            <Input
+              placeholder="Employer, client…"
+              value={payee}
+              onChange={(e) => setPayee(e.target.value)}
+            />
+          </Field>
+        ) : (
+          <Field label="From account">
+            <Select
+              value={sourceAccountId}
+              onChange={(e) => setSourceAccountId(e.target.value)}
+            >
+              {accountOptions()}
+            </Select>
+          </Field>
+        )}
+
+        {type === "expense" ? (
+          <Field label="To" hint="Outside your accounts">
+            <Input
+              placeholder="Landlord, utility…"
+              value={payee}
+              onChange={(e) => setPayee(e.target.value)}
+            />
+          </Field>
+        ) : (
+          <Field label="To account">
+            <Select
+              value={destinationAccountId}
+              onChange={(e) => setDestinationAccountId(e.target.value)}
+            >
+              {accountOptions(type === "transfer" ? sourceAccountId : undefined)}
+            </Select>
+          </Field>
+        )}
+
+        {type === "transfer" ? (
+          <Field label="Description (optional)" hint="Defaults to “From → To”">
+            <Input
+              placeholder="TFSA contribution"
+              value={payee}
+              onChange={(e) => setPayee(e.target.value)}
+            />
+          </Field>
+        ) : (
+          <Field label="Category">
+            <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+              {optionsFor(type).map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+
+        <Field
+          label="First payment"
+          hint="A past date posts the payments already due"
+        >
+          <Input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+        </Field>
+        <Field label="Ends (optional)" hint="Leave empty to repeat indefinitely">
+          <Input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
+        </Field>
+        <Field label="Note (optional)">
+          <Input
+            placeholder="Anything worth remembering"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </Field>
+      </div>
+
+      <label className="mt-4 flex items-center gap-2 text-sm text-ink-dim">
+        <input
+          type="checkbox"
+          checked={active}
+          onChange={(e) => setActive(e.target.checked)}
+          className="h-4 w-4 accent-brand"
+        />
+        Active — pause this to stop it posting without deleting it
+      </label>
+
+      {error ? <p className="mt-3 text-xs text-negative">{error}</p> : null}
+      <FormActions
+        onCancel={onClose}
+        label={initial ? "Save changes" : "Create recurring"}
+      />
+    </form>
+  );
+}
 
 export function ConfirmDelete({
   open,

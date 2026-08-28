@@ -32,6 +32,7 @@ import {
   suggestCategory,
   txnKey,
 } from "@/lib/csv";
+import { sidesFor } from "@/lib/types";
 import { fmtCAD } from "@/lib/format";
 
 type Step = "upload" | "review" | "done";
@@ -122,7 +123,7 @@ export default function ImportPage() {
         type: r.type,
         amount: r.amount,
         category: r.category,
-        accountId: effectiveAccountId,
+        ...sidesFor(r.type, effectiveAccountId),
         payee: r.payee.trim(),
         note: r.note,
       });
