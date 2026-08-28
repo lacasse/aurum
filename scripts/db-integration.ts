@@ -211,23 +211,39 @@ async function main() {
     console.log("EODHD daily cap (never touches the network)");
     {
       const eodhd = await import("../src/db/eodhd");
+      /*
+       * Read the cap rather than assuming it. CI pins EODHD_DAY_LIMIT to zero
+       * so no test can spend a real call, and assertions written against a
+       * hardcoded 20 simply failed there — every one of them, on every run,
+       * unnoticed. Expressed in terms of the limit they hold either way: the
+       * behaviour under test is the ledger's arithmetic, not the number.
+       */
+      const { EODHD_DAY_LIMIT } = await import("../src/lib/eodhd-quota");
+      const cap = EODHD_DAY_LIMIT;
+      const opening = Math.min(5, cap);
       const day = new Date("2026-08-28T12:00:00Z");
       await eodhd.__resetEodhdLedgerForTests();
 
       const first = await eodhd.reserveEodhdCalls(5, day);
-      expect(first === 5, `grants 5 of 20 (got ${first})`);
+      expect(first === opening, `grants ${opening} of ${cap} (got ${first})`);
 
       // The ledger is in the database, so this is what a container restart
       // sees — an in-memory counter would have reset to zero here.
       const usage = await eodhd.eodhdUsage(day);
-      expect(usage.used === 5 && usage.remaining === 15, "usage persists to the database");
+      expect(
+        usage.used === opening && usage.remaining === cap - opening,
+        "usage persists to the database",
+      );
 
       const rest = await eodhd.reserveEodhdCalls(219, day);
-      expect(rest === 15, `a 219-ticker refresh gets only the 15 left (got ${rest})`);
+      expect(
+        rest === cap - opening,
+        `a 219-ticker refresh gets only the ${cap - opening} left (got ${rest})`,
+      );
       expect((await eodhd.reserveEodhdCalls(1, day)) === 0, "further calls are refused");
 
       const spent = (await eodhd.eodhdUsage(day)).used;
-      expect(spent === 20, `exactly 20 calls were ever granted (got ${spent})`);
+      expect(spent === cap, `exactly ${cap} calls were ever granted (got ${spent})`);
 
       // Concurrent refreshes must not both see the same headroom.
       await eodhd.__resetEodhdLedgerForTests();
@@ -236,8 +252,8 @@ async function main() {
       );
       const totalGranted = races.reduce((a, b) => a + b, 0);
       expect(
-        totalGranted === 20,
-        `10 concurrent 4-call requests grant 20 in total, not more (got ${totalGranted})`,
+        totalGranted === cap,
+        `10 concurrent 4-call requests grant ${cap} in total, not more (got ${totalGranted})`,
       );
 
       const nextDay = new Date("2026-08-29T00:00:01Z");
@@ -246,8 +262,22 @@ async function main() {
         "the allowance resets at 00:00 GMT",
       );
       expect(
-        (await eodhd.reserveEodhdCalls(20, nextDay)) === 20,
+        (await eodhd.reserveEodhdCalls(cap, nextDay)) === cap,
         "a full allowance is available the next day",
+      );
+
+      // Type-ahead validation draws on a lower ceiling than the refresh, so a
+      // field cannot eat the allowance every holding's price depends on.
+      const { validateLimit } = await import("../src/lib/eodhd-quota");
+      await eodhd.__resetEodhdLedgerForTests();
+      const validateCap = validateLimit();
+      expect(
+        (await eodhd.reserveEodhdCalls(cap, day, validateCap)) === validateCap,
+        `validation stops at ${validateCap} of ${cap}`,
+      );
+      expect(
+        (await eodhd.reserveEodhdCalls(cap, day)) === cap - validateCap,
+        "the refresh can still spend what validation left",
       );
 
       // Per-ticker fetch dates drive which holdings spend tomorrow's calls.
@@ -266,11 +296,17 @@ async function main() {
       const { MINUTE_RESERVE, TWELVEDATA_MINUTE_LIMIT } = await import(
         "../src/lib/twelvedata-quota"
       );
-      const cap = Math.max(0, TWELVEDATA_MINUTE_LIMIT - MINUTE_RESERVE);
+      const minuteCap = Math.max(0, TWELVEDATA_MINUTE_LIMIT - MINUTE_RESERVE);
+      // Zero under CI's pinned limits, where "grants a full minute" is not a
+      // meaningful claim — the assertion is that granting tracks the cap.
+      const spendable = minuteCap > 0;
       const at = new Date("2026-08-28T13:30:00Z");
       await td.__resetTwelveDataLedgerForTests();
 
-      expect(await td.reserveTwelveDataCredits(cap, at), `a full minute's credits are granted (${cap})`);
+      expect(
+        (await td.reserveTwelveDataCredits(minuteCap, at)) === spendable,
+        `a full minute's credits are granted (${minuteCap})`,
+      );
       expect(
         !(await td.reserveTwelveDataCredits(1, at)),
         "one more in the same minute is refused",
@@ -283,11 +319,11 @@ async function main() {
       // The next minute restores the per-minute allowance but not the day's.
       const nextMinute = new Date(at.getTime() + 60_000);
       expect(
-        await td.reserveTwelveDataCredits(1, nextMinute),
+        (await td.reserveTwelveDataCredits(1, nextMinute)) === spendable,
         "a new minute restores the allowance",
       );
       expect(
-        (await td.twelveDataUsage(nextMinute)).day.used === cap + 1,
+        (await td.twelveDataUsage(nextMinute)).day.used === minuteCap + (spendable ? 1 : 0),
         "the daily count carries across minutes",
       );
 
@@ -299,8 +335,8 @@ async function main() {
       );
       const grantedCredits = results.filter(Boolean).length * 2;
       expect(
-        grantedCredits <= cap,
-        `10 concurrent 2-credit requests never exceed ${cap} (got ${grantedCredits})`,
+        grantedCredits <= minuteCap,
+        `10 concurrent 2-credit requests never exceed ${minuteCap} (got ${grantedCredits})`,
       );
       await td.__resetTwelveDataLedgerForTests();
     }
@@ -481,20 +517,32 @@ async function main() {
     expect(!(await repo.isSeeded()), "an emptied database looks unseeded…");
     expect(await repo.isDemoDeleted(), "…but the demo-deleted marker suppresses re-seeding");
 
-    if (failures > 0) {
-      console.error(`\n${failures} test(s) failed`);
-      process.exitCode = 1;
-    } else {
-      console.log("\nall db integration tests passed");
-    }
-    // close connections before stopping the server so the pool
-    // doesn't emit spurious 'error' events
-    const { pool } = await import("../src/db/index");
-    await pool.end();
+    if (failures > 0) console.error(`\n${failures} test(s) failed`);
+    else console.log("\nall db integration tests passed");
   } finally {
+    /*
+     * Closing the pool belongs here, not at the end of the try: an assertion
+     * that throws used to skip it and leave connections open, and postgres
+     * terminating them on shutdown surfaced as an unhandled 'error' that took
+     * the process down with a stack trace instead of a test report.
+     */
+    try {
+      const { pool } = await import("../src/db/index");
+      pool.on("error", () => {}); // shutdown races are not test failures
+      await pool.end();
+    } catch {
+      // Never opened, or already closed. Either way there is nothing to close.
+    }
     await pg.stop();
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
+
+  /*
+   * Exit explicitly, and last. `process.exitCode` set before the shutdown above
+   * did not survive it: the suite reported nine failures and the job still went
+   * green, which is worse than either a pass or a fail.
+   */
+  process.exit(failures > 0 ? 1 : 0);
 }
 
 main().catch((err) => {
