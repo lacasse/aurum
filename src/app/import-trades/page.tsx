@@ -21,9 +21,18 @@ import {
   cn,
 } from "@/components/ui";
 import { useFinance } from "@/lib/store";
+import {
+  TradeRow,
+  accumulatePositions,
+  parseTradeCsv,
+  positionToHolding,
+} from "@/lib/trades";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import { fmtCAD, todayISO } from "@/lib/format";
 import {
+  Currency,
+  Holding,
+  REGISTRATION_LABELS,
   Registration,
   isInvestmentAccount,
   isLiability,
@@ -31,119 +40,6 @@ import {
 } from "@/lib/types";
 
 type Step = "upload" | "review" | "done";
-
-type TradeType = "buy" | "sell" | "dividend" | "deposit" | "withdrawal";
-
-interface TradeRow {
-  id: string;
-  date: string;
-  type: TradeType;
-  ticker: string;
-  quantity: number;
-  pricePerUnit: number;
-  transactedAmount: number;
-  registration: Registration;
-  manualCadConversion: number;
-  include: boolean;
-  error?: string;
-  sourceFile: string;
-}
-
-function parseTradeDate(raw: string | undefined): string {
-  if (!raw) return todayISO();
-  const s = raw.trim();
-  // YYYY-MM-DD or YYYY/MM/DD
-  const iso = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
-  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
-  // MM/DD/YYYY or DD/MM/YYYY (assume MM first)
-  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-  if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
-  return todayISO();
-}
-
-function parseNum(raw: string | undefined): number {
-  if (!raw) return 0;
-  const cleaned = raw.replace(/[^0-9.\-]/g, "");
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function normalizeType(raw: string | undefined): TradeType {
-  const s = (raw ?? "").trim().toLowerCase();
-  if (s === "buy" || s === "purchase") return "buy";
-  if (s === "sell" || s === "sale") return "sell";
-  if (s === "dividend" || s === "div") return "dividend";
-  if (s === "deposit" || s === "contribution") return "deposit";
-  if (s === "withdrawal" || s === "withdraw" || s === "withdrawal") return "withdrawal";
-  return "buy";
-}
-
-function normalizeAccountType(raw: string | undefined): Registration {
-  const s = (raw ?? "").trim().toLowerCase();
-  if (s.includes("tfsa")) return "TFSA";
-  if (s.includes("rrsp") || s.includes("rrif")) return "RRSP";
-  if (s.includes("fhsa")) return "FHSA";
-  return "non-registered";
-}
-
-let seq = 0;
-function rowId(): string {
-  seq += 1;
-  return `trade-${Date.now().toString(36)}-${seq}`;
-}
-
-function parseCsvToTradeRows(file: File, csvText: string): TradeRow[] {
-  const result = Papa.parse(csvText, {
-    header: true,
-    skipEmptyLines: true,
-    transformHeader: (h: string) => h.trim(),
-  });
-
-  const rows: TradeRow[] = [];
-  for (const raw of result.data as Record<string, string>[]) {
-    // Match columns by header name (case-insensitive)
-    const get = (name: string) => {
-      for (const k of Object.keys(raw)) {
-        if (k.toLowerCase().replace(/\s+/g, " ").trim() === name.toLowerCase()) {
-          return raw[k];
-        }
-      }
-      return undefined;
-    };
-
-    const type = normalizeType(get("Type") ?? get("type"));
-    const ticker = (get("Ticker") ?? get("ticker") ?? "").trim().toUpperCase();
-    const quantity = parseNum(get("Quantity") ?? get("quantity"));
-    const pricePerUnit = parseNum(get("Price per unit") ?? get("price per unit") ?? get("price"));
-    const transactedAmount = parseNum(get("Transacted amount") ?? get("transacted amount") ?? get("amount"));
-    const registration = normalizeAccountType(get("account type") ?? get("accounttype"));
-    const manualCad = parseNum(
-      get("Manual CAD Conversion") ?? get("manual cad conversion") ?? get("cad") ?? get("cad conversion"),
-    );
-
-    // Skip empty rows
-    if (!type && !ticker && transactedAmount === 0) continue;
-
-    // Use the manual CAD conversion as the canonical CAD amount
-    const cadAmount = manualCad !== 0 ? manualCad : transactedAmount;
-
-    rows.push({
-      id: rowId(),
-      date: parseTradeDate(get("Date") ?? get("date")),
-      type,
-      ticker,
-      quantity,
-      pricePerUnit,
-      transactedAmount,
-      registration,
-      manualCadConversion: cadAmount,
-      include: true,
-      sourceFile: file.name,
-    });
-  }
-
-  return rows;
-}
 
 export default function ImportTradesPage() {
   const ready = useReady();
@@ -156,14 +52,16 @@ export default function ImportTradesPage() {
 
   const investmentAccounts = accounts.filter((a) => isInvestmentAccount(a.kind));
   /**
-   * The CSV names a registration ("TFSA"), not an account, so match it to one
-   * of the user's investment accounts and fall back to the first if none
-   * carries that registration.
+   * The CSV names a registration ("TFSA"), not an account, so match it to the
+   * investment account carrying that registration.
+   *
+   * Deliberately no fallback to "the first investment account". That fallback
+   * silently filed every imported trade into one account when the accounts had
+   * no registration set yet — the import looked like it worked and the data was
+   * wrong. An unmatched registration is now surfaced for the user to fix.
    */
   const accountIdFor = (registration: Registration): string =>
-    investmentAccounts.find((a) => a.registration === registration)?.id ??
-    investmentAccounts[0]?.id ??
-    "";
+    investmentAccounts.find((a) => a.registration === registration)?.id ?? "";
   /** The everyday account cash moves in from / out to. */
   const cashAccountId =
     accounts.find((a) => !isInvestmentAccount(a.kind) && !isLiability(a.kind))?.id ?? "";
@@ -192,115 +90,66 @@ export default function ImportTradesPage() {
     const allRows: TradeRow[] = [];
     for (const file of csvs) {
       const text = await file.text();
-      allRows.push(...parseCsvToTradeRows(file, text));
+      allRows.push(...parseTradeCsv(file.name, text));
     }
     setRows((prev) => [...prev, ...allRows]);
     setBusy(false);
   };
 
+  /*
+   * Registrations named by the CSV that no investment account carries. Shown in
+   * review so the user can add the account rather than having the trades land
+   * somewhere arbitrary.
+   */
+  const unmatchedRegistrations = [
+    ...new Set(
+      included
+        .map((r) => r.registration)
+        .filter((reg): reg is Registration => reg !== null && !accountIdFor(reg)),
+    ),
+  ];
+  const unreadableRows = rows.filter((r) => r.registration === null).length;
+  const blocked = unmatchedRegistrations.length > 0;
+
   const process = async () => {
     setProcessing(true);
+    const { positions, cashDeltas, transfers } = accumulatePositions(
+      included,
+      accountIdFor,
+      holdings,
+    );
+
     let created = 0;
     let updated = 0;
-    let deposits = 0;
-    let withdrawals = 0;
-    // Buying converts cash already in the account into securities, so the cash
-    // has to leave the balance or the money is counted twice — once as cash and
-    // again as the position. Netted per account, applied once at the end.
-    const cashDeltas = new Map<string, number>();
-    const moveCash = (accountId: string, delta: number) =>
-      cashDeltas.set(accountId, (cashDeltas.get(accountId) ?? 0) + delta);
+    for (const pos of positions) {
+      const input = positionToHolding(pos);
+      if (pos.existing) {
+        updateHolding(pos.existing.id, input);
+        updated++;
+      } else if (input.shares > 0) {
+        addHolding(input);
+        created++;
+      }
+    }
 
-    // Sort by date so buys process in chronological order
-    const sorted = [...included].sort((a, b) => a.date.localeCompare(b.date));
-
-    for (const row of sorted) {
-      if (row.type === "buy") {
-        moveCash(accountIdFor(row.registration), -Math.abs(row.manualCadConversion));
-        const existing = holdings.find(
-          (h) => h.ticker.toUpperCase() === row.ticker && h.accountId === accountIdFor(row.registration),
-        );
-        if (existing) {
-          const costCad = row.manualCadConversion;
-          const newShares = existing.shares + row.quantity;
-          const newAvgCost =
-            existing.shares > 0
-              ? (existing.shares * existing.avgCost + costCad) / newShares
-              : costCad / row.quantity;
-          updateHolding(existing.id, {
-            ...existing,
-            shares: Math.round(newShares * 1e8) / 1e8,
-            avgCost: Math.round(newAvgCost * 10000) / 10000,
-          });
-          updated++;
-        } else {
-          const costCad = row.manualCadConversion;
-          addHolding({
-            ticker: row.ticker,
-            name: row.ticker,
-            assetClass: "US Equity",
-            sector: "Other",
-            shares: row.quantity,
-            avgCost:
-              row.quantity > 0
-                ? Math.round((costCad / row.quantity) * 10000) / 10000
-                : 0,
-            price: row.pricePerUnit,
-            dividendsReceived: 0,
-            accountId: accountIdFor(row.registration),
-            currency: "CAD",
-          });
-          created++;
-        }
-      } else if (row.type === "sell") {
-        moveCash(accountIdFor(row.registration), Math.abs(row.manualCadConversion));
-        const existing = holdings.find(
-          (h) => h.ticker.toUpperCase() === row.ticker && h.accountId === accountIdFor(row.registration),
-        );
-        if (existing && row.quantity > 0) {
-          const newShares = Math.max(0, existing.shares - row.quantity);
-          updateHolding(existing.id, {
-            ...existing,
-            shares: Math.round(newShares * 1e8) / 1e8,
-          });
-          updated++;
-        }
-      } else if (row.type === "dividend") {
-        moveCash(accountIdFor(row.registration), Math.abs(row.manualCadConversion));
-        const existing = holdings.find(
-          (h) => h.ticker.toUpperCase() === row.ticker && h.accountId === accountIdFor(row.registration),
-        );
-        if (existing && row.manualCadConversion > 0) {
-          updateHolding(existing.id, {
-            ...existing,
-            dividendsReceived: existing.dividendsReceived + row.manualCadConversion,
-          });
-          updated++;
-        }
-      } else if (row.type === "deposit" || row.type === "withdrawal") {
-        // Money moving in or out of a brokerage is a transfer between two of
-        // your own accounts, not income or spending: it does not change net
-        // worth, it just changes where the money sits.
-        const investmentId = accountIdFor(row.registration);
-        const deposit = row.type === "deposit";
-        const from = deposit ? cashAccountId : investmentId;
-        const to = deposit ? investmentId : cashAccountId;
-        if (from && to && from !== to) {
-          addTransaction({
-            date: row.date,
-            type: "transfer",
-            amount: Math.abs(row.manualCadConversion),
-            category: TRANSFER_CATEGORY,
-            sourceAccountId: from,
-            destinationAccountId: to,
-            payee: deposit
-              ? `Deposit to ${row.registration}`
-              : `Withdrawal from ${row.registration}`,
-            note: `Historical import: ${row.registration} ${row.type}`,
-          });
-        }
-        if (deposit) deposits++;
-        else withdrawals++;
+    for (const t of transfers) {
+      // Money moving in or out of a brokerage is a transfer between two of your
+      // own accounts, not income or spending: it does not change net worth, it
+      // just changes where the money sits.
+      const from = t.deposit ? cashAccountId : t.accountId;
+      const to = t.deposit ? t.accountId : cashAccountId;
+      const label = REGISTRATION_LABELS[t.registration];
+      if (from && to && from !== to) {
+        addTransaction({
+          date: t.date,
+          type: "transfer",
+          amount: t.amount,
+          category: TRANSFER_CATEGORY,
+          sourceAccountId: from,
+          destinationAccountId: to,
+          payee: t.deposit ? `Deposit to ${label}` : `Withdrawal from ${label}`,
+          note: `Historical import: ${label} ${t.deposit ? "deposit" : "withdrawal"}`,
+        });
       }
     }
 
@@ -308,7 +157,12 @@ export default function ImportTradesPage() {
       adjustAccountCash(accountId, Math.round(delta * 100) / 100);
     }
 
-    setResult({ created, updated, deposits, withdrawals });
+    setResult({
+      created,
+      updated,
+      deposits: transfers.filter((t) => t.deposit).length,
+      withdrawals: transfers.filter((t) => !t.deposit).length,
+    });
     setProcessing(false);
     setStep("done");
   };
@@ -496,10 +350,28 @@ export default function ImportTradesPage() {
                           {fmtCAD(r.transactedAmount, 2)}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums font-medium">
-                          {fmtCAD(r.manualCadConversion, 2)}
+                          {fmtCAD(r.amountCad, 2)}
+                          {r.currency === "USD" && (
+                            <span
+                              className="ml-1 rounded bg-elevated px-1 py-px text-[9px] font-medium text-amber-400"
+                              title="Converted in the export, so this is a US-listed security"
+                            >
+                              USD
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
-                          <Badge>{r.registration}</Badge>
+                          {r.registration ? (
+                            <Badge
+                              tone={accountIdFor(r.registration) ? undefined : "negative"}
+                            >
+                              {REGISTRATION_LABELS[r.registration]}
+                            </Badge>
+                          ) : (
+                            <span title={r.error}>
+                              <Badge tone="negative">unreadable</Badge>
+                            </span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -508,11 +380,47 @@ export default function ImportTradesPage() {
               </div>
             </Card>
 
+            {/*
+              * Refusing the import beats guessing. The old fallback filed
+              * unmatched trades into whichever investment account came first,
+              * which is how a whole portfolio ended up in one account.
+              */}
+            {blocked && (
+              <Card className="border-negative/40 bg-negative/5 p-4">
+                <p className="text-xs font-semibold text-negative">
+                  No account for{" "}
+                  {unmatchedRegistrations.map((r) => REGISTRATION_LABELS[r]).join(", ")}
+                </p>
+                <p className="mt-1 text-xs text-ink-dim">
+                  These trades name an account you have not created yet. Add an
+                  investment account with the matching registration on the Accounts
+                  page, then come back — importing them into another account would
+                  put them in the wrong place.
+                </p>
+              </Card>
+            )}
+            {unreadableRows > 0 && (
+              <Card className="border-amber-500/40 bg-amber-500/5 p-4">
+                <p className="text-xs font-semibold text-amber-400">
+                  {unreadableRows} row{unreadableRows === 1 ? "" : "s"} have an
+                  unreadable account type and are excluded
+                </p>
+                <p className="mt-1 text-xs text-ink-dim">
+                  Check the &ldquo;account type&rdquo; column for those rows.
+                  Recognized values include TFSA, RRSP, FHSA, Pension, and taxable
+                  or non-registered.
+                </p>
+              </Card>
+            )}
+
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setStep("upload")}>
                 Back
               </Button>
-              <Button onClick={process} disabled={included.length === 0 || processing}>
+              <Button
+                onClick={process}
+                disabled={included.length === 0 || processing || blocked}
+              >
                 {processing ? (
                   <Loader2 size={14} className="animate-spin" />
                 ) : (
