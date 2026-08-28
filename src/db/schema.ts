@@ -1,3 +1,4 @@
+import type { CashFlow } from "@/lib/types";
 import {
   boolean,
   date,
@@ -88,6 +89,8 @@ export const holdings = pgTable("holdings", {
   avgCostCAD: unitPrice("avg_cost_cad").notNull().default(0),
   dividendsReceivedCAD: money("dividends_received_cad").notNull().default(0),
   historyCAD: jsonb("history_cad").$type<number[]>().notNull().default([]),
+  /** Dated buys, sells and dividends — the basis for realized gain and MWRR. */
+  flows: jsonb("flows").$type<CashFlow[]>().notNull().default([]),
   position: integer("position").notNull().default(0),
 });
 

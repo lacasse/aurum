@@ -3,6 +3,7 @@
 import {
   Account,
   Budget,
+  CashFlow,
   Currency,
   Holding,
   isLiability,
@@ -14,6 +15,7 @@ import {
   lastMonthKeys,
   monthKeyOf,
 } from "./format";
+import { DatedFlow, xirr } from "./xirr";
 import {
   fromCents,
   roundMoney,
@@ -232,26 +234,87 @@ export interface HoldingRow {
   priceCAD: number;
   marketValue: number;
   costBasis: number;
+  /** Unrealized: what the shares still held are worth, less what they cost. */
   gain: number;
+  /** Realized: what past sales brought in, less what those shares had cost. */
+  realizedGain: number;
   totalDividends: number;
+  /** Unrealized plus realized plus dividends — everything the position made. */
   totalReturn: number;
-  mwrr: number; // annualized money-weighted rate of return (%)
+  /**
+   * Annualized money-weighted return (%), or null when there are no dated
+   * flows to measure — a position entered by hand has none. Null and zero are
+   * different answers and are shown differently.
+   */
+  mwrr: number | null;
   weightPct: number;
   change1mPct: number;
 }
 
-/** Annualized MWRR for a buy-and-hold position with dividends. */
-function computeMwrr(
-  costBasis: number,
-  marketValue: number,
-  dividendsReceived: number,
-  months: number,
-): number {
-  if (costBasis <= 0 || months <= 0) return 0;
-  const totalValue = marketValue + dividendsReceived;
-  const periodReturn = (totalValue - costBasis) / costBasis;
-  const annualized = (1 + periodReturn) ** (12 / months) - 1;
-  return annualized * 100;
+/**
+ * Replay a position's flows to recover what they add up to.
+ *
+ * Realized gain is not stored anywhere: it is whatever the sales brought in
+ * less what those particular shares had cost, and that depends on the average
+ * cost at the moment of each sale. Deriving it here keeps one source of truth —
+ * the flows — instead of a stored total that can drift away from them.
+ */
+export function replayFlows(flows: CashFlow[]): {
+  shares: number;
+  costCAD: number;
+  realizedGainCAD: number;
+  dividendsCAD: number;
+} {
+  let shares = 0;
+  let costCAD = 0;
+  let realizedGainCAD = 0;
+  let dividendsCAD = 0;
+
+  for (const f of [...flows].sort((a, b) => a.date.localeCompare(b.date))) {
+    if (f.kind === "buy") {
+      shares += f.shares;
+      costCAD += f.amount;
+    } else if (f.kind === "sell") {
+      const sold = Math.min(Math.abs(f.shares), shares);
+      // Average cost: selling a third of the shares disposes of a third of the
+      // basis, and what remains keeps the same average.
+      const costOfSold = shares > 0 ? costCAD * (sold / shares) : 0;
+      realizedGainCAD += f.amount - costOfSold;
+      costCAD -= costOfSold;
+      shares -= sold;
+    } else {
+      dividendsCAD += f.amount;
+    }
+  }
+
+  return {
+    shares: Math.round(shares * 1e8) / 1e8,
+    costCAD: roundMoney(costCAD),
+    realizedGainCAD: roundMoney(realizedGainCAD),
+    dividendsCAD: roundMoney(dividendsCAD),
+  };
+}
+
+/**
+ * Money-weighted return for a position, from its flows plus what it is worth
+ * now.
+ *
+ * Null when there is nothing to measure — no flows, or everything on one day.
+ * Previously this was a simple total return annualized over a hardcoded 18
+ * months, which gave a position bought last month and one held five years the
+ * same denominator.
+ */
+function computeMwrr(flows: CashFlow[], marketValue: number, asOf: string): number | null {
+  if (flows.length === 0) return null;
+  const dated: DatedFlow[] = flows.map((f) => ({
+    date: f.date,
+    // Money paid in is negative, money received is positive.
+    amount: f.kind === "buy" ? -f.amount : f.amount,
+  }));
+  // What the position is worth today closes the series: selling it now is the
+  // final inflow.
+  if (marketValue > 0) dated.push({ date: asOf, amount: marketValue });
+  return xirr(dated);
 }
 
 /**
@@ -263,7 +326,10 @@ function computeMwrr(
  * distorting either. MWRR then composes for free, since it is computed from
  * the pooled basis, value and dividends.
  */
-export function consolidateHoldings(holdings: Holding[]): HoldingRow[] {
+export function consolidateHoldings(
+  holdings: Holding[],
+  asOf: string = currentMonthKey() + "-15",
+): HoldingRow[] {
   const groups = new Map<string, Holding[]>();
   for (const h of holdings) {
     const key = h.ticker.trim().toUpperCase();
@@ -291,6 +357,15 @@ export function consolidateHoldings(holdings: Holding[]): HoldingRow[] {
     const gain = subtractMoney(marketValue, costBasis);
 
     const openLots = lots.filter((h) => h.shares > 0);
+    /*
+     * Realized gain and the money-weighted return both come from the flows,
+     * pooled across accounts so the row answers "how has this security done for
+     * me" rather than "how has this tax wrapper done".
+     */
+    const flows = lots.flatMap((h) => h.flows ?? []);
+    const realizedGain = roundMoney(
+      lots.reduce((sum, h) => sum + replayFlows(h.flows ?? []).realizedGainCAD, 0),
+    );
     return {
       lots,
       /*
@@ -311,9 +386,10 @@ export function consolidateHoldings(holdings: Holding[]): HoldingRow[] {
       marketValue,
       costBasis,
       gain,
+      realizedGain,
       totalDividends,
-      totalReturn: roundMoney(gain + totalDividends),
-      mwrr: computeMwrr(costBasis, marketValue, totalDividends, 18),
+      totalReturn: roundMoney(gain + realizedGain + totalDividends),
+      mwrr: computeMwrr(flows, marketValue, asOf),
       weightPct: 0,
       change1mPct: prev > 0 ? ((priceCAD - prev) / prev) * 100 : 0,
     };
@@ -357,13 +433,23 @@ export function sortHoldingRows(
 ): HoldingRow[] {
   const sign = dir === "asc" ? 1 : -1;
   return [...rows].sort((a, b) => {
+    if (key === "mwrr") {
+      // Positions with no measurable return sort last in either direction,
+      // rather than being treated as zero.
+      const av = a.mwrr;
+      const bv = b.mwrr;
+      if (av === null && bv === null) return b.marketValue - a.marketValue;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      return av !== bv ? (av - bv) * sign : b.marketValue - a.marketValue;
+    }
     if (key === "name") {
       const cmp = (a.name || a.ticker).localeCompare(b.name || b.ticker, undefined, {
         sensitivity: "base",
       });
       return cmp !== 0 ? cmp * sign : b.marketValue - a.marketValue;
     }
-    const diff = a[key] - b[key];
+    const diff = a[key as Exclude<SortKey, "name" | "mwrr">] - b[key as Exclude<SortKey, "name" | "mwrr">];
     return diff !== 0 ? diff * sign : b.marketValue - a.marketValue;
   });
 }

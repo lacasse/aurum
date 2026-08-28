@@ -1,0 +1,12 @@
+-- Dated cash flows per holding.
+--
+-- The importer already computes every buy, sell and dividend with its date and
+-- amount, and then throws them away, keeping only the resulting position. That
+-- makes two things impossible: a realized gain (the proceeds of a sale are
+-- gone) and a money-weighted return (an IRR needs dated flows). Both are now
+-- derived by replaying this list.
+--
+-- Stored as jsonb on the holding rather than a side table: flows are only ever
+-- read with their holding, never queried across holdings, and this matches how
+-- `history` is already kept.
+ALTER TABLE "holdings" ADD COLUMN IF NOT EXISTS "flows" jsonb DEFAULT '[]'::jsonb NOT NULL;

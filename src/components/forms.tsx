@@ -875,6 +875,12 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
             avgCost: Math.round(newAvgCost * 10000) / 10000,
             accountId: row.accountId,
             currency: row.currency as Holding["currency"],
+            // Recorded so this trade counts towards the realized gain and the
+            // money-weighted return, same as an imported one.
+            flows: [
+              ...(existing.flows ?? []),
+              { date: row.date, kind: "buy" as const, amount: Math.abs(costCad), shares: qty },
+            ],
           });
           updated++;
         } else {
@@ -889,6 +895,7 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
             dividendsReceived: 0,
             accountId: row.accountId,
             currency: row.currency as Holding["currency"],
+            flows: [{ date: row.date, kind: "buy", amount: Math.abs(costCad), shares: qty }],
           });
           created++;
         }
@@ -921,6 +928,15 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
         updateHolding(existing.id, {
           ...existing,
           shares: Math.round(newShares * 1e8) / 1e8,
+          flows: [
+            ...(existing.flows ?? []),
+            {
+              date: row.date,
+              kind: "sell" as const,
+              amount: Math.abs(proceedsCad),
+              shares: -qty,
+            },
+          ],
         });
         updated++;
       } else if (row.action === "dividend") {
@@ -940,6 +956,10 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
           updateHolding(existing.id, {
             ...existing,
             dividendsReceived: existing.dividendsReceived + cadAmount,
+            flows: [
+              ...(existing.flows ?? []),
+              { date: row.date, kind: "dividend" as const, amount: cadAmount, shares: 0 },
+            ],
           });
           updated++;
         } else {
