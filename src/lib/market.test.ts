@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
+  isCoinTicker,
   priceSource,
   toEodhdSymbol,
   toTwelveDataSymbol,
@@ -67,5 +68,20 @@ describe("toEodhdSymbol", () => {
     assert.equal(toEodhdSymbol("XEQT"), "XEQT.TO");
     assert.equal(toEodhdSymbol("RETL.NEO"), "RETL.NEO");
     assert.equal(toEodhdSymbol("cryp-a.to"), "CRYP-A.TO");
+  });
+});
+
+describe("isCoinTicker", () => {
+  test("a bare coin symbol is a coin", () => {
+    for (const t of ["BTC", "eth", "SOL", "ADA"]) {
+      assert.equal(isCoinTicker(t), true, t);
+    }
+  });
+
+  test("an exchange listing is not, however crypto-flavoured", () => {
+    // These are TSX products, and EODHD really is the feed that carries them.
+    for (const t of ["CRYP-A.TO", "CRYP-C.TO", "GOLD.TO", "RETL.NEO", "XEQT"]) {
+      assert.equal(isCoinTicker(t), false, t);
+    }
   });
 });

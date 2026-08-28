@@ -8,6 +8,29 @@ function isExchangeListed(ticker: string): boolean {
   return ticker.trim().includes(".");
 }
 
+/**
+ * Bare tickers that are coins rather than listed securities.
+ *
+ * Needed because an import has no column saying so: it carries a ticker and a
+ * currency, and nothing else. Without this, a coin is filed as an equity, which
+ * routes it to the Canadian equity feed as "BTC.TO" — a symbol that does not
+ * exist — and spends one of a strictly limited twenty daily calls on it every
+ * time. An exchange-listed crypto product (CRYP-A.TO) is not in this set: it
+ * really is a listed security.
+ */
+const COIN_TICKERS = new Set([
+  "BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "DOT", "AVAX", "MATIC", "LINK",
+  "LTC", "UNI", "ATOM", "NEAR", "FIL", "BCH", "TRX", "XLM", "ETC", "HBAR",
+  "ICP", "APT", "ARB", "OP", "SUI", "INJ", "TIA", "SEI", "RNDR", "IMX",
+]);
+
+/** Whether a ticker names a coin traded directly, rather than a listed security. */
+export function isCoinTicker(ticker: string): boolean {
+  const t = ticker.trim().toUpperCase();
+  if (t.includes(".")) return false; // a venue suffix means a listing
+  return COIN_TICKERS.has(t.split("/")[0]);
+}
+
 /* ── Twelve Data symbols (US stocks, crypto, FX) ── */
 
 /**

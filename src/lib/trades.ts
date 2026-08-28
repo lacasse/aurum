@@ -6,7 +6,8 @@
  * into one account and created a separate position for every row.
  */
 import Papa from "papaparse";
-import { CashFlow, Currency, Holding, Registration } from "./types";
+import { isCoinTicker } from "./market";
+import { AssetClass, CashFlow, Currency, Holding, Registration } from "./types";
 import { todayISO } from "./format";
 
 export type TradeType = "buy" | "sell" | "dividend" | "deposit" | "withdrawal";
@@ -538,7 +539,11 @@ export function positionToHolding(pos: Position) {
   return {
     ticker: pos.ticker,
     name: pos.existing?.name ?? pos.ticker,
-    assetClass: pos.existing?.assetClass ?? ("US Equity" as const),
+    // A coin is not an equity, and getting this wrong sends it to the wrong
+    // price feed for a symbol that does not exist.
+    assetClass:
+      pos.existing?.assetClass ??
+      ((isCoinTicker(pos.ticker) ? "Crypto" : "US Equity") as AssetClass),
     sector: pos.existing?.sector ?? "Other",
     shares,
     avgCost,
