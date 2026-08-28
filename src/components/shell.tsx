@@ -20,7 +20,7 @@ import {
   X,
   LogOut,
 } from "lucide-react";
-import { Button, Modal } from "./ui";
+import { Button, Input, Modal } from "./ui";
 import { useFinance } from "@/lib/store";
 import { useMounted } from "@/lib/hooks";
 import { cn } from "./ui";
@@ -56,6 +56,7 @@ function ThemeToggle() {
 
 function ResetDemo() {
   const [open, setOpen] = useState(false);
+  const [confirm, setConfirm] = useState("");
   const resetDemo = useFinance((s) => s.resetDemo);
   return (
     <>
@@ -66,20 +67,43 @@ function ResetDemo() {
         <RefreshCcw size={14} />
         Reset demo data
       </button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Reset demo data">
+      <Modal
+        open={open}
+        onClose={() => {
+          setOpen(false);
+          setConfirm("");
+        }}
+        title="Reset demo data"
+      >
         <p className="text-sm text-ink-dim">
           This restores the original sample accounts, transactions, holdings and
-          budgets, discarding every change you made.
+          budgets, discarding every change you made. To continue, type{" "}
+          <span className="font-mono text-ink">RESET</span>.
         </p>
+        <Input
+          className="mt-3"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          placeholder="Type RESET to confirm"
+          autoComplete="off"
+        />
         <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setOpen(false)}>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setOpen(false);
+              setConfirm("");
+            }}
+          >
             Cancel
           </Button>
           <Button
             variant="danger"
+            disabled={confirm.trim().toUpperCase() !== "RESET"}
             onClick={() => {
               resetDemo();
               setOpen(false);
+              setConfirm("");
             }}
           >
             Reset everything

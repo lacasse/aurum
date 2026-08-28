@@ -16,7 +16,7 @@ docker compose up --build
 | --- | --- | --- |
 | app | https://localhost | Next.js app + JSON API (HTTPS only) |
 | db | internal :5432 | PostgreSQL 17 (volume `pgdata` persists data) |
-| adminer | https://localhost:8443 | DB browser (server: `db`, user/pass: `aurum`) |
+| adminer | localhost:8443 (loopback only) | DB browser (server: `db`), reach it via an SSH tunnel |
 
 Only HTTPS is exposed. A self-signed certificate is generated automatically on first
 startup (stored in the `certs` volume). HTTP requests on port 80 redirect to HTTPS. Since
@@ -26,23 +26,41 @@ the certificate is self-signed, browsers will show a warning you'll need to acce
 
 The app and its API are protected by a session-cookie login. Visiting any page (or hitting
 any `/api/*` route) without a valid session redirects to `/login` (pages) or returns `401`
-(API). After a successful login the session cookie lasts 7 days.
+(API). After a successful login the session cookie lasts 7 days. Login attempts are rate
+limited per IP (5 failures → progressively longer lockout).
 
-Credentials are configured via environment variables (with the defaults shown below):
+Credentials are configured via environment variables **with no built-in defaults** — the
+app refuses to start if any are missing:
 
-| Variable | Default | Purpose |
+| Variable | Required | Purpose |
 | --- | --- | --- |
-| `AUTH_USERNAME` | `admin` | Login username |
-| `AUTH_PASSWORD` | `password` | Login password |
-| `AUTH_SECRET` | dev string | HMAC key used to sign session cookies |
+| `AUTH_USERNAME` | yes | Login username |
+| `AUTH_PASSWORD` | yes* | Login password (plaintext, constant-time compared) |
+| `AUTH_PASSWORD_HASH` | no | scrypt `salt:hash` of the password — preferred over `AUTH_PASSWORD` |
+| `AUTH_SECRET` | yes | HMAC key used to sign session cookies |
+
+*One of `AUTH_PASSWORD` or `AUTH_PASSWORD_HASH` is required (the hash takes precedence).
+
+Generate a password hash and set it in `.env`:
+
+```bash
+npm run hash-password -- 'your-password'   # prints salt:hash hex
+# paste it into AUTH_PASSWORD_HASH in .env, then remove AUTH_PASSWORD
+```
 
 **Change these before exposing the app.** Set them in `.env` or your environment, e.g.:
 
 ```bash
-AUTH_USERNAME=you AUTH_PASSWORD=a-strong-password AUTH_SECRET=a-long-random-secret docker compose up -d --build
+AUTH_USERNAME=you AUTH_PASSWORD=... AUTH_SECRET=a-long-random-secret docker compose up -d --build
 ```
 
+Rotating `AUTH_PASSWORD`, `AUTH_PASSWORD_HASH`, or `AUTH_SECRET` immediately revokes every
+existing session cookie (they are signed with a key derived from the current credentials).
+
 The session cookie is `HttpOnly`, `Secure` (when NODE_ENV=production), and `SameSite=Lax`.
+
+**Reset demo data** in the sidebar now requires typing `RESET` to confirm before the server
+will wipe the database (it rejects the request otherwise).
 
 Migrations run and demo data seeds automatically on first request. `docker compose down`
 keeps your data (no flags). **Never run `docker compose down -v` or `docker volume prune`**
@@ -58,6 +76,9 @@ with env vars (set in `.env` or the environment):
 | --- | --- | --- |
 | `BACKUP_INTERVAL` | `21600` | Seconds between automatic backups (21600 = 6h) |
 | `BACKUP_RETENTION` | `14` | Number of latest backups to keep |
+| `BACKUP_ENCRYPTION_KEY` | (empty) | Optional passphrase; encrypts backups with AES-256-CBC (OpenSSL) |
+
+If `BACKUP_ENCRYPTION_KEY` is set, dumps are written as `.sql.gz.enc` and encrypted.
 
 Check that backups exist (also visible under **GET `/api/backups`** after login):
 
@@ -111,6 +132,11 @@ skipped with console errors).
 - [Recharts](https://recharts.org) for all charts
 - [Zustand](https://zustand.docs.pmnd.rs) as the client cache — optimistic updates with fire-and-forget persistence to the API
 - [Papa Parse](https://www.papaparse.com) for CSV import, [lucide-react](https://lucide.dev) icons, [next-themes](https://github.com/pacocoursey/next-themes) theming
+
+> **Security note (informational):** The production image runs the compiled
+> Next.js **standalone** output (`node server.js`), so it is unaffected by the
+> esbuild dev-service advisory that applies only to `next dev`/`tsx` in a
+> development environment. Do not pin dev-only tooling below the advisory line.
 
 ## Structure
 

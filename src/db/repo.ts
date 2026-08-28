@@ -489,6 +489,39 @@ export function parseHolding(body: unknown): Holding {
 /* Monthly snapshots                                                   */
 /* ------------------------------------------------------------------ */
 
+export function parseSnapshotInput(body: unknown): MonthlySnapshot {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const price = Number(b.price);
+  const avgCost = Number(b.avgCost);
+  const shares = Number(b.shares);
+  const value = Number(b.value);
+  const valueCAD = Number(b.valueCAD ?? b.value);
+  if (typeof b.month !== "string" || !/^\d{4}-\d{2}$/.test(b.month))
+    throw new BadRequestError("month must be YYYY-MM");
+  if (typeof b.holdingId !== "string" || !b.holdingId)
+    throw new BadRequestError("holdingId required");
+  if (typeof b.ticker !== "string" || !b.ticker.trim())
+    throw new BadRequestError("ticker required");
+  if (!Number.isFinite(price) || price <= 0)
+    throw new BadRequestError("price must be > 0");
+  if (!Number.isFinite(avgCost) || avgCost <= 0)
+    throw new BadRequestError("avgCost must be > 0");
+  if (!Number.isFinite(shares) || shares <= 0)
+    throw new BadRequestError("shares must be > 0");
+  if (!Number.isFinite(value))
+    throw new BadRequestError("value must be a number");
+  return {
+    month: b.month,
+    holdingId: b.holdingId,
+    ticker: String(b.ticker).trim().toUpperCase(),
+    price,
+    avgCost,
+    shares,
+    value,
+    valueCAD: Number.isFinite(valueCAD) ? valueCAD : value,
+  };
+}
+
 export async function getSnapshots(month: string): Promise<MonthlySnapshot[]> {
   const rows = await db
     .select()

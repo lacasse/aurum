@@ -1,5 +1,5 @@
 import { ensureDb } from "@/db/init";
-import { getSnapshots, upsertSnapshots } from "@/db/repo";
+import { getSnapshots, parseSnapshotInput, upsertSnapshots } from "@/db/repo";
 import { handle, readJson } from "@/db/http";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +25,8 @@ export async function POST(req: Request) {
     if (!Array.isArray(snapshots)) {
       return { error: "snapshots array required" };
     }
-    await upsertSnapshots(snapshots);
+    const parsed = snapshots.map((s) => parseSnapshotInput(s));
+    await upsertSnapshots(parsed);
     return { ok: true };
   });
 }

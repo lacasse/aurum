@@ -8,7 +8,16 @@ import { Button, Input, Field } from "@/components/ui";
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
+  const rawNext = searchParams.get("next") || "/";
+
+  // Same-origin check: only allow local path navigation (no open redirect).
+  const next = (() => {
+    if (typeof window === "undefined") return "/";
+    if (!rawNext.startsWith("/") || rawNext.startsWith("//")) return "/";
+    const target = new URL(rawNext, window.location.origin);
+    if (target.origin !== window.location.origin) return "/";
+    return target.pathname + target.search + target.hash;
+  })();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -30,7 +39,7 @@ function LoginForm() {
         setError(data.error || "Invalid credentials");
         return;
       }
-      router.push(next.startsWith("/") ? next : "/");
+      router.push(next);
       router.refresh();
     } catch {
       setError("Something went wrong. Please try again.");
