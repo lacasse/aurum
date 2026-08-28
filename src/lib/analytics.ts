@@ -3,6 +3,7 @@
 import {
   Account,
   Budget,
+  Currency,
   Holding,
   isLiability,
   Transaction,
@@ -198,8 +199,30 @@ export function sectorExposure(
   return top;
 }
 
+/**
+ * One row per security, pooling every account that holds it.
+ *
+ * Positions are stored per account because that is what is true — the same
+ * ticker bought in a TFSA and in a non-registered account has a different cost
+ * basis and a different tax treatment, and merging them in the database would
+ * throw that away. But a portfolio is read per security: "how much NVDA do I
+ * own, and how has it done" is one question, not one question per account. So
+ * the pooling happens here, at the point of display, and `lots` keeps the
+ * per-account detail available for anything that needs it.
+ */
 export interface HoldingRow {
-  holding: Holding;
+  /** Every stored position for this ticker, one per account. */
+  lots: Holding[];
+  /** The accounts this ticker sits in — one tag each on the holdings page. */
+  accountIds: string[];
+  ticker: string;
+  name: string;
+  currency: Currency;
+  /** Combined across accounts. */
+  shares: number;
+  /** Share-weighted across accounts, in CAD. */
+  avgCostCAD: number;
+  priceCAD: number;
   marketValue: number;
   costBasis: number;
   gain: number;
@@ -224,36 +247,73 @@ function computeMwrr(
   return annualized * 100;
 }
 
+/**
+ * Group stored positions by ticker.
+ *
+ * Cost basis is summed rather than averaged: the share-weighted average cost
+ * falls out of dividing the pooled basis by the pooled share count, which is
+ * the only way to combine two lots bought at different prices without
+ * distorting either. MWRR then composes for free, since it is computed from
+ * the pooled basis, value and dividends.
+ */
+export function consolidateHoldings(holdings: Holding[]): HoldingRow[] {
+  const groups = new Map<string, Holding[]>();
+  for (const h of holdings) {
+    const key = h.ticker.trim().toUpperCase();
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(h);
+    else groups.set(key, [h]);
+  }
+
+  const rows = [...groups.values()].map((lots) => {
+    const shares = lots.reduce((sum, h) => sum + h.shares, 0);
+    const costBasis = roundMoney(
+      lots.reduce((sum, h) => sum + h.shares * (h.avgCostCAD ?? h.avgCost), 0),
+    );
+    const totalDividends = roundMoney(
+      lots.reduce((sum, h) => sum + (h.dividendsReceivedCAD ?? h.dividendsReceived ?? 0), 0),
+    );
+    // Same security, so the price is the same wherever it is held; the lots
+    // only disagree when one has never been priced.
+    const priced = lots.find((h) => (h.priceCAD ?? h.price) > 0) ?? lots[0];
+    const priceCAD = priced.priceCAD ?? priced.price;
+    const hist = priced.historyCAD ?? priced.history;
+    const prev = hist.length > 1 ? hist[hist.length - 2] : priceCAD;
+
+    const marketValue = roundMoney(shares * priceCAD);
+    const gain = subtractMoney(marketValue, costBasis);
+
+    return {
+      lots,
+      // De-duplicated, because two lots of the same ticker in one account
+      // would otherwise tag it twice.
+      accountIds: [...new Set(lots.map((h) => h.accountId))],
+      ticker: priced.ticker,
+      name: priced.name,
+      currency: priced.currency,
+      shares: Math.round(shares * 1e8) / 1e8,
+      avgCostCAD: shares > 0 ? costBasis / shares : 0,
+      priceCAD,
+      marketValue,
+      costBasis,
+      gain,
+      totalDividends,
+      totalReturn: roundMoney(gain + totalDividends),
+      mwrr: computeMwrr(costBasis, marketValue, totalDividends, 18),
+      weightPct: 0,
+      change1mPct: prev > 0 ? ((priceCAD - prev) / prev) * 100 : 0,
+    };
+  });
+
+  const totalValue = sumMoney(rows.map((r) => r.marketValue));
+  for (const r of rows) {
+    r.weightPct = totalValue > 0 ? (r.marketValue / totalValue) * 100 : 0;
+  }
+  return rows.sort((a, b) => b.marketValue - a.marketValue);
+}
+
 export function holdingRows(holdings: Holding[]): HoldingRow[] {
-  const totalValue = sumProducts(
-    holdings.map((h) => [h.shares, h.priceCAD ?? h.price] as const),
-  );
-  return holdings
-    .map((h) => {
-      const px = h.priceCAD ?? h.price;
-      const avgC = h.avgCostCAD ?? h.avgCost;
-      const divs = h.dividendsReceivedCAD ?? h.dividendsReceived ?? 0;
-      const hist = h.historyCAD ?? h.history;
-      const marketValue = roundMoney(h.shares * px);
-      const costBasis = roundMoney(h.shares * avgC);
-      const prev =
-        hist.length > 1 ? hist[hist.length - 2] : px;
-      const gain = subtractMoney(marketValue, costBasis);
-      const totalReturn = roundMoney(gain + divs);
-      const mwrr = computeMwrr(costBasis, marketValue, divs, 18);
-      return {
-        holding: h,
-        marketValue,
-        costBasis,
-        gain,
-        totalDividends: divs,
-        totalReturn,
-        mwrr,
-        weightPct: totalValue > 0 ? (marketValue / totalValue) * 100 : 0,
-        change1mPct: prev > 0 ? ((px - prev) / prev) * 100 : 0,
-      };
-    })
-    .sort((a, b) => b.marketValue - a.marketValue);
+  return consolidateHoldings(holdings);
 }
 
 export interface BudgetRow {

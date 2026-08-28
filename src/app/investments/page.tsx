@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Flame, Pencil, Plus, RefreshCw, Trash2, TrendingUp } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, Flame, Pencil, Plus, RefreshCw, Trash2, TrendingUp } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
-import { Badge, Button, Card, CardHeader, Progress } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Progress, cn } from "@/components/ui";
 import {
   DonutChart,
   PALETTE,
@@ -58,6 +58,15 @@ export default function InvestmentsPage() {
   const [lastPriceUpdate, setLastPriceUpdate] = useState<Date | null>(null);
   const [priceRefreshing, setPriceRefreshing] = useState(false);
   const [staleTickers, setStaleTickers] = useState<Set<string>>(new Set());
+  /* Tickers whose per-account lots are shown; only ever set for pooled rows. */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpanded = (ticker: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(ticker)) next.delete(ticker);
+      else next.add(ticker);
+      return next;
+    });
   const [quota, setQuota] = useState<{
     used: number;
     limit: number;
@@ -141,7 +150,7 @@ export default function InvestmentsPage() {
     const best = [...rows].sort((a, b) => b.mwrr - a.mwrr)[0];
     const gainBars = rows
       .slice(0, 10)
-      .map((r) => ({ label: r.holding.ticker, gain: r.totalReturn }))
+      .map((r) => ({ label: r.ticker, gain: r.totalReturn }))
       .sort((a, b) => b.gain - a.gain);
     return {
       rows,
@@ -276,7 +285,7 @@ export default function InvestmentsPage() {
           />
           <StatCard
             label="Best performer"
-            value={data.best ? data.best.holding.ticker : "—"}
+            value={data.best ? data.best.ticker : "—"}
             delta={data.best?.mwrr}
             deltaLabel={data.best ? fmtSignedCAD(data.best.totalReturn) : "no holdings yet"}
             tone="positive"
@@ -448,26 +457,48 @@ export default function InvestmentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.rows.map((r) => (
+                {data.rows.map((r) => {
+                  const pooled = r.lots.length > 1;
+                  const open = expanded.has(r.ticker);
+                  return (
+                  <Fragment key={r.ticker}>
                   <tr
-                    key={r.holding.id}
-                    className="border-b border-line/50 transition-colors last:border-0 hover:bg-elevated/60"
+                    className={cn(
+                      "border-b border-line/50 transition-colors last:border-0 hover:bg-elevated/60",
+                      pooled && "cursor-pointer",
+                    )}
+                    onClick={pooled ? () => toggleExpanded(r.ticker) : undefined}
                   >
                     <td className="px-3 py-2.5">
                       <span className="flex items-center gap-2">
                         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-elevated text-[9px] font-bold tracking-wide text-brand">
-                          {r.holding.ticker.slice(0, 3)}
+                          {r.ticker.slice(0, 3)}
                         </span>
                         <span className="min-w-0">
-                          <span className="block truncate font-semibold">
-                            {r.holding.ticker}
+                          <span className="flex items-center gap-1 font-semibold">
+                            <span className="truncate">{r.ticker}</span>
+                            {pooled && (
+                              <ChevronRight
+                                size={12}
+                                className={cn(
+                                  "shrink-0 text-ink-faint transition-transform",
+                                  open && "rotate-90",
+                                )}
+                              />
+                            )}
                           </span>
                           <span className="flex items-center gap-1 text-ink-faint">
-                            <span className="truncate max-w-[100px]">{r.holding.name}</span>
-                            <span className="shrink-0 rounded bg-elevated px-1 py-px text-[8px] font-medium text-ink-faint">
-                              {accountLabel(r.holding.accountId)}
-                            </span>
-                            {staleTickers.has(r.holding.ticker) && (
+                            <span className="truncate max-w-[100px]">{r.name}</span>
+                            {/* One tag per account the security sits in. */}
+                            {r.accountIds.map((id) => (
+                              <span
+                                key={id}
+                                className="shrink-0 rounded bg-elevated px-1 py-px text-[8px] font-medium text-ink-faint"
+                              >
+                                {accountLabel(id)}
+                              </span>
+                            ))}
+                            {staleTickers.has(r.ticker) && (
                               <span
                                 className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[8px] font-medium text-amber-400"
                                 title="Last known price — the daily EODHD limit is used up, this updates automatically after 00:00 GMT"
@@ -475,7 +506,7 @@ export default function InvestmentsPage() {
                                 STALE
                               </span>
                             )}
-                            {r.holding.currency === "USD" && (
+                            {r.currency === "USD" && (
                               <span className="shrink-0 rounded bg-elevated px-1 py-px text-[8px] font-medium text-amber-400">
                                 USD
                               </span>
@@ -485,19 +516,19 @@ export default function InvestmentsPage() {
                       </span>
                     </td>
                     <td className="hidden px-3 py-2.5 text-right tabular-nums md:table-cell">
-                      {r.holding.shares.toLocaleString("en-US")}
+                      {r.shares.toLocaleString("en-US")}
                     </td>
                     <td className="hidden px-3 py-2.5 text-right tabular-nums text-ink-dim md:table-cell">
-                      {fmtCAD(r.holding.avgCostCAD ?? r.holding.avgCost, 2)}
+                      {fmtCAD(r.avgCostCAD, 2)}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">
-                      {fmtCAD(r.holding.priceCAD ?? r.holding.price, 2)}
+                      {fmtCAD(r.priceCAD, 2)}
                     </td>
                     <td className="px-3 py-2.5 text-right font-semibold tabular-nums">
                       {fmtCAD(r.marketValue)}
                     </td>
                     <td className="hidden px-3 py-2.5 text-right tabular-nums text-ink-dim lg:table-cell">
-                      {r.holding.dividendsReceived > 0 ? (
+                      {r.totalDividends > 0 ? (
                         <span className="text-positive">{fmtCAD(r.totalDividends)}</span>
                       ) : (
                         <span className="text-ink-faint">—</span>
@@ -528,29 +559,93 @@ export default function InvestmentsPage() {
                       </div>
                     </td>
                     <td className="whitespace-nowrap px-3 py-2.5 text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Edit ${r.holding.ticker}`}
-                        onClick={() => {
-                          setEditing(r.holding);
-                          setFormOpen(true);
-                        }}
-                      >
-                        <Pencil size={14} />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Delete ${r.holding.ticker}`}
-                        onClick={() => setDeleting(r.holding)}
-                        className="hover:text-negative"
-                      >
-                        <Trash2 size={14} />
-                      </Button>
+                      {/*
+                        * Editing is per position, not per security: a pooled row
+                        * has a separate cost basis in each account, so there is
+                        * nothing coherent to edit at this level. Expand instead.
+                        */}
+                      {pooled ? (
+                        <span className="text-[11px] text-ink-faint">
+                          {r.lots.length} accounts
+                        </span>
+                      ) : (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Edit ${r.ticker}`}
+                            onClick={() => {
+                              setEditing(r.lots[0]);
+                              setFormOpen(true);
+                            }}
+                          >
+                            <Pencil size={14} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Delete ${r.ticker}`}
+                            onClick={() => setDeleting(r.lots[0])}
+                            className="hover:text-negative"
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        </>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  {pooled &&
+                    open &&
+                    r.lots.map((lot) => (
+                      <tr key={lot.id} className="border-b border-line/50 bg-elevated/30 last:border-0">
+                        <td className="py-2 pl-12 pr-3">
+                          <span className="text-[11px] text-ink-dim">
+                            {accountLabel(lot.accountId)}
+                          </span>
+                        </td>
+                        <td className="hidden px-3 py-2 text-right tabular-nums text-ink-dim md:table-cell">
+                          {lot.shares.toLocaleString("en-US")}
+                        </td>
+                        <td className="hidden px-3 py-2 text-right tabular-nums text-ink-dim md:table-cell">
+                          {fmtCAD(lot.avgCostCAD ?? lot.avgCost, 2)}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
+                          {fmtCAD(lot.priceCAD ?? lot.price, 2)}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
+                          {fmtCAD(lot.shares * (lot.priceCAD ?? lot.price))}
+                        </td>
+                        <td className="hidden px-3 py-2 lg:table-cell" />
+                        <td className="px-3 py-2" />
+                        <td className="px-3 py-2" />
+                        <td className="hidden px-3 py-2 xl:table-cell" />
+                        <td className="whitespace-nowrap px-3 py-2 text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Edit ${r.ticker} in ${accountLabel(lot.accountId)}`}
+                            onClick={() => {
+                              setEditing(lot);
+                              setFormOpen(true);
+                            }}
+                          >
+                            <Pencil size={14} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Delete ${r.ticker} in ${accountLabel(lot.accountId)}`}
+                            onClick={() => setDeleting(lot)}
+                            className="hover:text-negative"
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                  );
+                })}
                 {data.rows.length === 0 && (
                   <tr>
                     <td colSpan={10} className="py-12 text-center text-xs text-ink-faint">
