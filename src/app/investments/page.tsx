@@ -152,12 +152,31 @@ export default function InvestmentsPage() {
 
   /* ---- live price polling ---- */
   const refreshPrices = useCallback(async () => {
-    if (holdings.length === 0) return;
+    /*
+     * One request per security, not per position, and only for securities
+     * still held.
+     *
+     * Sending every holding meant the same ticker held in four accounts asked
+     * for four prices, and a closed position asked for one at all — spending a
+     * strictly limited daily allowance on securities that are no longer owned
+     * and whose price changes nothing.
+     */
+    const priceable = new Map<string, { assetClass: string; currency: string }>();
+    for (const h of holdings) {
+      if (h.shares <= 0) continue;
+      const key = h.ticker.trim().toUpperCase();
+      if (!priceable.has(key)) {
+        priceable.set(key, { assetClass: h.assetClass, currency: h.currency });
+      }
+    }
+    if (priceable.size === 0) return;
+
     setPriceRefreshing(true);
     try {
-      const tickers = holdings.map((h) => h.ticker).join(",");
-      const classes = holdings.map((h) => h.assetClass).join(",");
-      const currencies = holdings.map((h) => h.currency).join(",");
+      const entries = [...priceable.entries()];
+      const tickers = entries.map(([t]) => t).join(",");
+      const classes = entries.map(([, v]) => v.assetClass).join(",");
+      const currencies = entries.map(([, v]) => v.currency).join(",");
       const res = await fetch(
         `/api/prices?tickers=${encodeURIComponent(tickers)}&classes=${encodeURIComponent(classes)}&currencies=${encodeURIComponent(currencies)}`,
         { cache: "no-store" },

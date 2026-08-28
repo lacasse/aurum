@@ -127,6 +127,22 @@ describe("parseTradeCsv", () => {
     assert.equal(positions[0].shares, 893, "901 - 8, not 901 + 8");
   });
 
+  test("a bare coin is imported as crypto, not as an equity", () => {
+    // Filed as an equity it goes to the Canadian equity feed as "BTC.TO",
+    // which does not exist, and burns one of twenty daily calls each time.
+    const csv = [
+      header,
+      "2025-01-05,Buy,BTC,0.5,50000,25000,Non-registered,",
+      "2025-01-05,Buy,CRYP-A.TO,100,13,1300,TFSA,",
+    ].join("\n");
+    const { positions } = accumulatePositions(parseTradeCsv("t.csv", csv), resolve, []);
+    const byTicker = Object.fromEntries(
+      positions.map((p) => [p.ticker, positionToHolding(p).assetClass]),
+    );
+    assert.equal(byTicker["BTC"], "Crypto");
+    assert.equal(byTicker["CRYP-A.TO"], "US Equity", "a listed crypto ETF is still a listing");
+  });
+
   test("a signed quantity is not applied twice", () => {
     // Some exports sign the quantity as well as naming the type. The type
     // carries the direction, so -8 on a sale must not add 8 back.
