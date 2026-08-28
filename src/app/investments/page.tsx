@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Flame,
   Pencil,
-  Plus,
   RefreshCw,
   TrendingUp,
 } from "lucide-react";
@@ -106,7 +105,6 @@ export default function InvestmentsPage() {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Holding | null>(null);
-  const [tradeOpen, setTradeOpen] = useState(false);
   const [benchmark, setBenchmark] = useState<BenchmarkData | null>(null);
   const [lastPriceUpdate, setLastPriceUpdate] = useState<Date | null>(null);
   const [priceRefreshing, setPriceRefreshing] = useState(false);
@@ -337,14 +335,6 @@ export default function InvestmentsPage() {
           >
             <RefreshCw size={15} className={priceRefreshing ? "animate-spin" : ""} />
           </Button>
-          <Button
-            onClick={() => {
-              setEditing(null);
-              setFormOpen(true);
-            }}
-          >
-            <Plus size={15} /> Add holding
-          </Button>
         </div>
       }
     >
@@ -403,18 +393,11 @@ export default function InvestmentsPage() {
         <Card>
           <CardHeader
             title="Log trades"
-            subtitle="Record buys, sells, and dividends. Unknown tickers are auto-added."
-            action={
-              <Button variant="secondary" size="sm" onClick={() => setTradeOpen(!tradeOpen)}>
-                {tradeOpen ? "Hide" : "Show"} trade log
-              </Button>
-            }
+            subtitle="Record buys, sells, and dividends. A ticker you have never held asks for its details on submit."
           />
-          {tradeOpen && (
-            <div className="px-3 pb-4">
-              <TradeEntry onComplete={() => {}} />
-            </div>
-          )}
+          <div className="px-3 pb-4">
+            <TradeEntry onComplete={() => {}} />
+          </div>
         </Card>
 
         <div className="grid gap-4 lg:grid-cols-3">
