@@ -22,7 +22,12 @@ export const metadata: Metadata = {
     "Track your net worth, income, expenses, budgets and investment portfolio — all locally in your browser.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+// Spelled out rather than using Next's generated `LayoutProps<"/">` global:
+// that type only exists once `next build`/`next dev` has written .next/types, so
+// a plain `tsc --noEmit` on a fresh checkout (as CI does) cannot see it.
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
       lang="en"
