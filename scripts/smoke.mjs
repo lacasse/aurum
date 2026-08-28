@@ -173,6 +173,13 @@ async function main() {
     "an unpriceable CAD ticker is reported as stale",
   );
 
+  /*
+   * Twelve Data is capped the same way. CI pins both windows to zero, so the
+   * route must report nothing spendable and reach for no provider at all.
+   */
+  expect(prices.body?.twelveData?.minute?.limit === 0, `the per-minute cap is pinned (got ${prices.body?.twelveData?.minute?.limit})`);
+  expect(prices.body?.twelveData?.day?.used === 0, `no Twelve Data credits were spent (got ${prices.body?.twelveData?.day?.used})`);
+
   console.log("destructive endpoints demand confirmation");
   expect(
     (await api("/api/demo", { method: "DELETE", body: JSON.stringify({}) })).status === 400,

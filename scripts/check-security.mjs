@@ -7,7 +7,13 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const IGNORED = new Set(["node_modules", ".next", ".git", "package-lock.json"]);
+const IGNORED = new Set([
+  "node_modules",
+  ".next",
+  ".git",
+  ".test-build", // compiled test output, not source
+  "package-lock.json",
+]);
 const SELF = "scripts/check-security.mjs";
 
 // Build the forbidden pattern so this very file does not match itself.
@@ -49,6 +55,14 @@ const HOME_PATH = /(?:^|[\s"'`(=:])(\/Users\/|\/home\/[a-z0-9_.-]+\/)/i;
 const EODHD_HOST = "eodhd" + ".com";
 const EODHD_ALLOWED_DIR = "src/app/api/prices/";
 
+/*
+ * Twelve Data has the same shape of limit — 8 credits a minute, 800 a day — and
+ * the same rule: every call site must reserve first. The FX helper calls it too,
+ * so the allowed set is a list rather than a single directory.
+ */
+const TWELVEDATA_HOST = "api.twelvedata" + ".com";
+const TWELVEDATA_ALLOWED = ["src/app/api/prices/", "src/lib/fx.ts"];
+
 function check(rel, content) {
   if (content.includes(EODHD_HOST)) {
     if (!rel.startsWith(EODHD_ALLOWED_DIR)) {
@@ -58,6 +72,18 @@ function check(rel, content) {
     } else if (!content.includes("reserveEodhdCalls")) {
       problems.push(
         `${rel}: calls ${EODHD_HOST} without reserveEodhdCalls — every call must reserve first`,
+      );
+    }
+  }
+
+  if (content.includes(TWELVEDATA_HOST)) {
+    if (!TWELVEDATA_ALLOWED.some((allowed) => rel.startsWith(allowed))) {
+      problems.push(
+        `${rel}: calls ${TWELVEDATA_HOST} outside ${TWELVEDATA_ALLOWED.join(" / ")}`,
+      );
+    } else if (!content.includes("reserveTwelveDataCredits")) {
+      problems.push(
+        `${rel}: calls ${TWELVEDATA_HOST} without reserveTwelveDataCredits — every call must reserve first`,
       );
     }
   }
@@ -95,6 +121,20 @@ if (!fallback) {
   problems.push(
     `src/lib/eodhd-quota.ts: default limit ${fallback[1]} exceeds the free plan's ${PLAN_LIMIT}/day`,
   );
+}
+
+/* The same, for Twelve Data's free plan. */
+const TD_PLAN = { TWELVEDATA_MINUTE_LIMIT: 8, TWELVEDATA_DAY_LIMIT: 800 };
+const tdSrc = readFileSync(join(ROOT, "src/lib/twelvedata-quota.ts"), "utf8");
+for (const [name, planLimit] of Object.entries(TD_PLAN)) {
+  const found = new RegExp(`${name}\\s*\\?\\?\\s*(\\d+)`).exec(tdSrc);
+  if (!found) {
+    problems.push(`src/lib/twelvedata-quota.ts: no ${name} fallback found`);
+  } else if (Number(found[1]) > planLimit) {
+    problems.push(
+      `src/lib/twelvedata-quota.ts: default ${name} ${found[1]} exceeds the free plan's ${planLimit}`,
+    );
+  }
 }
 
 if (problems.length) {
