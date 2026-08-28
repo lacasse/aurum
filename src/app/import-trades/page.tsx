@@ -23,8 +23,12 @@ import {
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import { fmtCAD, todayISO } from "@/lib/format";
-import { ACCOUNT_TYPES, AccountType, Holding } from "@/lib/types";
-import type { HoldingInput } from "@/lib/store";
+import {
+  Registration,
+  isInvestmentAccount,
+  isLiability,
+  TRANSFER_CATEGORY,
+} from "@/lib/types";
 
 type Step = "upload" | "review" | "done";
 
@@ -38,7 +42,7 @@ interface TradeRow {
   quantity: number;
   pricePerUnit: number;
   transactedAmount: number;
-  accountType: AccountType;
+  registration: Registration;
   manualCadConversion: number;
   include: boolean;
   error?: string;
@@ -74,7 +78,7 @@ function normalizeType(raw: string | undefined): TradeType {
   return "buy";
 }
 
-function normalizeAccountType(raw: string | undefined): AccountType {
+function normalizeAccountType(raw: string | undefined): Registration {
   const s = (raw ?? "").trim().toLowerCase();
   if (s.includes("tfsa")) return "TFSA";
   if (s.includes("rrsp") || s.includes("rrif")) return "RRSP";
@@ -112,7 +116,7 @@ function parseCsvToTradeRows(file: File, csvText: string): TradeRow[] {
     const quantity = parseNum(get("Quantity") ?? get("quantity"));
     const pricePerUnit = parseNum(get("Price per unit") ?? get("price per unit") ?? get("price"));
     const transactedAmount = parseNum(get("Transacted amount") ?? get("transacted amount") ?? get("amount"));
-    const accountType = normalizeAccountType(get("account type") ?? get("accounttype"));
+    const registration = normalizeAccountType(get("account type") ?? get("accounttype"));
     const manualCad = parseNum(
       get("Manual CAD Conversion") ?? get("manual cad conversion") ?? get("cad") ?? get("cad conversion"),
     );
@@ -131,7 +135,7 @@ function parseCsvToTradeRows(file: File, csvText: string): TradeRow[] {
       quantity,
       pricePerUnit,
       transactedAmount,
-      accountType,
+      registration,
       manualCadConversion: cadAmount,
       include: true,
       sourceFile: file.name,
@@ -148,6 +152,21 @@ export default function ImportTradesPage() {
   const updateHolding = useFinance((s) => s.updateHolding);
   const addTransaction = useFinance((s) => s.addTransaction);
   const accounts = useFinance((s) => s.accounts);
+  const adjustAccountCash = useFinance((s) => s.adjustAccountCash);
+
+  const investmentAccounts = accounts.filter((a) => isInvestmentAccount(a.kind));
+  /**
+   * The CSV names a registration ("TFSA"), not an account, so match it to one
+   * of the user's investment accounts and fall back to the first if none
+   * carries that registration.
+   */
+  const accountIdFor = (registration: Registration): string =>
+    investmentAccounts.find((a) => a.registration === registration)?.id ??
+    investmentAccounts[0]?.id ??
+    "";
+  /** The everyday account cash moves in from / out to. */
+  const cashAccountId =
+    accounts.find((a) => !isInvestmentAccount(a.kind) && !isLiability(a.kind))?.id ?? "";
 
   const [step, setStep] = useState<Step>("upload");
   const [rows, setRows] = useState<TradeRow[]>([]);
@@ -185,14 +204,21 @@ export default function ImportTradesPage() {
     let updated = 0;
     let deposits = 0;
     let withdrawals = 0;
+    // Buying converts cash already in the account into securities, so the cash
+    // has to leave the balance or the money is counted twice — once as cash and
+    // again as the position. Netted per account, applied once at the end.
+    const cashDeltas = new Map<string, number>();
+    const moveCash = (accountId: string, delta: number) =>
+      cashDeltas.set(accountId, (cashDeltas.get(accountId) ?? 0) + delta);
 
     // Sort by date so buys process in chronological order
     const sorted = [...included].sort((a, b) => a.date.localeCompare(b.date));
 
     for (const row of sorted) {
       if (row.type === "buy") {
+        moveCash(accountIdFor(row.registration), -Math.abs(row.manualCadConversion));
         const existing = holdings.find(
-          (h) => h.ticker.toUpperCase() === row.ticker && h.accountType === row.accountType,
+          (h) => h.ticker.toUpperCase() === row.ticker && h.accountId === accountIdFor(row.registration),
         );
         if (existing) {
           const costCad = row.manualCadConversion;
@@ -221,14 +247,15 @@ export default function ImportTradesPage() {
                 : 0,
             price: row.pricePerUnit,
             dividendsReceived: 0,
-            accountType: row.accountType,
+            accountId: accountIdFor(row.registration),
             currency: "CAD",
-          } as HoldingInput);
+          });
           created++;
         }
       } else if (row.type === "sell") {
+        moveCash(accountIdFor(row.registration), Math.abs(row.manualCadConversion));
         const existing = holdings.find(
-          (h) => h.ticker.toUpperCase() === row.ticker && h.accountType === row.accountType,
+          (h) => h.ticker.toUpperCase() === row.ticker && h.accountId === accountIdFor(row.registration),
         );
         if (existing && row.quantity > 0) {
           const newShares = Math.max(0, existing.shares - row.quantity);
@@ -239,8 +266,9 @@ export default function ImportTradesPage() {
           updated++;
         }
       } else if (row.type === "dividend") {
+        moveCash(accountIdFor(row.registration), Math.abs(row.manualCadConversion));
         const existing = holdings.find(
-          (h) => h.ticker.toUpperCase() === row.ticker && h.accountType === row.accountType,
+          (h) => h.ticker.toUpperCase() === row.ticker && h.accountId === accountIdFor(row.registration),
         );
         if (existing && row.manualCadConversion > 0) {
           updateHolding(existing.id, {
@@ -249,32 +277,35 @@ export default function ImportTradesPage() {
           });
           updated++;
         }
-      } else if (row.type === "deposit") {
-        // Create an income transaction
-        const defaultAccount = accounts[0]?.id ?? "";
-        addTransaction({
-          date: row.date,
-          type: "income",
-          amount: Math.abs(row.manualCadConversion),
-          category: "Other",
-          accountId: defaultAccount,
-          payee: `Deposit to ${row.accountType}`,
-          note: `Historical import: ${row.accountType} deposit`,
-        });
-        deposits++;
-      } else if (row.type === "withdrawal") {
-        const defaultAccount = accounts[0]?.id ?? "";
-        addTransaction({
-          date: row.date,
-          type: "expense",
-          amount: Math.abs(row.manualCadConversion),
-          category: "Other",
-          accountId: defaultAccount,
-          payee: `Withdrawal from ${row.accountType}`,
-          note: `Historical import: ${row.accountType} withdrawal`,
-        });
-        withdrawals++;
+      } else if (row.type === "deposit" || row.type === "withdrawal") {
+        // Money moving in or out of a brokerage is a transfer between two of
+        // your own accounts, not income or spending: it does not change net
+        // worth, it just changes where the money sits.
+        const investmentId = accountIdFor(row.registration);
+        const deposit = row.type === "deposit";
+        const from = deposit ? cashAccountId : investmentId;
+        const to = deposit ? investmentId : cashAccountId;
+        if (from && to && from !== to) {
+          addTransaction({
+            date: row.date,
+            type: "transfer",
+            amount: Math.abs(row.manualCadConversion),
+            category: TRANSFER_CATEGORY,
+            sourceAccountId: from,
+            destinationAccountId: to,
+            payee: deposit
+              ? `Deposit to ${row.registration}`
+              : `Withdrawal from ${row.registration}`,
+            note: `Historical import: ${row.registration} ${row.type}`,
+          });
+        }
+        if (deposit) deposits++;
+        else withdrawals++;
       }
+    }
+
+    for (const [accountId, delta] of cashDeltas) {
+      adjustAccountCash(accountId, Math.round(delta * 100) / 100);
     }
 
     setResult({ created, updated, deposits, withdrawals });
@@ -468,7 +499,7 @@ export default function ImportTradesPage() {
                           {fmtCAD(r.manualCadConversion, 2)}
                         </td>
                         <td className="px-3 py-2">
-                          <Badge>{r.accountType}</Badge>
+                          <Badge>{r.registration}</Badge>
                         </td>
                       </tr>
                     ))}

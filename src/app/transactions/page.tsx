@@ -1,7 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import {
+  ArrowDownRight,
+  ArrowLeftRight,
+  ArrowRight,
+  ArrowUpRight,
+  Pencil,
+  Plus,
+  Repeat,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { Shell } from "@/components/shell";
 import {
   Badge,
@@ -15,12 +25,21 @@ import {
 import { GroupedBars } from "@/components/charts";
 import {
   ConfirmDelete,
+  RecurringForm,
   TransactionForm,
 } from "@/components/forms";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import { fmtCompact, fmtCAD, labelDate, labelMonth, lastMonthKeys, monthKeyOf } from "@/lib/format";
-import { INCOME_CATEGORIES, Transaction } from "@/lib/types";
+import {
+  INCOME_CATEGORIES,
+  RECURRENCE_LABELS,
+  RecurringRule,
+  TRANSFER_CATEGORY,
+  Transaction,
+  touchesAccount,
+  transactionEndpoints,
+} from "@/lib/types";
 
 export default function TransactionsPage() {
   const ready = useReady();
@@ -28,9 +47,11 @@ export default function TransactionsPage() {
   const transactions = useFinance((s) => s.transactions);
   const userCategories = useFinance((s) => s.categories);
   const deleteTransaction = useFinance((s) => s.deleteTransaction);
+  const recurring = useFinance((s) => s.recurring);
+  const deleteRecurring = useFinance((s) => s.deleteRecurring);
 
   const [q, setQ] = useState("");
-  const [type, setType] = useState<"all" | "income" | "expense">("all");
+  const [type, setType] = useState<"all" | "income" | "expense" | "transfer">("all");
   const [category, setCategory] = useState("all");
   const [accountId, setAccountId] = useState("all");
   const [month, setMonth] = useState("all");
@@ -38,6 +59,9 @@ export default function TransactionsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState<Transaction | null>(null);
+  const [ruleFormOpen, setRuleFormOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState<RecurringRule | null>(null);
+  const [deletingRule, setDeletingRule] = useState<RecurringRule | null>(null);
 
   const monthOptions = useMemo(() => {
     if (transactions.length === 0) return [];
@@ -50,7 +74,7 @@ export default function TransactionsPage() {
     return transactions
       .filter((t) => type === "all" || t.type === type)
       .filter((t) => category === "all" || t.category === category)
-      .filter((t) => accountId === "all" || t.accountId === accountId)
+      .filter((t) => accountId === "all" || touchesAccount(t, accountId))
       .filter((t) => month === "all" || monthKeyOf(t.date) === month)
       .filter(
         (t) =>
@@ -65,8 +89,10 @@ export default function TransactionsPage() {
     let income = 0;
     let expenses = 0;
     for (const t of filtered) {
+      // Transfers move money between your own accounts, so they belong to
+      // neither total.
       if (t.type === "income") income += t.amount;
-      else expenses += t.amount;
+      else if (t.type === "expense") expenses += t.amount;
     }
     return { income, expenses, net: income - expenses };
   }, [filtered]);
@@ -79,7 +105,7 @@ export default function TransactionsPage() {
       for (const t of filtered) {
         if (monthKeyOf(t.date) !== key) continue;
         if (t.type === "income") income += t.amount;
-        else expenses += t.amount;
+        else if (t.type === "expense") expenses += t.amount;
       }
       return { label: labelMonth(key), income, expenses };
     });
@@ -155,6 +181,84 @@ export default function TransactionsPage() {
           </div>
         </Card>
 
+        {/* Recurring rules */}
+        <Card>
+          <div className="flex items-center justify-between px-5 pt-5">
+            <div>
+              <h3 className="text-sm font-semibold">Recurring</h3>
+              <p className="mt-0.5 text-xs text-ink-faint">
+                Rent, salary, subscriptions and contributions post themselves on
+                schedule
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setEditingRule(null);
+                setRuleFormOpen(true);
+              }}
+            >
+              <Plus size={14} /> New
+            </Button>
+          </div>
+          {recurring.length === 0 ? (
+            <p className="px-5 py-6 text-center text-xs text-ink-faint">
+              Nothing recurring yet. Add a rule and its payments appear here
+              automatically, including any already due.
+            </p>
+          ) : (
+            <div className="mt-3 divide-y divide-line/60 border-t border-line">
+              {recurring.map((r) => {
+                const { from, to } = transactionEndpoints(r, accountName);
+                return (
+                  <div
+                    key={r.id}
+                    className="flex items-center gap-3 px-5 py-3 text-sm"
+                  >
+                    <Repeat
+                      size={14}
+                      className={r.active ? "text-brand" : "text-ink-faint"}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{r.payee}</span>
+                      <span className="block truncate text-[11px] text-ink-faint">
+                        {RECURRENCE_LABELS[r.frequency]} · {from} → {to}
+                        {r.active
+                          ? ` · next ${labelDate(r.nextDate)}`
+                          : " · paused"}
+                      </span>
+                    </span>
+                    <span className="whitespace-nowrap font-semibold tabular-nums">
+                      {fmtCAD(r.amount, 2)}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Edit ${r.payee}`}
+                      onClick={() => {
+                        setEditingRule(r);
+                        setRuleFormOpen(true);
+                      }}
+                    >
+                      <Pencil size={14} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Delete ${r.payee}`}
+                      onClick={() => setDeletingRule(r)}
+                      className="hover:text-negative"
+                    >
+                      <Trash2 size={14} />
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+
         {/* Filters */}
         <Card className="p-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -177,6 +281,7 @@ export default function TransactionsPage() {
               <option value="all">All types</option>
               <option value="income">Income</option>
               <option value="expense">Expense</option>
+              <option value="transfer">Transfer</option>
             </Select>
             <Select value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="all">All categories</option>
@@ -194,6 +299,7 @@ export default function TransactionsPage() {
                   </option>
                 ))}
               </optgroup>
+              <option value={TRANSFER_CATEGORY}>{TRANSFER_CATEGORY}</option>
             </Select>
             <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
               <option value="all">All accounts</option>
@@ -231,7 +337,7 @@ export default function TransactionsPage() {
                     <th className="px-4 py-3 font-medium">Payee</th>
                     <th className="px-4 py-3 font-medium">Category</th>
                     <th className="hidden px-4 py-3 font-medium md:table-cell">
-                      Account
+                      From → To
                     </th>
                     <th className="px-4 py-3 text-right font-medium">Amount</th>
                     <th className="px-4 py-3 text-right font-medium">Actions</th>
@@ -260,17 +366,35 @@ export default function TransactionsPage() {
                         </Badge>
                       </td>
                       <td className="hidden px-4 py-3 text-ink-faint md:table-cell">
-                        {accountName(t.accountId)}
+                        {(() => {
+                          const { from, to } = transactionEndpoints(t, accountName);
+                          return (
+                            <span className="inline-flex items-center gap-1">
+                              <span className="truncate max-w-[110px]">{from}</span>
+                              <ArrowRight size={11} className="shrink-0" />
+                              <span className="truncate max-w-[110px]">{to}</span>
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td
                         className={cn(
                           "whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums",
-                          t.type === "income" ? "text-positive" : "text-ink",
+                          t.type === "income"
+                            ? "text-positive"
+                            : t.type === "transfer"
+                              ? "text-ink-dim"
+                              : "text-ink",
                         )}
                       >
                         {t.type === "income" ? (
                           <span className="inline-flex items-center gap-1">
                             <ArrowDownRight size={13} />+
+                            {fmtCAD(t.amount, 2)}
+                          </span>
+                        ) : t.type === "transfer" ? (
+                          <span className="inline-flex items-center gap-1">
+                            <ArrowLeftRight size={13} />
                             {fmtCAD(t.amount, 2)}
                           </span>
                         ) : (
@@ -318,6 +442,21 @@ export default function TransactionsPage() {
           setFormOpen(false);
           setEditing(null);
         }}
+      />
+      <RecurringForm
+        open={ruleFormOpen}
+        initial={editingRule}
+        onClose={() => {
+          setRuleFormOpen(false);
+          setEditingRule(null);
+        }}
+      />
+      <ConfirmDelete
+        open={deletingRule !== null}
+        onClose={() => setDeletingRule(null)}
+        onConfirm={() => deletingRule && deleteRecurring(deletingRule.id)}
+        title="Delete recurring transaction"
+        message={`Stop “${deletingRule?.payee ?? ""}” from repeating? Payments it has already posted are kept.`}
       />
       <ConfirmDelete
         open={deleting !== null}

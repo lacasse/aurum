@@ -37,8 +37,18 @@ interface BenchmarkData {
 export default function InvestmentsPage() {
   const ready = useReady();
   const holdings = useFinance((s) => s.holdings);
+  const accounts = useFinance((s) => s.accounts);
   const deleteHolding = useFinance((s) => s.deleteHolding);
   const updateHolding = useFinance((s) => s.updateHolding);
+
+  /** Short label for the account a position sits in, e.g. "TFSA". */
+  const accountLabel = (id: string) => {
+    const account = accounts.find((a) => a.id === id);
+    if (!account) return "—";
+    return account.registration && account.registration !== "non-registered"
+      ? account.registration
+      : account.name;
+  };
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Holding | null>(null);
@@ -425,7 +435,7 @@ export default function InvestmentsPage() {
                           <span className="flex items-center gap-1 text-ink-faint">
                             <span className="truncate max-w-[100px]">{r.holding.name}</span>
                             <span className="shrink-0 rounded bg-elevated px-1 py-px text-[8px] font-medium text-ink-faint">
-                              {r.holding.accountType}
+                              {accountLabel(r.holding.accountId)}
                             </span>
                             {r.holding.currency === "USD" && (
                               <span className="shrink-0 rounded bg-elevated px-1 py-px text-[8px] font-medium text-amber-400">

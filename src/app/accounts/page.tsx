@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   Banknote,
+  Bitcoin,
   Car,
   CreditCard,
   Home,
@@ -11,6 +12,7 @@ import {
   PiggyBank,
   Plus,
   Trash2,
+  TrendingUp,
   Wallet,
 } from "lucide-react";
 import { Shell } from "@/components/shell";
@@ -33,6 +35,8 @@ const KIND_ICON: Record<AccountKind, typeof Wallet> = {
   checking: Wallet,
   savings: PiggyBank,
   cash: Banknote,
+  investment: TrendingUp,
+  crypto: Bitcoin,
   property: Home,
   credit: CreditCard,
   loan: Car,
@@ -164,6 +168,9 @@ export default function AccountsPage() {
                       <span className="block text-sm font-semibold">{acc.name}</span>
                       <span className="block text-[11px] text-ink-faint">
                         {acc.institution}
+                        {acc.registration && acc.registration !== "non-registered"
+                          ? ` · ${acc.registration}`
+                          : ""}
                       </span>
                     </span>
                   </span>

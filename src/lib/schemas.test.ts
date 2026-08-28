@@ -25,7 +25,7 @@ describe("transactionSchema", () => {
     type: "expense",
     amount: 12.34,
     category: "Groceries",
-    accountId: "a1",
+    sourceAccountId: "a1",
     payee: "  Market  ",
   };
 
@@ -57,7 +57,7 @@ describe("transactionSchema", () => {
   test("rejects a malformed date and an unknown type", () => {
     assert.equal(transactionSchema.safeParse({ ...valid, date: "01/08/2026" }).success, false);
     assert.equal(transactionSchema.safeParse({ ...valid, date: "2026-8-1" }).success, false);
-    assert.equal(transactionSchema.safeParse({ ...valid, type: "transfer" }).success, false);
+    assert.equal(transactionSchema.safeParse({ ...valid, type: "nope" }).success, false);
   });
 
   test("rejects a missing or blank id", () => {
@@ -67,10 +67,9 @@ describe("transactionSchema", () => {
     assert.equal(transactionSchema.safeParse(noId).success, false);
   });
 
-  test("defaults category and accountId rather than failing", () => {
-    const t = ok(transactionSchema.safeParse({ ...valid, category: undefined, accountId: null }));
+  test("defaults the category rather than failing", () => {
+    const t = ok(transactionSchema.safeParse({ ...valid, category: undefined }));
     assert.equal(t.category, "Other");
-    assert.equal(t.accountId, "");
   });
 
   test("keeps a non-blank note and drops a blank or non-string one", () => {
@@ -82,6 +81,49 @@ describe("transactionSchema", () => {
   test("strips unknown keys instead of persisting them", () => {
     const t = ok(transactionSchema.safeParse({ ...valid, sneaky: "value" }));
     assert.equal("sneaky" in t, false);
+  });
+});
+
+describe("transactionSchema sides", () => {
+  const base = { id: "t1", date: "2026-08-01", amount: 10, category: "Groceries", payee: "x" };
+
+  test("an expense needs a source and income needs a destination", () => {
+    assert.equal(
+      transactionSchema.safeParse({ ...base, type: "expense", sourceAccountId: "a1" }).success,
+      true,
+    );
+    assert.equal(transactionSchema.safeParse({ ...base, type: "expense" }).success, false);
+    assert.equal(
+      transactionSchema.safeParse({ ...base, type: "income", destinationAccountId: "a1" }).success,
+      true,
+    );
+    assert.equal(transactionSchema.safeParse({ ...base, type: "income" }).success, false);
+  });
+
+  test("a transfer needs two different accounts", () => {
+    const transfer = { ...base, type: "transfer" as const };
+    assert.equal(
+      transactionSchema.safeParse({
+        ...transfer,
+        sourceAccountId: "a1",
+        destinationAccountId: "a2",
+      }).success,
+      true,
+    );
+    assert.equal(
+      transactionSchema.safeParse({ ...transfer, sourceAccountId: "a1" }).success,
+      false,
+      "a transfer with no destination is rejected",
+    );
+    assert.equal(
+      transactionSchema.safeParse({
+        ...transfer,
+        sourceAccountId: "a1",
+        destinationAccountId: "a1",
+      }).success,
+      false,
+      "a transfer to the same account is rejected",
+    );
   });
 });
 
@@ -115,6 +157,14 @@ describe("accountSchema", () => {
     assert.equal(ok(accountSchema.safeParse({ ...valid, balance: 1.005 })).balance, 1.01);
   });
 
+  test("keeps a known registration and rejects an unknown one", () => {
+    assert.equal(ok(accountSchema.safeParse({ ...valid, registration: "TFSA" })).registration, "TFSA");
+    assert.equal(ok(accountSchema.safeParse({ ...valid, registration: "Pension" })).registration, "Pension");
+    // `.catch` drops an unrecognised value rather than failing the whole account.
+    assert.equal(ok(accountSchema.safeParse({ ...valid, registration: "RESP" })).registration, undefined);
+    assert.equal(ok(accountSchema.safeParse(valid)).registration, undefined);
+  });
+
   test("validates history entries and discards a malformed history", () => {
     const good = ok(
       accountSchema.safeParse({ ...valid, history: [{ month: "2026-08", value: 10 }] }),
@@ -136,6 +186,7 @@ describe("holdingSchema", () => {
     avgCost: 100,
     price: 120,
     currency: "USD",
+    accountId: "acc-1",
   };
 
   test("uppercases the ticker and applies cross-field defaults", () => {
@@ -144,7 +195,7 @@ describe("holdingSchema", () => {
     assert.equal(h.name, "vfv", "name falls back to the ticker");
     assert.equal(h.assetClass, "US Equity");
     assert.equal(h.sector, "US Equity", "sector falls back to the asset class");
-    assert.equal(h.accountType, "non-registered");
+    assert.equal(h.accountId, "acc-1");
     assert.equal(h.priceCAD, 120, "CAD price falls back to the listing price");
     assert.equal(h.avgCostCAD, 100);
     assert.equal(h.dividendsReceived, 0);
@@ -165,7 +216,13 @@ describe("holdingSchema", () => {
   test("rejects unknown enum values (previously cast unchecked)", () => {
     assert.equal(holdingSchema.safeParse({ ...valid, currency: "EUR" }).success, false);
     assert.equal(holdingSchema.safeParse({ ...valid, assetClass: "Commodities" }).success, false);
-    assert.equal(holdingSchema.safeParse({ ...valid, accountType: "RESP" }).success, false);
+  });
+
+  test("requires the account the position is held in", () => {
+    const orphan: Partial<typeof valid> = { ...valid };
+    delete orphan.accountId;
+    assert.equal(holdingSchema.safeParse(orphan).success, false);
+    assert.equal(holdingSchema.safeParse({ ...valid, accountId: "  " }).success, false);
   });
 
   test("clamps negative dividends to zero", () => {

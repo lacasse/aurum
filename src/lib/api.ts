@@ -1,6 +1,13 @@
 "use client";
 
-import type { Account, FinanceData, Holding, MonthlySnapshot, Transaction } from "./types";
+import type {
+  Account,
+  FinanceData,
+  Holding,
+  MonthlySnapshot,
+  RecurringRule,
+  Transaction,
+} from "./types";
 
 export interface ServerState extends FinanceData {
   merchantRules: Record<string, string>;
@@ -59,6 +66,15 @@ export const api = {
 
   setMerchantRule: (merchant: string, category: string) =>
     send("/api/merchant-rules", "PUT", { merchant, category }),
+
+  // These return the whole state: creating or editing a rule can post the
+  // occurrences it already owes, which changes transactions and balances too.
+  createRecurring: (rule: RecurringRule) =>
+    send<ServerState>("/api/recurring", "POST", rule),
+  updateRecurring: (rule: RecurringRule) =>
+    send<ServerState>(`/api/recurring/${encodeURIComponent(rule.id)}`, "PUT", rule),
+  deleteRecurring: (id: string) =>
+    send(`/api/recurring/${encodeURIComponent(id)}`, "DELETE"),
 
   getSnapshots: (month: string) =>
     send<{ snapshots: MonthlySnapshot[] }>(`/api/snapshots?month=${encodeURIComponent(month)}`, "GET"),

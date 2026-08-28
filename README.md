@@ -117,10 +117,10 @@ skipped with console errors).
 | Page | What you get |
 | --- | --- |
 | **Dashboard** | Net worth / income / expenses / savings-rate KPI cards with sparklines, net-worth area chart (6–18M range toggle), expense donut, income-vs-expense bars, portfolio growth vs cost basis, stacked spending-by-category area, accounts overview, recent transactions |
-| **Transactions** | Full CRUD with filters (search, type, category, account, month), filtered summary chips, filtered cash-flow chart, balances adjust automatically (client and server agree) |
+| **Transactions** | Full CRUD with filters (search, type, category, account, month), filtered summary chips, filtered cash-flow chart, balances adjust automatically (client and server agree). Every row records where the money came *from* and went *to*; transfers move money between your own accounts. Recurring rules (rent, salary, contributions) post themselves on schedule and can be paused |
 | **Investments** | Holdings CRUD with price updates, value-vs-cost-basis chart, asset-allocation donut, sector radar, gain/loss bars, per-position table with weights |
 | **Budgets** | Monthly budgets per category, radial utilization gauge, budget-vs-actual bars, progress rows with inline limit editing, daily pace estimate — plus a category manager: create, rename, and delete categories (renames cascade to budgets and existing transactions; deleted categories move their transactions to "Other") |
-| **Accounts** | Assets/liabilities/net-worth KPIs, assets-vs-liabilities stacked area, account cards with history sparklines |
+| **Accounts** | Assets/liabilities/net-worth KPIs, assets-vs-liabilities stacked area, account cards with history sparklines. Accounts carry a kind (chequing, savings, cash, investment, crypto, property, credit, loan) and a registration (non-registered, TFSA, RRSP, FHSA, Pension) |
 | **Import CSV** | Upload one or many credit-card CSV exports (Amex-style or `transaction_date/merchant/amount`), auto-detected format, auto-categorization against your budget-section categories, duplicate flagging, and a review step to edit/delete/include rows before anything is saved. Card payments are skipped; category corrections are remembered per merchant for future imports |
 
 ## Stack
@@ -128,7 +128,7 @@ skipped with console errors).
 - [Next.js](https://nextjs.org) 16 (App Router, Turbopack) + React 19 + TypeScript
 - [PostgreSQL](https://www.postgresql.org) 17 + [Drizzle ORM](https://orm.drizzle.team) (migrations in `drizzle/`, applied at startup)
 - [Zod](https://zod.dev) for request-body validation — schemas are declared once in `src/lib/schemas.ts` and shared by every route
-- Route Handlers under `src/app/api` expose the data (accounts, transactions, holdings, budgets, categories, merchant rules, demo-data deletion)
+- Route Handlers under `src/app/api` expose the data (accounts, transactions, holdings, budgets, categories, merchant rules, recurring rules, demo-data deletion)
 - [Tailwind CSS](https://tailwindcss.com) v4 (semantic design tokens, dark theme by default with a light-mode toggle)
 - [Recharts](https://recharts.org) for all charts
 - [Zustand](https://zustand.docs.pmnd.rs) as the client cache — optimistic updates with fire-and-forget persistence to the API
@@ -138,6 +138,49 @@ skipped with console errors).
 > Next.js **standalone** output (`node server.js`), so it is unaffected by the
 > esbuild dev-service advisory that applies only to `next dev`/`tsx` in a
 > development environment. Do not pin dev-only tooling below the advisory line.
+
+## Accounts, transfers and recurring transactions
+
+**Every place money can sit is an account**, including registered ones. An account has two
+independent attributes, because they answer different questions:
+
+- **Kind** — what it is and how it behaves: `checking`, `savings`, `cash`, `investment`,
+  `property`, `credit`, `loan`. This decides the balance arithmetic (credit cards and
+  loans store what is *owed*, so the signs invert) and which accounts can hold securities.
+- **Registration** — its tax treatment: `non-registered`, `TFSA`, `RRSP`, `FHSA`,
+  `Pension`. Offered on every kind except debts and property, where it is meaningless.
+
+They are deliberately separate rather than one list: a TFSA may be a cash savings account
+or a portfolio of ETFs, and merging the two would force the cross product ("TFSA savings",
+"TFSA investment", …). Holdings reference an investment account by id, so a position's tax
+treatment is derived from its account instead of being duplicated on the holding.
+
+**Transactions have a source and a destination.** One side is always an account of yours;
+the other is either the outside world (named by `payee`) or a second account of yours:
+
+| Type | Source | Destination |
+| --- | --- | --- |
+| `expense` | your account | outside (payee) |
+| `income` | outside (payee) | your account |
+| `transfer` | your account | your other account |
+
+Transfers are how money reaches a registered account — a TFSA contribution is a transfer
+from chequing to the TFSA. They move money *within* your net worth rather than in or out
+of it, so they are excluded from income, spending, budgets and the cash-flow charts.
+
+**Recurring transactions** are templates plus a schedule (weekly, every 2 weeks, monthly,
+quarterly, yearly), managed on the Transactions page. Each rule owns a `nextDate`; loading
+the app posts every occurrence a rule owes up to today and advances it past them, so
+reopening the app after three months away posts exactly the three payments it missed.
+Generated rows carry the rule's id, which is also what stops a second run from posting a
+duplicate. Deleting a rule keeps the payments it already made — that money really moved.
+Month-based schedules clamp to short months, so a rule anchored on the 31st posts on
+Feb 28 and then returns to the 31st in March.
+
+> **Investment account balances are uninvested cash only.** Securities are valued from the
+> holdings themselves, so an investment account's balance covers just the cash sitting in
+> it. Recording a contribution as a transfer and then adding the holdings you bought with
+> it will count the money twice until you reduce the cash balance to match.
 
 > **Money is never stored as a float.** Every monetary, price and quantity
 > column is Postgres `numeric` (see `src/db/schema.ts`), and every total is
@@ -153,13 +196,14 @@ src/
   app/api/        # JSON API (force-dynamic route handlers)
   components/     # shell (sidebar/topbar), ui primitives, charts, forms, stat cards
   db/
-    schema.ts     # Drizzle schema (7 tables; money stored as exact `numeric`)
+    schema.ts     # Drizzle schema (9 tables; money stored as exact `numeric`)
     repo.ts       # queries, validation, balance side-effects, seed/reset
     init.ts       # one-shot migrate + first-run seed
   lib/
     types.ts      # domain models
     schemas.ts    # Zod request schemas shared by every API route
     money.ts      # exact money arithmetic in integer cents
+    recurrence.ts # schedule arithmetic for recurring transactions
     sample.ts     # deterministic 18-month sample data generator
     store.ts      # zustand store — optimistic updates + API sync
     api.ts        # typed fetch client for the API
@@ -187,6 +231,49 @@ and runs `node --test`, so there is no extra test-framework dependency.
 
 Every one of the above runs in CI on push and pull request
 (`.github/workflows/ci.yml`), along with a Docker image build.
+
+## Accounts, transfers and recurring transactions
+
+An account has two independent properties: a **kind** (checking, savings, cash,
+investment, crypto, property, credit, loan) describing what it is and how it behaves, and a
+**registration** (Non-registered, TFSA, RRSP, FHSA, Pension) describing its tax
+treatment. They are deliberately not one list — a TFSA can be a cash savings account
+or a portfolio of ETFs, and flattening them would force a "TFSA savings" / "TFSA
+investment" cross product. Registration is only offered on kinds that can be
+sheltered, so never on credit cards, loans or property.
+
+Holdings belong to an **account** rather than carrying a loose "account type" tag, so a
+contribution to a TFSA is an ordinary transfer into a real account. Investment and
+crypto accounts both hold positions; a crypto wallet or exchange account works the same
+way as a brokerage.
+
+Every transaction records **where the money came from and where it went**. One side
+is always an account of yours; the other is either a second account (a transfer) or
+the outside world, named by the payee:
+
+| Type | Source | Destination |
+| --- | --- | --- |
+| Expense | your account | payee |
+| Income | payer | your account |
+| Transfer | your account | your account |
+
+Transfers change nothing about your net worth, so they are excluded from income,
+spending, budgets and the cash-flow charts.
+
+**A positions-holding account's balance is uninvested cash only** — its securities are
+valued from the holdings. Buying therefore moves cash out of the account balance and
+into a holding, leaving net worth unchanged; selling and dividends put cash back.
+Adding a holding by hand records a position you already own and deliberately leaves
+the cash alone.
+
+**Recurring transactions** are templates plus a schedule (weekly, every 2 weeks,
+monthly, quarterly, yearly), managed on the Transactions page. Each rule owns the
+date it should next post, so catching up after the app has been closed for a month is
+just a loop, and the work is idempotent: rules are materialised on load, generated
+transactions are tagged with their rule id, and a rule that is up to date produces
+nothing. Month-based schedules clamp to short months — a rule anchored on the 31st
+posts on Feb 28 and returns to the 31st in March. Deleting a rule keeps the payments
+it already posted, since that money really moved.
 
 ## Demo data
 
