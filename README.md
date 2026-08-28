@@ -282,6 +282,29 @@ nothing. Month-based schedules clamp to short months — a rule anchored on the 
 posts on Feb 28 and returns to the 31st in March. Deleting a rule keeps the payments
 it already posted, since that money really moved.
 
+## Market data and the EODHD daily cap
+
+Canadian holdings are priced by [EODHD](https://eodhd.com), whose free plan allows
+**20 requests per day**, resetting at **00:00 GMT**. Going over does not degrade
+gracefully — it just fails — so every EODHD call in the app reserves against a ledger
+first and the app never exceeds the cap.
+
+The count lives in the database (`app_meta.eodhd_quota`, keyed by UTC date), not in
+memory: an in-process counter resets on every container restart, and a few redeploys
+could otherwise spend a whole day's allowance. `EODHD_DAY_LIMIT` overrides the cap;
+CI pins it to `0` so automated runs can never consume it, and no test calls the
+provider.
+
+Because there are usually far more holdings than daily calls, the refresh spends them
+on the tickers that have gone longest without an update, tracked per ticker in
+`app_meta.eodhd_last_fetch`. EOD prices only change after the market close, so nothing
+is spent before 16:00 Eastern.
+
+**When a price cannot be refreshed** — the allowance is spent, or the request failed —
+the holding keeps its **last known price** and is marked stale: a `STALE` badge on the
+row and a banner saying how many prices are affected and when the limit resets. Nothing
+is silently presented as current, and the prices update on their own after the reset.
+
 ## Demo data
 
 A fresh deployment seeds 18 months of deterministic sample data so the app is not empty
