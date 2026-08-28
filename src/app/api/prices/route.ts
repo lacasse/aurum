@@ -77,14 +77,25 @@ async function fetchEodhd(
 ): Promise<Map<string, number>> {
   if (items.length === 0 || !EODHD_TOKEN) return new Map();
   const out = new Map<string, number>();
-  const fetched: string[] = [];
 
   const to = new Date();
   const from = new Date(to);
   from.setDate(from.getDate() - 7);
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
+  /*
+   * Every ticker reached for is recorded, whether or not a price came back.
+   *
+   * Recording only successes meant a symbol the provider cannot price — a
+   * delisted holding, a wrong suffix — went back into the queue on the very
+   * next poll and spent another call, every hour, until the day's twenty were
+   * gone. Twenty calls for two prices. A failure now waits for tomorrow, which
+   * is also what a stale price is supposed to mean.
+   */
+  const attempted: string[] = [];
+
   for (const item of items) {
+    attempted.push(item.ticker);
     try {
       const url = `https://eodhd.com/api/eod/${encodeURIComponent(item.symbol)}?api_token=${EODHD_TOKEN}&fmt=json&period=1d&from=${fmt(from)}&to=${fmt(to)}`;
       const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
@@ -100,16 +111,13 @@ async function fetchEodhd(
       const px = last?.close;
       if (px != null && Number.isFinite(px) && px > 0) {
         out.set(item.ticker, Math.round(px * 100) / 100);
-        fetched.push(item.ticker);
       }
     } catch {
       console.warn(`[prices] EODHD fetch failed for ${item.symbol}`);
     }
     if (items.length > 1) await new Promise((r) => setTimeout(r, 250));
   }
-  // Record only what actually came back, so a failed call does not mark a
-  // ticker as done for the day.
-  await recordEodhdFetched(fetched);
+  await recordEodhdFetched(attempted);
   return out;
 }
 
