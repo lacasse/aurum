@@ -126,7 +126,12 @@ export default function ImportTradesPage() {
       if (pos.existing) {
         updateHolding(pos.existing.id, input);
         updated++;
-      } else if (input.shares > 0) {
+      } else if (input.shares > 0 || pos.everHeld) {
+        /*
+         * A ticker bought and sold within the same import still gets a row.
+         * It ends at zero shares, so the holdings table hides it, but the
+         * realized gain and any dividends it paid are kept.
+         */
         addHolding(input);
         created++;
       }

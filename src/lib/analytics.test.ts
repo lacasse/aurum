@@ -285,3 +285,61 @@ describe("sortHoldingRows", () => {
     assert.deepEqual(rows.map((r) => r.ticker), before);
   });
 });
+
+describe("closed positions", () => {
+  const lot = (over: Partial<Holding>): Holding =>
+    ({
+      id: "h",
+      ticker: "XEQT",
+      name: "iShares Core Equity ETF",
+      assetClass: "US Equity",
+      sector: "Other",
+      shares: 10,
+      avgCost: 30,
+      price: 40,
+      history: [38, 40],
+      dividendsReceived: 0,
+      accountId: "acc-tfsa",
+      currency: "CAD",
+      priceCAD: 40,
+      avgCostCAD: 30,
+      dividendsReceivedCAD: 0,
+      historyCAD: [38, 40],
+      ...over,
+    }) as Holding;
+
+  test("a fully-sold position is marked closed, not dropped", () => {
+    // Kept on purpose: the cost basis and dividends are the record of a
+    // realized gain, which still matters at tax time.
+    const [row] = consolidateHoldings([
+      lot({ shares: 0, dividendsReceivedCAD: 120 }),
+    ]);
+    assert.equal(row.closed, true);
+    assert.equal(row.totalDividends, 120, "the dividend record survives");
+    assert.equal(row.marketValue, 0);
+  });
+
+  test("a position with shares is not closed", () => {
+    assert.equal(consolidateHoldings([lot({ shares: 10 })])[0].closed, false);
+  });
+
+  test("selling out of one account does not close a position held elsewhere", () => {
+    const [row] = consolidateHoldings([
+      lot({ id: "a", accountId: "acc-tfsa", shares: 0 }),
+      lot({ id: "b", accountId: "acc-rrsp", shares: 5 }),
+    ]);
+    assert.equal(row.closed, false);
+    assert.equal(row.shares, 5);
+    assert.deepEqual(row.accountIds, ["acc-rrsp"], "the emptied account stops being tagged");
+    assert.equal(row.lots.length, 2, "both lots are still available as detail");
+  });
+
+  test("a wholly closed position keeps its account tags for the record", () => {
+    const [row] = consolidateHoldings([
+      lot({ id: "a", accountId: "acc-tfsa", shares: 0 }),
+      lot({ id: "b", accountId: "acc-rrsp", shares: 0 }),
+    ]);
+    assert.equal(row.closed, true);
+    assert.deepEqual(row.accountIds, ["acc-tfsa", "acc-rrsp"]);
+  });
+});

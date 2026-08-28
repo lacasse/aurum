@@ -213,8 +213,15 @@ export function sectorExposure(
 export interface HoldingRow {
   /** Every stored position for this ticker, one per account. */
   lots: Holding[];
-  /** The accounts this ticker sits in — one tag each on the holdings page. */
+  /** The accounts still holding it — one tag each on the holdings page. */
   accountIds: string[];
+  /**
+   * Every share has been sold. The row is kept rather than deleted: the cost
+   * basis and the dividends it paid are the record of a realized gain, which
+   * still matters at tax time in a non-registered account. The holdings table
+   * hides these unless closed positions are shown.
+   */
+  closed: boolean;
   ticker: string;
   name: string;
   currency: Currency;
@@ -283,11 +290,18 @@ export function consolidateHoldings(holdings: Holding[]): HoldingRow[] {
     const marketValue = roundMoney(shares * priceCAD);
     const gain = subtractMoney(marketValue, costBasis);
 
+    const openLots = lots.filter((h) => h.shares > 0);
     return {
       lots,
-      // De-duplicated, because two lots of the same ticker in one account
-      // would otherwise tag it twice.
-      accountIds: [...new Set(lots.map((h) => h.accountId))],
+      /*
+       * Tag only the accounts that still hold it, so a position closed in one
+       * account stops claiming to be there. When every lot is closed there is
+       * nothing left to tag, so the row keeps its full history instead.
+       */
+      accountIds: [
+        ...new Set((openLots.length > 0 ? openLots : lots).map((h) => h.accountId)),
+      ],
+      closed: shares <= 0,
       ticker: priced.ticker,
       name: priced.name,
       currency: priced.currency,
