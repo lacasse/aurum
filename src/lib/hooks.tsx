@@ -41,27 +41,74 @@ export function PageSkeleton() {
   );
 }
 
-export type TickerStatus = "idle" | "loading" | "valid" | "invalid";
+export type TickerStatus = "idle" | "loading" | "valid" | "invalid" | "unknown";
+
+/**
+ * Answers already paid for, kept for the life of the page.
+ *
+ * Every lookup costs a provider call from a small daily allowance, and a
+ * debounced field re-asks the same question constantly: clearing a ticker and
+ * retyping it, switching rows, reopening the dialog. Only definitive answers
+ * are cached — an "unknown" means nobody looked, and caching that would make
+ * an exhausted quota look permanent for the rest of the session.
+ */
+const validationCache = new Map<string, { valid: boolean; price: number | null }>();
+
+const cacheKey = (ticker: string, assetClass: AssetClass, currency: Currency) =>
+  `${ticker}|${assetClass}|${currency}`;
 
 /**
  * Debounced ticker validation against the price APIs.
- * Returns the validation status and the fetched price (if valid).
+ *
+ * Returns the validation status and the price, when there is one. A ticker
+ * already in the portfolio resolves from the store without a request at all —
+ * it is held, so it exists, and its price is already known.
  */
 export function useTickerValidation(ticker: string, assetClass: AssetClass, currency: Currency = "USD") {
   const [status, setStatus] = useState<TickerStatus>("idle");
   const [price, setPrice] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const t = ticker.trim().toUpperCase();
+  /*
+   * The held position's price, or null when the ticker is not in the
+   * portfolio. Selected down to a primitive so the store hands back a stable
+   * value: returning the holding itself would be a fresh object every render
+   * and would re-run the effect forever.
+   */
+  const heldPrice = useFinance((s) => {
+    const h = s.holdings.find((x) => x.ticker.toUpperCase() === t);
+    return h ? h.price : null;
+  });
 
   // This effect synchronizes with an external system (the price API): it
   // resets to "idle" when the field is cleared and shows "loading" while the
   // debounced request is in flight. Both are deliberate single re-renders, not
   // the cascading render chain `set-state-in-effect` exists to catch.
   useEffect(() => {
-    const t = ticker.trim().toUpperCase();
     if (!t) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus("idle");
       setPrice(null);
+      return;
+    }
+
+    /*
+     * A ticker you already hold needs no provider to confirm it exists, and
+     * the trade log is mostly about positions you already have. This is the
+     * difference between a call per keystroke-pause and no calls at all for
+     * the common case.
+     */
+    if (heldPrice !== null) {
+      setStatus("valid");
+      setPrice(heldPrice > 0 ? heldPrice : null);
+      return;
+    }
+
+    const key = cacheKey(t, assetClass, currency);
+    const cached = validationCache.get(key);
+    if (cached) {
+      setStatus(cached.valid ? "valid" : "invalid");
+      setPrice(cached.price);
       return;
     }
 
@@ -77,13 +124,26 @@ export function useTickerValidation(ticker: string, assetClass: AssetClass, curr
           `/api/prices/validate?ticker=${encodeURIComponent(t)}&class=${encodeURIComponent(assetClass)}&currency=${encodeURIComponent(currency)}`,
           { cache: "no-store", signal: controller.signal },
         );
-        if (!res.ok) return setStatus("invalid");
-        const data = (await res.json()) as { valid: boolean; price: number | null };
+        // A failed request is not a verdict on the ticker.
+        if (!res.ok) return setStatus("unknown");
+        const data = (await res.json()) as {
+          valid: boolean;
+          checked?: boolean;
+          price: number | null;
+        };
         if (controller.signal.aborted) return;
+        // `checked: false` means the daily allowance was gone and nothing was
+        // asked. Saying "invalid" there accuses a perfectly good ticker.
+        if (data.checked === false) {
+          setStatus("unknown");
+          setPrice(null);
+          return;
+        }
+        validationCache.set(key, { valid: data.valid, price: data.price });
         setStatus(data.valid ? "valid" : "invalid");
         setPrice(data.price);
       } catch {
-        if (!controller.signal.aborted) setStatus("invalid");
+        if (!controller.signal.aborted) setStatus("unknown");
       }
     }, 600);
 
@@ -91,7 +151,7 @@ export function useTickerValidation(ticker: string, assetClass: AssetClass, curr
       clearTimeout(timer);
       controller.abort();
     };
-  }, [ticker, assetClass, currency]);
+  }, [t, assetClass, currency, heldPrice]);
 
   return { status, price };
 }
