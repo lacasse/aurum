@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Check, Loader2, Plus, X } from "lucide-react";
 import {
   ACCOUNT_KINDS,
@@ -34,16 +34,22 @@ import { Button, Field, Input, Modal, Select } from "./ui";
 function FormActions({
   onCancel,
   label = "Save",
+  destructive,
 }: {
   onCancel: () => void;
   label?: string;
+  /** Sits apart on the left, well away from the button people mean to press. */
+  destructive?: ReactNode;
 }) {
   return (
-    <div className="mt-6 flex justify-end gap-2">
-      <Button type="button" variant="secondary" onClick={onCancel}>
-        Cancel
-      </Button>
-      <Button type="submit">{label}</Button>
+    <div className="mt-6 flex items-center justify-between gap-2">
+      <div>{destructive}</div>
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit">{label}</Button>
+      </div>
     </div>
   );
 }
@@ -425,6 +431,7 @@ function HoldingFormInner({
 }) {
   const addHolding = useFinance((s) => s.addHolding);
   const updateHolding = useFinance((s) => s.updateHolding);
+  const deleteHolding = useFinance((s) => s.deleteHolding);
   const usdCadRate = useFinance((s) => s.usdCadRate);
   const accounts = useFinance((s) => s.accounts);
   const investmentAccounts = accounts.filter((a) => isInvestmentAccount(a.kind));
@@ -446,6 +453,12 @@ function HoldingFormInner({
   );
   const [currency, setCurrency] = useState(initial?.currency ?? "USD");
   const [error, setError] = useState("");
+  /*
+   * Deleting asks twice, in place. A holding carries its whole cost basis and
+   * dividend history, so this is not something to lose to a stray click — but a
+   * nested modal inside this one would be worse than the two-step.
+   */
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const { status: tickerStatus, price: fetchedPrice } = useTickerValidation(
     ticker,
@@ -640,7 +653,43 @@ function HoldingFormInner({
         {" "}to enter a purchase, which pays for the shares out of that cash.
       </p>
       {error ? <p className="mt-3 text-xs text-negative">{error}</p> : null}
-      <FormActions onCancel={onClose} label={initial ? "Save changes" : "Add holding"} />
+      <FormActions
+        onCancel={onClose}
+        label={initial ? "Save changes" : "Add holding"}
+        destructive={
+          initial ? (
+            confirmingDelete ? (
+              <span className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => {
+                    deleteHolding(initial.id);
+                    onClose();
+                  }}
+                >
+                  Delete permanently
+                </Button>
+                <button
+                  type="button"
+                  className="text-xs text-ink-faint underline-offset-2 hover:underline"
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  Keep
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(true)}
+                className="text-xs text-ink-faint transition-colors hover:text-negative"
+              >
+                Delete holding
+              </button>
+            )
+          ) : undefined
+        }
+      />
     </form>
   );
 }
@@ -721,6 +770,7 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
   const holdings = useFinance((s) => s.holdings);
   const addHolding = useFinance((s) => s.addHolding);
   const updateHolding = useFinance((s) => s.updateHolding);
+  const deleteHolding = useFinance((s) => s.deleteHolding);
   const usdCadRate = useFinance((s) => s.usdCadRate);
   const accounts = useFinance((s) => s.accounts);
   const adjustAccountCash = useFinance((s) => s.adjustAccountCash);
