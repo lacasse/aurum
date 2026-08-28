@@ -1,7 +1,13 @@
 import { handle } from "@/db/http";
 import { eodhdUsage, recordEodhdFetched, reserveEodhdCalls } from "@/db/eodhd";
-import { priceSource, toEodhdSymbol, toTwelveDataSymbol } from "@/lib/market";
-import { reserveTwelveDataCredits } from "@/lib/ratelimit";
+import {
+  priceSource,
+  toEodhdSymbol,
+  toTwelveDataSymbol,
+  toUsdCryptoSymbol,
+} from "@/lib/market";
+import { usdCadRate } from "@/lib/fx";
+import { reserveTwelveDataCredits } from "@/db/twelvedata";
 import type { AssetClass, Currency } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +17,7 @@ const EODHD_TOKEN = process.env.EODHD_API_KEY ?? "";
 
 async function fetchTwelveDataPrice(symbol: string): Promise<number | null> {
   if (!TWELVE_DATA_KEY) return null;
-  if (!reserveTwelveDataCredits(1)) return null; // over rate/quota budget
+  if (!(await reserveTwelveDataCredits(1))) return null; // over rate/quota budget
   try {
     const res = await fetch(
       `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${TWELVE_DATA_KEY}`,
@@ -62,13 +68,21 @@ export async function GET(req: Request) {
     }
 
     let price: number | null = null;
-    const usesEodhd = priceSource(ac, cu) === "eodhd";
+    const usesEodhd = priceSource(ac, cu, ticker) === "eodhd";
 
     if (usesEodhd) {
       price = await fetchEodhdPrice(toEodhdSymbol(ticker));
       if (price != null) await recordEodhdFetched([ticker]);
     } else {
-      price = await fetchTwelveDataPrice(toTwelveDataSymbol(ticker, ac));
+      price = await fetchTwelveDataPrice(toTwelveDataSymbol(ticker, ac, cu));
+      // Same reason as the price route: a coin may not carry a CAD pair.
+      if (price == null && ac === "Crypto" && cu === "CAD") {
+        const usd = await fetchTwelveDataPrice(toUsdCryptoSymbol(ticker));
+        if (usd != null) {
+          const { rate } = await usdCadRate();
+          price = Math.round(usd * rate * 100) / 100;
+        }
+      }
     }
 
     const quota = usesEodhd ? await eodhdUsage() : undefined;
