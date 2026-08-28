@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Check, Loader2, Plus, X } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 import {
   ACCOUNT_KINDS,
   ACCOUNT_KIND_LABELS,
@@ -16,6 +16,7 @@ import {
   AccountKind,
   AssetClass,
   Currency,
+  CashFlow,
   Holding,
   INCOME_CATEGORIES,
   RecurrenceFrequency,
@@ -29,6 +30,7 @@ import {
 import { todayISO } from "@/lib/format";
 import { useFinance } from "@/lib/store";
 import { useTickerValidation } from "@/lib/hooks";
+import { isCoinTicker } from "@/lib/market";
 import { Button, Field, Input, Modal, Select } from "./ui";
 
 function FormActions({
@@ -766,11 +768,107 @@ function TradeTickerInput({
   );
 }
 
+/**
+ * Details we cannot infer for a ticker nobody has held before. The trade row
+ * carries the numbers; this carries the identity, and it is asked for once,
+ * on submit, rather than up front in a separate "add holding" form.
+ */
+interface NewHoldingMeta {
+  ticker: string;
+  name: string;
+  assetClass: AssetClass;
+  sector: string;
+}
+
+/** A trailing row the user has not touched yet is not a trade. */
+function isBlankRow(row: TradeRow): boolean {
+  return (
+    !row.ticker.trim() &&
+    !row.quantity.trim() &&
+    !row.price.trim() &&
+    !row.cadAmount.trim()
+  );
+}
+
+function NewHoldingDetails({
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  pending: NewHoldingMeta[];
+  onCancel: () => void;
+  onConfirm: (meta: NewHoldingMeta[]) => void;
+}) {
+  const [meta, setMeta] = useState<NewHoldingMeta[]>(pending);
+
+  const set = (ticker: string, field: keyof NewHoldingMeta, value: string) =>
+    setMeta((prev) =>
+      prev.map((m) => (m.ticker === ticker ? { ...m, [field]: value } : m)),
+    );
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onConfirm(
+          meta.map((m) => ({
+            ...m,
+            name: m.name.trim() || m.ticker,
+            sector: m.sector.trim() || m.assetClass,
+          })),
+        );
+      }}
+    >
+      <p className="text-xs text-ink-dim">
+        {meta.length === 1 ? "This ticker is" : "These tickers are"} new to your
+        portfolio. The asset class decides which price feed quotes it, so it is
+        worth getting right.
+      </p>
+      <div className="mt-4 space-y-4">
+        {meta.map((m) => (
+          <div key={m.ticker} className="rounded-lg border border-line bg-elevated/60 p-3">
+            <p className="text-sm font-medium">{m.ticker}</p>
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              <Field label="Name">
+                <Input
+                  value={m.name}
+                  onChange={(e) => set(m.ticker, "name", e.target.value)}
+                  placeholder={m.ticker}
+                  autoFocus
+                />
+              </Field>
+              <Field label="Asset class">
+                <Select
+                  value={m.assetClass}
+                  onChange={(e) => set(m.ticker, "assetClass", e.target.value)}
+                >
+                  {ASSET_CLASSES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Sector / group">
+                <Input
+                  value={m.sector}
+                  onChange={(e) => set(m.ticker, "sector", e.target.value)}
+                  placeholder={m.assetClass}
+                />
+              </Field>
+            </div>
+          </div>
+        ))}
+      </div>
+      <FormActions onCancel={onCancel} label="Record trades" />
+    </form>
+  );
+}
+
 export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
   const holdings = useFinance((s) => s.holdings);
   const addHolding = useFinance((s) => s.addHolding);
   const updateHolding = useFinance((s) => s.updateHolding);
-  const deleteHolding = useFinance((s) => s.deleteHolding);
   const usdCadRate = useFinance((s) => s.usdCadRate);
   const accounts = useFinance((s) => s.accounts);
   const adjustAccountCash = useFinance((s) => s.adjustAccountCash);
@@ -782,23 +880,25 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
   ]);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
+  /** Non-null while the new-position dialog is asking for the missing details. */
+  const [pending, setPending] = useState<NewHoldingMeta[] | null>(null);
 
   const update = (id: string, field: keyof TradeRow, value: string) => {
-    setRows((prev) =>
-      prev.map((r) => {
+    setRows((prev) => {
+      const next = prev.map((r) => {
         if (r.id !== id) return r;
-        const next = { ...r, [field]: value };
+        const draft = { ...r, [field]: value };
         // Auto-fill ticker defaults when changing action
         if (field === "action") {
           if (value === "dividend") {
-            next.quantity = "1";
+            draft.quantity = "1";
           }
           if (value === "sell") {
             // Pre-fill price from current price if ticker exists
             const h = holdings.find(
               (h) => h.ticker.toUpperCase() === r.ticker.toUpperCase(),
             );
-            if (h) next.price = String(h.price);
+            if (h) draft.price = String(h.price);
           }
         }
         // Auto-fill CAD amount when currency is USD and price/qty change
@@ -806,43 +906,107 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
           r.currency === "USD" &&
           (field === "price" || field === "quantity" || field === "currency")
         ) {
-          const qty = Number(field === "quantity" ? value : next.quantity);
-          const px = Number(field === "price" ? value : next.price);
+          const qty = Number(field === "quantity" ? value : draft.quantity);
+          const px = Number(field === "price" ? value : draft.price);
           if (qty > 0 && px > 0) {
-            next.cadAmount = String(Math.round(qty * px * usdCadRate * 100) / 100);
+            draft.cadAmount = String(Math.round(qty * px * usdCadRate * 100) / 100);
           }
         }
         if (field === "currency" && value === "CAD") {
-          next.cadAmount = "";
+          draft.cadAmount = "";
         }
-        return next;
-      }),
-    );
+        return draft;
+      });
+      /*
+       * The last row grows a fresh one behind it the moment it stops being
+       * empty, so there is always somewhere to type next and never a button to
+       * press first. Blank trailing rows are ignored on submit.
+       */
+      const last = next[next.length - 1];
+      if (last && !isBlankRow(last)) {
+        next.push({ ...emptyRow(), accountId: last.accountId || defaultAccountId });
+      }
+      return next;
+    });
   };
 
   const removeRow = (id: string) => {
     setRows((prev) => (prev.length > 1 ? prev.filter((r) => r.id !== id) : prev));
   };
 
-  const process = () => {
+  const reset = () => {
+    setRows([{ ...emptyRow(), accountId: defaultAccountId }]);
+    setPending(null);
+  };
+
+  /**
+   * Applies the batch. `meta` carries the identity of tickers that have no
+   * holding yet, collected by the dialog; it is empty when every row names a
+   * position that already exists.
+   */
+  const commit = (entered: NewHoldingMeta[]) => {
     setError("");
     setOk("");
-    let created = 0;
-    let updated = 0;
+    const meta = new Map(entered.map((m) => [m.ticker, m]));
+    const active = rows.filter((r) => !isBlankRow(r));
+
     // Netted per account and applied once at the end, so a batch that buys and
     // sells in the same account does not race itself through the API.
     const cashDeltas = new Map<string, number>();
 
-    for (const row of rows) {
-      const ticker = row.ticker.trim().toUpperCase();
-      if (!ticker) {
-        setError("Ticker is required on every row.");
-        return;
-      }
+    /*
+     * A batch can touch the same position on several rows, but `holdings` is a
+     * render-time snapshot that does not move between them. Rows are replayed
+     * onto this working copy and each position is written back exactly once, so
+     * a second buy of the same ticker builds on the first rather than
+     * overwriting it — or, for a ticker that is new, opening a duplicate.
+     *
+     * Keyed by ticker *and* account, because one ticker held in two accounts is
+     * two positions with their own cost bases.
+     */
+    interface WorkingLot {
+      ticker: string;
+      existing: Holding | null;
+      accountId: string;
+      currency: string;
+      shares: number;
+      avgCost: number;
+      dividends: number;
+      price: number;
+      flows: CashFlow[];
+    }
+    const lots = new Map<string, WorkingLot>();
+    const lotFor = (ticker: string, row: TradeRow): WorkingLot => {
+      const key = `${ticker} ${row.accountId}`;
+      const found = lots.get(key);
+      if (found) return found;
+      const existing =
+        holdings.find(
+          (h) =>
+            h.ticker.toUpperCase() === ticker && h.accountId === row.accountId,
+        ) ?? null;
+      const lot: WorkingLot = {
+        ticker,
+        existing,
+        accountId: row.accountId,
+        currency: existing?.currency ?? row.currency,
+        shares: existing?.shares ?? 0,
+        avgCost: existing?.avgCost ?? 0,
+        dividends: existing?.dividendsReceived ?? 0,
+        price: existing?.price ?? 0,
+        flows: [...(existing?.flows ?? [])],
+      };
+      lots.set(key, lot);
+      return lot;
+    };
 
+    for (const row of active) {
+      const ticker = row.ticker.trim().toUpperCase();
       const qty = Number(row.quantity);
       const px = Number(row.price);
       const isUsd = row.currency === "USD";
+      const lot = lotFor(ticker, row);
+      const held = lot.existing != null || lot.shares > 0;
 
       if (row.action === "buy") {
         if (!Number.isFinite(qty) || qty <= 0) {
@@ -860,64 +1024,36 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
           row.accountId,
           (cashDeltas.get(row.accountId) ?? 0) - Math.abs(costCad),
         );
-        const existing = holdings.find(
-          (h) => h.ticker.toUpperCase() === ticker,
-        );
-        if (existing) {
-          const newShares = existing.shares + qty;
-          const newAvgCost =
-            existing.shares > 0
-              ? (existing.shares * existing.avgCost + costCad) / newShares
-              : costCad / qty;
-          updateHolding(existing.id, {
-            ...existing,
-            shares: Math.round(newShares * 1e8) / 1e8,
-            avgCost: Math.round(newAvgCost * 10000) / 10000,
-            accountId: row.accountId,
-            currency: row.currency as Holding["currency"],
-            // Recorded so this trade counts towards the realized gain and the
-            // money-weighted return, same as an imported one.
-            flows: [
-              ...(existing.flows ?? []),
-              { date: row.date, kind: "buy" as const, amount: Math.abs(costCad), shares: qty },
-            ],
-          });
-          updated++;
-        } else {
-          addHolding({
-            ticker,
-            name: ticker,
-            assetClass: "US Equity",
-            sector: "Other",
-            shares: qty,
-            avgCost: Math.round((costCad / qty) * 10000) / 10000,
-            price: px,
-            dividendsReceived: 0,
-            accountId: row.accountId,
-            currency: row.currency as Holding["currency"],
-            flows: [{ date: row.date, kind: "buy", amount: Math.abs(costCad), shares: qty }],
-          });
-          created++;
-        }
+        const newShares = lot.shares + qty;
+        lot.avgCost =
+          lot.shares > 0
+            ? (lot.shares * lot.avgCost + costCad) / newShares
+            : costCad / qty;
+        lot.shares = newShares;
+        if (lot.price <= 0) lot.price = px;
+        // Recorded so this trade counts towards the realized gain and the
+        // money-weighted return, same as an imported one.
+        lot.flows.push({
+          date: row.date,
+          kind: "buy",
+          amount: Math.abs(costCad),
+          shares: qty,
+        });
       } else if (row.action === "sell") {
         if (!Number.isFinite(qty) || qty <= 0) {
           setError(`Sell ${ticker}: quantity must be > 0.`);
           return;
         }
-        const existing = holdings.find(
-          (h) => h.ticker.toUpperCase() === ticker,
-        );
-        if (!existing) {
+        if (!held) {
           setError(`Sell ${ticker}: no position found.`);
           return;
         }
-        if (qty > existing.shares) {
+        if (qty > lot.shares) {
           setError(
-            `Sell ${ticker}: cannot sell ${qty} shares, only ${existing.shares} held.`,
+            `Sell ${ticker}: cannot sell ${qty} shares, only ${lot.shares} held.`,
           );
           return;
         }
-        const newShares = existing.shares - qty;
         const proceedsCad = isUsd
           ? Number(row.cadAmount) || qty * px * usdCadRate
           : qty * px;
@@ -925,64 +1061,134 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
           row.accountId,
           (cashDeltas.get(row.accountId) ?? 0) + Math.abs(proceedsCad),
         );
-        updateHolding(existing.id, {
-          ...existing,
-          shares: Math.round(newShares * 1e8) / 1e8,
-          flows: [
-            ...(existing.flows ?? []),
-            {
-              date: row.date,
-              kind: "sell" as const,
-              amount: Math.abs(proceedsCad),
-              shares: -qty,
-            },
-          ],
+        lot.shares -= qty;
+        lot.flows.push({
+          date: row.date,
+          kind: "sell",
+          amount: Math.abs(proceedsCad),
+          shares: -qty,
         });
-        updated++;
       } else if (row.action === "dividend") {
         const cadAmount = isUsd ? Number(row.cadAmount) || 0 : Number(row.price) || 0;
         if (!Number.isFinite(cadAmount) || cadAmount <= 0) {
           setError(`Dividend ${ticker}: amount must be > 0.`);
           return;
         }
-        const existing = holdings.find(
-          (h) => h.ticker.toUpperCase() === ticker,
-        );
-        if (existing) {
-          cashDeltas.set(
-            row.accountId,
-            (cashDeltas.get(row.accountId) ?? 0) + cadAmount,
-          );
-          updateHolding(existing.id, {
-            ...existing,
-            dividendsReceived: existing.dividendsReceived + cadAmount,
-            flows: [
-              ...(existing.flows ?? []),
-              { date: row.date, kind: "dividend" as const, amount: cadAmount, shares: 0 },
-            ],
-          });
-          updated++;
-        } else {
+        if (!held) {
           setError(`Dividend ${ticker}: no position found to credit.`);
           return;
         }
+        cashDeltas.set(
+          row.accountId,
+          (cashDeltas.get(row.accountId) ?? 0) + cadAmount,
+        );
+        lot.dividends += cadAmount;
+        lot.flows.push({
+          date: row.date,
+          kind: "dividend",
+          amount: cadAmount,
+          shares: 0,
+        });
       }
     }
 
-    // Only applied once every row has validated: an early `return` above
-    // aborts the whole batch, and the cash must not move for a batch that
-    // never posted its trades.
+    // Nothing below can fail, so the writes and the cash only happen once every
+    // row has validated: an early `return` above aborts the whole batch, and
+    // the cash must not move for a batch that never posted its trades.
+    let created = 0;
+    for (const lot of lots.values()) {
+      const shares = Math.round(lot.shares * 1e8) / 1e8;
+      const avgCost = Math.round(lot.avgCost * 10000) / 10000;
+      if (lot.existing) {
+        updateHolding(lot.existing.id, {
+          ...lot.existing,
+          shares,
+          avgCost,
+          dividendsReceived: Math.round(lot.dividends * 100) / 100,
+          flows: lot.flows,
+        });
+        continue;
+      }
+      // A ticker already held in another account keeps that position's
+      // identity; only one nobody has held before goes through the dialog.
+      const sibling = holdings.find((h) => h.ticker.toUpperCase() === lot.ticker);
+      const m = meta.get(lot.ticker);
+      if (!m && !sibling) {
+        // Unreachable: every unknown ticker is collected before commit runs.
+        // Guessing an asset class here would send it to the wrong price feed.
+        setError(`${lot.ticker}: missing position details.`);
+        return;
+      }
+      addHolding({
+        ticker: lot.ticker,
+        name: m?.name ?? sibling?.name ?? lot.ticker,
+        assetClass: m?.assetClass ?? sibling?.assetClass ?? "US Equity",
+        sector: m?.sector ?? sibling?.sector ?? "Other",
+        shares,
+        avgCost,
+        price: lot.price,
+        dividendsReceived: Math.round(lot.dividends * 100) / 100,
+        accountId: lot.accountId,
+        currency: lot.currency as Holding["currency"],
+        flows: lot.flows,
+      });
+      created++;
+    }
+
     for (const [accountId, delta] of cashDeltas) {
       adjustAccountCash(accountId, Math.round(delta * 100) / 100);
     }
 
     setOk(
-      `Processed ${created + updated} trade${created + updated !== 1 ? "s" : ""}` +
-        (created > 0 ? ` (${created} new)` : "") +
-        (updated > 0 ? ` (${updated} updated)` : ""),
+      `Recorded ${active.length} trade${active.length !== 1 ? "s" : ""}` +
+        (created > 0 ? ` (${created} new position${created !== 1 ? "s" : ""})` : ""),
     );
-    setRows([{ ...emptyRow(), accountId: defaultAccountId }]);
+    reset();
     onComplete?.();
+  };
+
+  const process = () => {
+    setError("");
+    setOk("");
+    const active = rows.filter((r) => !isBlankRow(r));
+    if (active.length === 0) {
+      setError("Enter at least one trade.");
+      return;
+    }
+    for (const row of active) {
+      if (!row.ticker.trim()) {
+        setError("Ticker is required on every row.");
+        return;
+      }
+    }
+
+    /*
+     * Buying a ticker with no holding behind it opens a position, and a
+     * position needs a name and an asset class that no trade row carries. Ask
+     * for them here, once per ticker, instead of guessing.
+     */
+    const needed: NewHoldingMeta[] = [];
+    const seen = new Set<string>();
+    for (const row of active) {
+      const ticker = row.ticker.trim().toUpperCase();
+      if (row.action !== "buy" || seen.has(ticker)) continue;
+      if (holdings.some((h) => h.ticker.toUpperCase() === ticker)) continue;
+      seen.add(ticker);
+      needed.push({
+        ticker,
+        name: "",
+        // A coin is never an equity, and routing it as one sends it to the
+        // wrong price feed — so start from what the symbol already tells us.
+        assetClass: isCoinTicker(ticker) ? "Crypto" : "US Equity",
+        sector: "",
+      });
+    }
+
+    if (needed.length > 0) {
+      setPending(needed);
+      return;
+    }
+    commit([]);
   };
 
   return (
@@ -1092,13 +1298,30 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
       {ok && <p className="text-xs text-positive">{ok}</p>}
 
       <div className="flex items-center gap-2">
-        <Button type="button" variant="secondary" onClick={() => setRows((prev) => [...prev, { ...emptyRow(), accountId: defaultAccountId }])}>
-          <Plus size={14} /> Add row
-        </Button>
         <Button type="button" onClick={process}>
           Submit trades
         </Button>
       </div>
+
+      <Modal
+        open={pending != null}
+        onClose={() => setPending(null)}
+        title={
+          pending && pending.length > 1 ? "New positions" : "New position"
+        }
+      >
+        {pending && (
+          <NewHoldingDetails
+            key={pending.map((p) => p.ticker).join(",")}
+            pending={pending}
+            onCancel={() => setPending(null)}
+            onConfirm={(meta) => {
+              setPending(null);
+              commit(meta);
+            }}
+          />
+        )}
+      </Modal>
     </div>
   );
 }
