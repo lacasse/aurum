@@ -564,7 +564,13 @@ function HoldingFormInner({
         <Field label="Average cost per share">
           <Input
             type="number"
-            step="0.01"
+            /*
+             * A per-unit price, not a money total. Averaging buys over
+             * fractional shares lands on fractions of a cent, and a 0.01 step
+             * makes the browser reject the very value we stored — editing an
+             * imported holding failed on its own average cost.
+             */
+            step="any"
             min="0"
             value={avgCost}
             onChange={(e) => setAvgCost(e.target.value)}
@@ -574,7 +580,7 @@ function HoldingFormInner({
         <Field label="Current price" hint="Used for the latest data point">
           <Input
             type="number"
-            step="0.01"
+            step="any"
             min="0"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
@@ -955,7 +961,7 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
           <Field label={idx === 0 ? "Price" : undefined}>
             <Input
               type="number"
-              step="0.01"
+              step="any"
               min="0"
               value={row.price}
               onChange={(e) => update(row.id, "price", e.target.value)}
