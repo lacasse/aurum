@@ -22,6 +22,12 @@ loss is irreversible. Follow these rules without exception.
   unless the user explicitly asks and a verified backup is taken first.
 - Do not modify `docker-compose.yml` in a way that would delete the `pgdata` (or `backups`)
   volume declarations.
+- **Never change or remove the top-level `name: finance` in `docker-compose.yml`.** The
+  volumes are `finance_pgdata` / `finance_backups`; that name is what keeps pointing at
+  them. Without it Compose falls back to the directory name, and `docker compose up` builds
+  a second stack on empty volumes — the app then looks wiped even though the data is intact
+  under the old prefix. If containers ever appear with a non-`finance-` prefix, STOP: do not
+  run `down -v`, and check `docker volume ls` before anything else.
 
 ## Automated backups
 

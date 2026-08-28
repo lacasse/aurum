@@ -1,3 +1,13 @@
+# Pinned so the project name never depends on the directory name.
+#
+# Compose otherwise derives it from the enclosing folder, which makes the
+# volumes holding every figure in this app move when the folder is renamed or
+# the repo is cloned somewhere else: `docker compose up` then silently builds a
+# second stack on *empty* volumes, which looks exactly like total data loss.
+# The data lives in `finance_pgdata` / `finance_backups`, so this name is what
+# keeps pointing at it — do not change it without migrating those volumes.
+name: finance
+
 services:
   db:
     image: postgres:17-alpine
