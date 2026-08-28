@@ -525,6 +525,9 @@ function HoldingFormInner({
               {tickerStatus === "invalid" && ticker.trim() && (
                 <X size={14} className="text-negative" />
               )}
+              {tickerStatus === "unknown" && ticker.trim() && (
+                <span className="text-[12px] text-ink-faint">?</span>
+              )}
             </span>
           </div>
           {tickerStatus === "valid" && fetchedPrice != null && (
@@ -537,6 +540,11 @@ function HoldingFormInner({
           {tickerStatus === "invalid" && ticker.trim() && (
             <p className="mt-1 text-[11px] text-negative">
               Ticker not found — check the symbol and asset class
+            </p>
+          )}
+          {tickerStatus === "unknown" && ticker.trim() && (
+            <p className="mt-1 text-[11px] text-ink-faint">
+              Could not check right now — the daily lookup allowance is used up
             </p>
           )}
         </Field>
@@ -733,7 +741,17 @@ function TradeTickerInput({
   row: TradeRow;
   update: (id: string, field: keyof TradeRow, value: string) => void;
 }) {
-  const { status, price: fetchedPrice } = useTickerValidation(row.ticker, "US Equity", row.currency as Currency);
+  /*
+   * The asset class picks the price feed, so guessing "US Equity" for a coin
+   * sent BTC to the wrong provider and it came back rejected. The symbol is
+   * all we have to go on here, and for coins it is enough.
+   */
+  const assetClass: AssetClass = isCoinTicker(row.ticker) ? "Crypto" : "US Equity";
+  const { status, price: fetchedPrice } = useTickerValidation(
+    row.ticker,
+    assetClass,
+    row.currency as Currency,
+  );
   const usdCadRate = useFinance((s) => s.usdCadRate);
 
   return (
@@ -762,6 +780,14 @@ function TradeTickerInput({
         )}
         {status === "invalid" && row.ticker.trim() && (
           <X size={12} className="text-negative" />
+        )}
+        {status === "unknown" && row.ticker.trim() && (
+          <span
+            className="text-[11px] text-ink-faint"
+            title="Could not check this ticker — the daily lookup allowance is used up. The trade will still record."
+          >
+            ?
+          </span>
         )}
       </span>
     </div>
