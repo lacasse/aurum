@@ -1,5 +1,6 @@
 import { lastMonthKeys } from "@/lib/format";
 import { handle } from "@/db/http";
+import { fetchMonthlyCloses } from "@/lib/yahoo";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,17 @@ interface Cached {
 
 const TTL = 12 * 60 * 60 * 1000;
 let cache: Cached | null = null;
+
+/*
+ * How long to leave Yahoo alone after it refuses.
+ *
+ * Only successes used to be cached, so a refusal meant asking again on the
+ * very next page load — and Yahoo answers a burst from one address with 429s
+ * that last minutes, so retrying on sight is what keeps the refusal alive.
+ * Backing off for half an hour turns a failed fetch into one failed fetch.
+ */
+const FAILURE_TTL = 30 * 60 * 1000;
+let failedAt = 0;
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -53,48 +65,17 @@ function simulate(months: string[]): BenchmarkData {
 }
 
 async function fetchLive(months: string[]): Promise<BenchmarkData> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${SYMBOL}?interval=1mo&range=2y`;
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-      Accept: "application/json",
-    },
-    cache: "no-store",
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`yahoo responded ${res.status}`);
-  const json = (await res.json()) as {
-    chart?: {
-      result?: {
-        timestamp?: number[];
-        indicators?: {
-          adjclose?: { adjclose?: (number | null)[] }[];
-          quote?: { close?: (number | null)[] }[];
-        };
-      }[];
-    };
-  };
-  const result = json.chart?.result?.[0];
-  const ts = result?.timestamp ?? [];
-  const raw =
-    result?.indicators?.adjclose?.[0]?.adjclose ??
-    result?.indicators?.quote?.[0]?.close ??
-    [];
-  if (ts.length === 0 || raw.length === 0) throw new Error("empty chart payload");
-
-  // bucket closes by YYYY-MM, keeping the last non-null price per month
-  const byMonth = new Map<string, number>();
-  for (let i = 0; i < ts.length; i++) {
-    const price = raw[i];
-    if (price == null || !Number.isFinite(price)) continue;
-    const d = new Date(ts[i] * 1000);
-    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    byMonth.set(key, price);
-  }
+  /*
+   * Ten years, not two. The charts run back to the first recorded trade, and a
+   * benchmark that stops short of that would silently shorten the comparison
+   * to whatever both lines happened to cover. One request costs the same
+   * either way.
+   */
+  const { closes } = await fetchMonthlyCloses(SYMBOL, "10y");
+  if (closes.size === 0) throw new Error("empty chart payload");
   const series = months
-    .filter((m) => byMonth.has(m))
-    .map((m) => ({ month: m, price: byMonth.get(m)! }));
+    .filter((m) => closes.has(m))
+    .map((m) => ({ month: m, price: closes.get(m)! }));
   if (series.length < 3) throw new Error("not enough benchmark history");
   return { symbol: SYMBOL, name: NAME, simulated: false, series };
 }
@@ -110,12 +91,16 @@ export async function GET(req: Request) {
       if (series.length >= 3) return { ...cache.data, series };
     }
 
+    if (Date.now() - failedAt < FAILURE_TTL) return simulate(months);
+
     try {
       const data = await fetchLive(months);
       cache = { at: Date.now(), data };
+      failedAt = 0;
       return data;
     } catch (err) {
       console.error("[benchmark] live fetch failed, using simulation:", err);
+      failedAt = Date.now();
       return simulate(months);
     }
   });
