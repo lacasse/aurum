@@ -602,7 +602,18 @@ export default function InvestmentsPage() {
               </thead>
               <tbody>
                 {data.rows.map((r) => {
-                  const pooled = r.lots.length > 1;
+                  /*
+                   * A security held in several accounts keeps its sold-off lots
+                   * out of the breakdown on the same terms as the table itself:
+                   * hidden by default, shown when closed positions are shown.
+                   * The row's own totals still count them — a realized gain
+                   * pooled across accounts is the point of pooling — so this
+                   * hides the line, never the money.
+                   */
+                  const lots = showClosed ? r.lots : r.lots.filter((l) => l.shares > 0);
+                  // Counted after the filter, so a position left in one account
+                  // reads and behaves as the single holding it now is.
+                  const pooled = lots.length > 1;
                   const open = expanded.has(r.ticker);
                   return (
                   <Fragment key={r.ticker}>
@@ -731,7 +742,7 @@ export default function InvestmentsPage() {
                         */}
                       {pooled ? (
                         <span className="text-[11px] text-ink-faint">
-                          {r.lots.length} accounts
+                          {lots.length} accounts
                         </span>
                       ) : (
                         <>
@@ -740,7 +751,7 @@ export default function InvestmentsPage() {
                             size="icon"
                             aria-label={`Edit ${r.ticker}`}
                             onClick={() => {
-                              setEditing(r.lots[0]);
+                              setEditing(lots[0]);
                               setFormOpen(true);
                             }}
                           >
@@ -752,7 +763,7 @@ export default function InvestmentsPage() {
                   </tr>
                   {pooled &&
                     open &&
-                    r.lots.map((lot) => (
+                    lots.map((lot) => (
                       <tr key={lot.id} className="border-b border-line/50 bg-elevated/30 last:border-0">
                         <td className="py-2 pl-12 pr-3">
                           <span className="text-[11px] text-ink-dim">
