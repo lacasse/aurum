@@ -4,7 +4,7 @@ import type { AssetClass, Currency } from "./types";
  * An exchange listing carries a venue suffix — XEQT.TO, RETL.NEO, CRYP-A.TO.
  * A bare ticker does not.
  */
-function isExchangeListed(ticker: string): boolean {
+export function isExchangeListed(ticker: string): boolean {
   return ticker.trim().includes(".");
 }
 
@@ -66,23 +66,25 @@ export function toEodhdSymbol(ticker: string): string {
 
 /* ── Price source routing ── */
 
-export function priceSource(
-  assetClass: AssetClass,
-  currency: Currency,
-  ticker = "",
-): "twelvedata" | "eodhd" {
-  /*
-   * A coin has no listing venue. It trades globally and around the clock, and
-   * the currency a position is recorded in says where you count it, not where
-   * it trades. Routing on currency alone sent BTC, ETH and SOL to the Canadian
-   * equity feed as "BTC.TO", which has no price at all — so they showed as
-   * permanently stale while quietly spending the 20-a-day EODHD allowance.
-   */
-  if (assetClass === "Crypto" && !isExchangeListed(ticker)) return "twelvedata";
-  /*
-   * A crypto ETF is an exchange listing like any other: CRYP-A.TO is a TSX
-   * product and EODHD is the feed that carries it.
-   */
-  if (currency === "CAD") return "eodhd";
-  return "twelvedata";
+/**
+ * Which feed quotes this ticker.
+ *
+ * The exchange suffix decides, and nothing else: "XEQT.TO" and "RETL.NEO" name
+ * a Canadian listing, so EODHD answers for them; a bare "AAPL" or "REIT" does
+ * not, so Twelve Data does.
+ *
+ * This used to route on the currency, which read well until you notice the
+ * currency is a form field that defaults to CAD. Somebody typing a US stock
+ * into a fresh trade row never said "Canadian" — the default did — and the app
+ * went looking for "AAPL.TO", a symbol that does not exist, spending one of a
+ * strictly limited twenty daily calls to find that out. A suffix is something
+ * the user writes down on purpose, so routing on it replaces an inference with
+ * a statement, and leaves no ambiguous case for the app to guess at.
+ *
+ * A coin is bare and lands on Twelve Data, which is where it belongs. An
+ * exchange-listed crypto product (CRYP-A.TO) carries a suffix and stays on
+ * EODHD, which is also where it belongs — the same rule reaches both.
+ */
+export function priceSource(ticker: string): "twelvedata" | "eodhd" {
+  return isExchangeListed(ticker) ? "eodhd" : "twelvedata";
 }
