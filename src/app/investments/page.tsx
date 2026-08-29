@@ -147,63 +147,87 @@ export default function InvestmentsPage() {
     resetsAt: string;
   } | null>(null);
   const mountedRef = useRef(true);
+  /*
+   * Whether the closed positions have been priced this session. They are not
+   * polled — see below — so this is what stops opening and shutting the section
+   * from re-spending the allowance each time.
+   */
+  const closedPricedRef = useRef(false);
 
   /* ---- live price polling ---- */
-  const refreshPrices = useCallback(async () => {
-    /*
-     * One request per security, not per position, and only for securities
-     * still held.
-     *
-     * Sending every holding meant the same ticker held in four accounts asked
-     * for four prices, and a closed position asked for one at all — spending a
-     * strictly limited daily allowance on securities that are no longer owned
-     * and whose price changes nothing.
-     */
-    const priceable = new Map<string, { assetClass: string; currency: string }>();
-    for (const h of holdings) {
-      if (h.shares <= 0) continue;
-      const key = h.ticker.trim().toUpperCase();
-      if (!priceable.has(key)) {
-        priceable.set(key, { assetClass: h.assetClass, currency: h.currency });
-      }
-    }
-    if (priceable.size === 0) return;
 
-    setPriceRefreshing(true);
-    try {
-      const entries = [...priceable.entries()];
-      const tickers = entries.map(([t]) => t).join(",");
-      const classes = entries.map(([, v]) => v.assetClass).join(",");
-      const currencies = entries.map(([, v]) => v.currency).join(",");
-      const res = await fetch(
-        `/api/prices?tickers=${encodeURIComponent(tickers)}&classes=${encodeURIComponent(classes)}&currencies=${encodeURIComponent(currencies)}`,
-        { cache: "no-store" },
-      );
-      if (!res.ok) return;
-      const { prices, stale, quota: q } = (await res.json()) as {
-        prices: Record<string, number>;
-        stale?: string[];
-        quota?: { used: number; limit: number; remaining: number; resetsAt: string };
-        ts: number;
-      };
-      if (!mountedRef.current) return;
-      // Prices we could not refresh keep their last known value; the badge is
-      // what tells you the figure is not from today.
-      setStaleTickers(new Set(stale ?? []));
-      setQuota(q ?? null);
-      for (const h of holdings) {
-        const px = prices[h.ticker];
-        if (px != null && px > 0 && px !== h.price) {
-          updateHolding(h.id, { ...h, price: px });
+  /**
+   * Fetch prices for a set of holdings and write back the ones that moved.
+   *
+   * One request per security, not per position: the same ticker held in four
+   * accounts asked for four prices before, which spent four calls out of a
+   * strictly limited daily allowance to learn one number.
+   */
+  const fetchPricesFor = useCallback(
+    async (subset: Holding[], { replaceStale }: { replaceStale: boolean }) => {
+      const priceable = new Map<string, { assetClass: string; currency: string }>();
+      for (const h of subset) {
+        const key = h.ticker.trim().toUpperCase();
+        if (!priceable.has(key)) {
+          priceable.set(key, { assetClass: h.assetClass, currency: h.currency });
         }
       }
-      setLastPriceUpdate(new Date());
-    } catch {
-      // silently keep existing prices
-    } finally {
-      if (mountedRef.current) setPriceRefreshing(false);
-    }
-  }, [holdings, updateHolding]);
+      if (priceable.size === 0) return;
+
+      setPriceRefreshing(true);
+      try {
+        const entries = [...priceable.entries()];
+        const tickers = entries.map(([t]) => t).join(",");
+        const classes = entries.map(([, v]) => v.assetClass).join(",");
+        const currencies = entries.map(([, v]) => v.currency).join(",");
+        const res = await fetch(
+          `/api/prices?tickers=${encodeURIComponent(tickers)}&classes=${encodeURIComponent(classes)}&currencies=${encodeURIComponent(currencies)}`,
+          { cache: "no-store" },
+        );
+        if (!res.ok) return;
+        const { prices, stale, quota: q } = (await res.json()) as {
+          prices: Record<string, number>;
+          stale?: string[];
+          quota?: { used: number; limit: number; remaining: number; resetsAt: string };
+          ts: number;
+        };
+        if (!mountedRef.current) return;
+        // Prices we could not refresh keep their last known value; the badge is
+        // what tells you the figure is not from today.
+        setStaleTickers((prev) =>
+          replaceStale
+            ? new Set(stale ?? [])
+            : // A closed-position fetch covers only part of the portfolio, so
+              // its answer adds to what the poll found rather than replacing it.
+              new Set([...prev, ...(stale ?? [])]),
+        );
+        setQuota(q ?? null);
+        for (const h of subset) {
+          const px = prices[h.ticker];
+          if (px != null && px > 0 && px !== h.price) {
+            updateHolding(h.id, { ...h, price: px });
+          }
+        }
+        setLastPriceUpdate(new Date());
+      } catch {
+        // silently keep existing prices
+      } finally {
+        if (mountedRef.current) setPriceRefreshing(false);
+      }
+    },
+    [updateHolding],
+  );
+
+  /*
+   * The poll covers open positions only. A sold-off holding's price changes
+   * nothing — its realized gain is already settled by what it sold for — so
+   * polling it every few minutes spends a scarce daily allowance to keep a
+   * number nobody is looking at up to date.
+   */
+  const refreshPrices = useCallback(
+    () => fetchPricesFor(holdings.filter((h) => h.shares > 0), { replaceStale: true }),
+    [holdings, fetchPricesFor],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -216,6 +240,24 @@ export default function InvestmentsPage() {
       clearInterval(id);
     };
   }, [refreshPrices]);
+
+  /*
+   * Closed positions are priced once, the first time their section is opened.
+   *
+   * They are worth a current price when you are looking at them — a sold-off
+   * row still shows a market value — but not one refreshed on a timer while
+   * hidden. Once per session, on demand, is the whole cost.
+   */
+  useEffect(() => {
+    if (!showClosed || closedPricedRef.current) return;
+    const closed = holdings.filter((h) => h.shares <= 0);
+    if (closed.length === 0) return;
+    closedPricedRef.current = true;
+    // Deferred for the same reason as the initial poll: calling straight
+    // through would set state synchronously in the effect body.
+    const timer = setTimeout(() => void fetchPricesFor(closed, { replaceStale: false }), 0);
+    return () => clearTimeout(timer);
+  }, [showClosed, holdings, fetchPricesFor]);
 
   /* ---- benchmark ---- */
   useEffect(() => {
