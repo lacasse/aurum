@@ -389,12 +389,16 @@ export default function InvestmentsPage() {
             </p>
             <p className="mt-1 text-xs text-ink-dim">
               Showing the last known price for these holdings.{" "}
-              {quota
-                ? `The EODHD free plan allows ${quota.limit} price lookups a day and ${quota.used} have been used. `
-                : ""}
-              Prices update automatically after the daily limit resets
-              {quota ? ` at ${new Date(quota.resetsAt).toLocaleString()}` : " at 00:00 GMT"}
-              .
+              {/*
+                * The daily cap is named only when it is actually the cause.
+                * Staleness now covers both providers, and a Twelve Data ticker
+                * that failed to quote has nothing to do with the EODHD
+                * allowance — saying so would send you looking in the wrong
+                * place, or waiting for a reset that changes nothing.
+                */}
+              {quota && quota.remaining === 0
+                ? `The EODHD free plan allows ${quota.limit} price lookups a day and all ${quota.used} have been used; they reset at ${new Date(quota.resetsAt).toLocaleString()}. `
+                : "They update on the next successful refresh. "}
             </p>
           </Card>
         )}
