@@ -64,6 +64,13 @@
       "when": 1788500000000,
       "tag": "0008_normalise_exchange_suffixes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788600000000,
+      "tag": "0009_tsla_neo_suffix",
+      "breakpoints": true
     }
   ]
 }
