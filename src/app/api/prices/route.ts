@@ -191,7 +191,7 @@ export async function GET(req: Request) {
       const cu = (currencies[i] ?? "USD") as Currency;
 
       const cached = priceCache.get(tickers[i]);
-      const source = priceSource(ac, cu, tickers[i]);
+      const source = priceSource(tickers[i]);
       const ttl = CACHE_TTL[source] ?? 60_000;
       if (cached && now - cached.at < ttl) {
         cachedPrices[tickers[i]] = cached.price;

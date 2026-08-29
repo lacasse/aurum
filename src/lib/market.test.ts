@@ -9,26 +9,40 @@ import {
 } from "./market";
 
 describe("priceSource", () => {
-  test("a bare coin goes to Twelve Data whatever currency it is recorded in", () => {
+  test("a ticker naming its exchange goes to EODHD", () => {
+    for (const t of ["XEQT.TO", "RETL.NEO", "AUTO.NE", "RAIL.TO", "CRYP-A.TO"]) {
+      assert.equal(priceSource(t), "eodhd", t);
+    }
+  });
+
+  test("a bare ticker goes to Twelve Data", () => {
+    for (const t of ["AAPL", "REIT", "CHIP", "RATE"]) {
+      assert.equal(priceSource(t), "twelvedata", t);
+    }
+  });
+
+  test("a bare coin goes to Twelve Data", () => {
     // The bug this replaces: recording BTC in CAD sent it to the Canadian
     // equity feed as "BTC.TO", which has no price, so it showed as
     // permanently stale.
     for (const coin of ["BTC", "ETH", "SOL"]) {
-      assert.equal(priceSource("Crypto", "CAD", coin), "twelvedata", coin);
-      assert.equal(priceSource("Crypto", "USD", coin), "twelvedata", coin);
+      assert.equal(priceSource(coin), "twelvedata", coin);
     }
   });
 
   test("a crypto ETF is an exchange listing and stays on EODHD", () => {
-    // CRYP-A.TO is a TSX product, not a coin.
-    assert.equal(priceSource("Crypto", "CAD", "CRYP-A.TO"), "eodhd");
+    // CRYP-A.TO is a TSX product, not a coin, and the suffix says so.
+    assert.equal(priceSource("CRYP-A.TO"), "eodhd");
   });
 
-  test("equities still route on currency", () => {
-    assert.equal(priceSource("US Equity", "CAD", "XEQT"), "eodhd");
-    assert.equal(priceSource("US Equity", "USD", "CHIP"), "twelvedata");
-    assert.equal(priceSource("Intl Equity", "CAD", "GRWT"), "eodhd");
-    assert.equal(priceSource("US Equity", "CAD", "RETL.NEO"), "eodhd");
+  test("the currency a position is recorded in does not decide the feed", () => {
+    /*
+     * The regression that motivated the rule: a trade row defaults to CAD, so
+     * routing on currency sent every US stock somebody typed to the Canadian
+     * feed as "AAPL.TO". Only what the user wrote in the ticker counts now.
+     */
+    assert.equal(priceSource("AAPL"), "twelvedata");
+    assert.equal(priceSource("XEQT.TO"), "eodhd");
   });
 });
 
@@ -83,5 +97,28 @@ describe("isCoinTicker", () => {
     for (const t of ["CRYP-A.TO", "CRYP-C.TO", "GOLD.TO", "RETL.NEO", "XEQT"]) {
       assert.equal(isCoinTicker(t), false, t);
     }
+  });
+});
+
+describe("the portfolio's Canadian holdings after normalisation", () => {
+  test("XEQT, QUAL and GRWT carry .TO and keep the Canadian feed", () => {
+    /*
+     * These three were stored bare, which under this rule would have sent them
+     * to Twelve Data as ambiguous symbols — where a same-named US listing
+     * would return a confident price for a security the user does not own.
+     * Migration 0008 gave them their suffix; this is what makes that
+     * migration load-bearing rather than cosmetic.
+     */
+    for (const t of ["XEQT.TO", "QUAL.TO", "GRWT.TO"]) {
+      assert.equal(priceSource(t), "eodhd", t);
+      assert.equal(toEodhdSymbol(t), t);
+    }
+  });
+
+  test("REIT is bare and quoted by Twelve Data", () => {
+    // Stored as "REIT.US", which Twelve Data does not understand and which the
+    // old currency rule sent there anyway, so it never priced at all.
+    assert.equal(priceSource("REIT"), "twelvedata");
+    assert.equal(toTwelveDataSymbol("REIT", "US Equity", "USD"), "REIT");
   });
 });

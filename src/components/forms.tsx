@@ -747,12 +747,9 @@ function TradeTickerInput({
    * all we have to go on here, and for coins it is enough.
    */
   const assetClass: AssetClass = isCoinTicker(row.ticker) ? "Crypto" : "US Equity";
-  const { status, price: fetchedPrice } = useTickerValidation(
-    row.ticker,
-    assetClass,
-    row.currency as Currency,
-  );
-  const usdCadRate = useFinance((s) => s.usdCadRate);
+  // Only the status is used: the tick says the ticker is real, and the price
+  // belongs in the row's own price field, not crowded into the input.
+  const { status } = useTickerValidation(row.ticker, assetClass, row.currency as Currency);
 
   return (
     <div className="relative">
@@ -766,18 +763,7 @@ function TradeTickerInput({
         {status === "loading" && (
           <Loader2 size={12} className="animate-spin text-ink-faint" />
         )}
-        {status === "valid" && (
-          <span className="flex items-center gap-0.5">
-            <Check size={12} className="text-positive" />
-            {fetchedPrice != null && (
-              <span className="text-[10px] text-positive tabular-nums">
-                ${row.currency === "USD"
-                  ? (fetchedPrice * usdCadRate).toLocaleString("en-CA", { maximumFractionDigits: 0 })
-                  : fetchedPrice.toLocaleString("en-CA", { maximumFractionDigits: 0 })}
-              </span>
-            )}
-          </span>
-        )}
+        {status === "valid" && <Check size={12} className="text-positive" />}
         {status === "invalid" && row.ticker.trim() && (
           <X size={12} className="text-negative" />
         )}
