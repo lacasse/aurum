@@ -347,8 +347,37 @@ fell back to a deterministic simulation when the fetch failed — so the "XEQT" 
 random walk wearing its name, marked only by a badge. A number that is quietly invented is
 worse than one that is missing.
 
-Extending the benchmark means editing a migration, which is the honest cost of data that
-never changes.
+The series keeps itself current from EODHD, and costs **one call however wide the gap**:
+the EOD endpoint takes a date range and `period=m` returns one bar per month, so a year of
+missing months arrives in a single response.
+
+It is careful with a scarce allowance. It runs only when a completed month is actually
+missing, which is at most once a month — the ordinary case reads one row and stops. It
+draws against the same reserved ceiling as ticker validation, so it can never take the
+last calls a price refresh depends on; if the day is spent it waits for tomorrow. And it
+marks the day whether or not it succeeded, so a bad afternoon at the provider costs one
+call rather than one per page load.
+
+There is deliberately no scheduled month-end job. A job that fires on the last day of the
+month only works if the app is running and reached on that exact day; miss it once and
+that month is lost. Filling by *absence* instead means any completed month that is missing
+gets picked up whenever the chart is next drawn — on the 1st, the 15th, or three months
+later — with no scheduler and nothing to miss.
+
+The month in progress is never fetched. Its close does not exist yet, and writing a
+month-to-date figure into a series of month-end closes would either leave a stale number
+for the rest of the month or turn one call a month into thirty. It arrives as a real close
+once the month has ended, like every other month.
+
+The monthly checklist deliberately does **not** feed this series, though it looks like it
+could. It records holdings "as of the 1st of the month" from whatever live price the app
+holds — which is not a month-end close, and quietly filing one in a column of published
+closes would put two different kinds of number in the same place.
+
+Two limits worth knowing. EODHD's free plan serves **one year** of history whatever range
+is asked for, so a gap wider than that cannot be closed automatically — ship the missing
+closes in a migration instead. And an empty series is not treated as a gap: that means the
+shipped migration has not run, and fetching a decade one year at a time is not the answer.
 
 ### What the refresh actually asks for
 
