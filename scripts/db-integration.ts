@@ -545,6 +545,45 @@ async function main() {
       expect(revised?.close === 10.25, `a newer snapshot wins (got ${revised?.close})`);
     }
 
+    console.log("benchmark series");
+    {
+      const bm = await import("../src/db/benchmark");
+      const { BENCHMARK_TICKER } = await import("../src/lib/benchmark");
+      const ph = await import("../src/db/price-history");
+
+      // The series ships with the code, so a fresh database already has it.
+      const shipped = await ph.readPriceHistory([BENCHMARK_TICKER]);
+      expect(shipped.length === 78, `78 benchmark closes ship with the code (got ${shipped.length})`);
+      expect(
+        (await bm.lastBenchmarkMonth()) === "2026-07",
+        `the shipped series ends where the migration says (got ${await bm.lastBenchmarkMonth()})`,
+      );
+      expect(
+        shipped.every((r) => r.source === "benchmark"),
+        "every shipped row is tagged as the benchmark",
+      );
+
+      // A month the fill has written extends the series.
+      const NEXT = "2026-08";
+      await ph.writePriceHistory([
+        { ticker: BENCHMARK_TICKER, month: NEXT, close: 46.5, currency: "CAD", source: "benchmark" },
+      ]);
+      expect(
+        (await bm.lastBenchmarkMonth()) === NEXT,
+        "the series knows its newest month",
+      );
+
+      // A price feed must never overwrite the benchmark series.
+      await ph.writePriceHistory([
+        { ticker: BENCHMARK_TICKER, month: NEXT, close: 1.23, currency: "CAD" },
+      ]);
+      const after = (await ph.readPriceHistory([BENCHMARK_TICKER])).find((r) => r.month === NEXT);
+      expect(after?.close === 46.5, `a provider cannot clobber a benchmark close (got ${after?.close})`);
+
+      // With the day's allowance pinned to zero, no call can be made.
+      expect((await bm.fillBenchmarkGap()) === 0, "the gap fill spends nothing when the cap is zero");
+    }
+
     await repo.deleteDemoData();
     state = await repo.getState();
     expect(!state.demoPresent, "demo data reported absent after deletion");

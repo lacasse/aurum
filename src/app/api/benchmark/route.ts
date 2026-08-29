@@ -3,6 +3,7 @@ import { ensureDb } from "@/db/init";
 import { db } from "@/db/index";
 import { priceHistory } from "@/db/schema";
 import { handle } from "@/db/http";
+import { fillBenchmarkGap } from "@/db/benchmark";
 import { lastMonthKeys } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +33,12 @@ interface BenchmarkData {
 export async function GET(req: Request) {
   return handle(async () => {
     await ensureDb();
+    /*
+     * The shipped series is current on the day it is released and drifts from
+     * there, so bring it up to date before reading. Costs nothing at all once
+     * it is current, and one call at most on the day a month is missing.
+     */
+    await fillBenchmarkGap();
     const monthsParam = Number(new URL(req.url).searchParams.get("months") ?? 18);
     const months = lastMonthKeys(Math.min(Math.max(monthsParam, 3), 120));
 

@@ -2,8 +2,16 @@ import { eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "./index";
 import { priceHistory } from "./schema";
 
-/** Where a close came from. A snapshot outranks anything fetched. */
-export type CloseSource = "snapshot" | "provider";
+/**
+ * Where a close came from, in order of authority:
+ *
+ *   `snapshot`  — the user's own month-end record of what a position was worth
+ *   `benchmark` — a published close shipped with the code, or read for it
+ *   `provider`  — anything fetched incidentally from a price feed
+ *
+ * A provider close never overwrites either of the others.
+ */
+export type CloseSource = "snapshot" | "benchmark" | "provider";
 
 export interface MonthlyClose {
   ticker: string;
@@ -35,10 +43,11 @@ export async function readPriceHistory(
  * it closes. Settled months are rewritten with the number they already held,
  * which costs nothing and removes the need to reason about which is which.
  *
- * With one exception: a figure taken from the user's own month-end record is
- * never overwritten by a fetched one. The snapshot is what the position was
- * actually worth; a provider close is a price found later and multiplied by a
- * share count we reconstructed. When the two disagree the snapshot is right,
+ * With one exception: a figure from the user's own month-end record, or one
+ * shipped as the benchmark series, is never overwritten by a fetched one. A
+ * snapshot is what the position was actually worth and a benchmark close is a
+ * published fact; a provider close is a price found later and multiplied by a
+ * share count we reconstructed. When they disagree the fetched one is wrong,
  * so a backfill arriving afterwards must not quietly win.
  *
  * `excluded` is Postgres' name for the row the insert tried to add.
@@ -62,7 +71,7 @@ export async function writePriceHistory(rows: MonthlyClose[]): Promise<void> {
         },
         setWhere: or(
           eq(priceHistory.source, "provider"),
-          sql`excluded."source" = 'snapshot'`,
+          sql`excluded."source" <> 'provider'`,
         ),
       });
   }
