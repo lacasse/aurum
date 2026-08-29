@@ -28,13 +28,15 @@ import type { SortKey } from "@/lib/analytics";
 import {
   allTimeSeries,
   allocationByClass,
+  chainedReturns,
   firstFlowMonth,
+  netExternalFlows,
   holdingRows,
   monthsSince,
   sortHoldingRows,
   portfolioSeries,
   sectorExposure,
-  type CloseHistory,
+  type SnapshotHistory,
 } from "@/lib/analytics";
 import { fmtCompact, fmtPct, fmtSignedCAD, fmtCAD, labelMonth } from "@/lib/format";
 import type { Holding } from "@/lib/types";
@@ -167,7 +169,7 @@ export default function InvestmentsPage() {
   const [showClosed, setShowClosed] = useState(false);
   const [growthRange, setGrowthRange] = useState<RangeKey>("ALL");
   const [twrRange, setTwrRange] = useState<RangeKey>("ALL");
-  const [closes, setCloses] = useState<CloseHistory | null>(null);
+  const [snapshots, setSnapshots] = useState<SnapshotHistory>({});
 
   /* Tickers whose per-account lots are shown; only ever set for pooled rows. */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -298,48 +300,45 @@ export default function InvestmentsPage() {
   }, [showClosed, holdings, fetchPricesFor]);
 
   /*
-   * Monthly closes, for valuing the portfolio in months it no longer carries a
-   * price for. A cold cache is filled a few tickers a minute — the provider
-   * refuses a burst — so the server answers with whatever it has and says
-   * whether more is coming; we ask again, slowly, until it is done. Once
-   * filled it is stored, and every later load answers from the database on the
-   * first try.
+   * Recorded month-end values — the best source there is for what the
+   * portfolio was worth, and the only one that reaches months with no trade
+   * behind them. Fetched once: it is history, and history does not move.
    */
   useEffect(() => {
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let attempts = 0;
-    const load = () => {
-      fetch("/api/prices/history", { cache: "no-store" })
+    const timer = setTimeout(() => {
+      fetch("/api/snapshots/history", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-        .then((d: { closes: CloseHistory; complete: boolean }) => {
-          if (cancelled) return;
-          /*
-           * Only a finished fill is used. A half-filled one would put the
-           * tickers it has at market and the rest at book cost, which is not a
-           * worse all-time chart so much as a different, untrue one — better to
-           * go on showing the shorter series until the whole set is in.
-           */
-          if (d.complete) setCloses(d.closes);
-          else if (attempts++ < 20) timer = setTimeout(load, 25_000);
+        .then((d: { months: SnapshotHistory }) => {
+          if (!cancelled) setSnapshots(d.months ?? {});
         })
         .catch(() => {});
-    };
-    timer = setTimeout(load, 0);
+    }, 0);
     return () => {
       cancelled = true;
-      if (timer) clearTimeout(timer);
+      clearTimeout(timer);
     };
   }, []);
 
   /*
-   * How far back the charts can go: the month of the first recorded trade.
+   * How far back the charts can go: the earlier of the first recorded trade
+   * and the first recorded month-end value. The values reach further back —
+   * positions were held before the trade log was kept — and a chart that
+   * started at the first trade would simply omit them.
    * The benchmark is asked for the same span so the two lines start together.
    */
-  const spanMonths = useMemo(() => {
-    const start = firstFlowMonth(holdings);
-    return start ? monthsSince(start).length : 18;
-  }, [holdings]);
+  const historyStart = useMemo(() => {
+    const flow = firstFlowMonth(holdings);
+    const recorded = Object.keys(snapshots).sort()[0];
+    if (!flow) return recorded ?? null;
+    if (!recorded) return flow;
+    return recorded < flow ? recorded : flow;
+  }, [holdings, snapshots]);
+
+  const spanMonths = useMemo(
+    () => (historyStart ? monthsSince(historyStart).length : 18),
+    [historyStart],
+  );
 
   /* ---- benchmark ---- */
   useEffect(() => {
@@ -397,14 +396,14 @@ export default function InvestmentsPage() {
   /*
    * The whole run is computed once; the window only trims what is drawn, so
    * switching ranges is a change of view rather than of data and never
-   * refetches. Until the closes arrive this falls back to the eighteen months
-   * of prices carried on the holdings themselves, so the chart is never empty.
+   * refetches. Until the recorded values arrive this falls back to the
+   * eighteen months of prices carried on the holdings themselves, so the
+   * chart is never empty.
    */
   const allTime = useMemo(() => {
-    const start = firstFlowMonth(holdings);
-    if (!start || !closes) return null;
-    return allTimeSeries(holdings, closes, monthsSince(start));
-  }, [holdings, closes]);
+    if (!historyStart || Object.keys(snapshots).length === 0) return null;
+    return allTimeSeries(holdings, {}, monthsSince(historyStart), snapshots);
+  }, [holdings, snapshots, historyStart]);
 
   const fullSeries = allTime?.points ?? data.series;
 
@@ -412,6 +411,8 @@ export default function InvestmentsPage() {
     () => windowed(fullSeries, growthRange),
     [fullSeries, growthRange],
   );
+
+  const flowsByMonth = useMemo(() => netExternalFlows(holdings), [holdings]);
 
   const twr = useMemo(() => {
     if (!benchmark || benchmark.series.length < 2) return null;
@@ -431,13 +432,25 @@ export default function InvestmentsPage() {
       .filter((m) => valueByMonth.has(m) && valueByMonth.get(m)! > 0);
     const windowedMonths = windowed(months, twrRange);
     if (windowedMonths.length < 2) return null;
-    const p0 = valueByMonth.get(windowedMonths[0])!;
     const b0 = priceByMonth.get(windowedMonths[0])!;
-    if (!p0 || !b0) return null;
-    const rows = windowedMonths.map((m) => ({
+    if (!b0) return null;
+    /*
+     * The portfolio line is chained monthly returns, not the ratio of its
+     * first value to its last: deposits are not performance. The benchmark
+     * needs no such treatment — an index price has no cash flows — so it stays
+     * a simple ratio, and the two are finally measuring the same thing.
+     */
+    const windowPoints = windowedMonths.map((m) => ({
       key: m,
       label: labelMonth(m),
-      portfolio: (valueByMonth.get(m)! / p0 - 1) * 100,
+      value: valueByMonth.get(m)!,
+      cost: 0,
+    }));
+    const growth = chainedReturns(windowPoints, flowsByMonth);
+    const rows = windowedMonths.map((m, i) => ({
+      key: m,
+      label: labelMonth(m),
+      portfolio: growth[i],
       benchmark: (priceByMonth.get(m)! / b0 - 1) * 100,
     }));
     const finalRow = rows[rows.length - 1];
@@ -451,7 +464,7 @@ export default function InvestmentsPage() {
       simulated: benchmark.simulated,
       note: benchmark.note,
     };
-  }, [benchmark, fullSeries, twrRange]);
+  }, [benchmark, fullSeries, flowsByMonth, twrRange]);
 
   if (!ready) return <PageSkeleton />;
 
@@ -614,7 +627,7 @@ export default function InvestmentsPage() {
           <Card>
             <CardHeader
               title="Time-weighted return vs XEQT"
-              subtitle={`Cumulative growth over ${twr.months} months · no cash flows tracked, so TWR equals portfolio growth`}
+              subtitle={`Chained monthly returns over ${twr.months} months · deposits and withdrawals removed`}
               action={
                 <div className="flex items-center gap-2">
                   <Segmented

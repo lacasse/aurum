@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   allTimeSeries,
   budgetRows,
+  chainedReturns,
+  netExternalFlows,
   cashflowSeries,
   consolidateHoldings,
   firstFlowMonth,
@@ -632,6 +634,73 @@ describe("allTimeSeries", () => {
     assert.deepEqual(unpriced, ["AAA"]);
   });
 
+  test("a recorded month-end value is used in place of shares times price", () => {
+    const holdings = [
+      lot({ flows: [{ date: "2024-01-05", kind: "buy", amount: 100, shares: 10 }] }),
+    ];
+    const closes = { AAA: { "2024-01": 10, "2024-02": 10, "2024-03": 10, "2024-04": 10 } };
+    const snapshots = { "2024-02": { AAA: 175 }, "2024-03": { AAA: 250 } };
+    const { points } = allTimeSeries(holdings, closes, MONTHS, snapshots);
+    assert.deepEqual(
+      points.map((p) => p.value),
+      [100, 175, 250, 100],
+      "recorded months win; the rest fall back to the price",
+    );
+  });
+
+  test("a position recorded but never traded still counts toward value", () => {
+    // Held before the trade log existed: no flows, but it was worth something.
+    const { points } = allTimeSeries([], {}, MONTHS, {
+      "2024-01": { OLD: 500 },
+      "2024-02": { OLD: 450 },
+    });
+    assert.deepEqual(points.map((p) => p.value), [500, 450, 0, 0]);
+    assert.deepEqual(points.map((p) => p.cost), [0, 0, 0, 0], "no trades, no cost");
+  });
+
+  test("a recorded ticker is not double counted against its own shares", () => {
+    const holdings = [
+      lot({ flows: [{ date: "2024-01-05", kind: "buy", amount: 100, shares: 10 }] }),
+    ];
+    const { points } = allTimeSeries(holdings, { AAA: { "2024-01": 10 } }, MONTHS, {
+      "2024-01": { AAA: 130 },
+    });
+    assert.equal(points[0].value, 130, "the snapshot replaces the price, it does not add to it");
+  });
+
+  test("months valued entirely from records are counted", () => {
+    const { snapshotMonths } = allTimeSeries([], {}, MONTHS, {
+      "2024-01": { OLD: 500 },
+      "2024-03": { OLD: 450 },
+    });
+    assert.equal(snapshotMonths, 2);
+  });
+
+  test("the current month falls back to the live price, not to book cost", () => {
+    const holdings = [
+      lot({
+        shares: 10,
+        priceCAD: 30,
+        flows: [{ date: "2024-01-05", kind: "buy", amount: 100, shares: 10 }],
+      }),
+    ];
+    // No snapshot and no close for any month: only the last one may use the
+    // live price, since today's price says nothing about January.
+    const { points } = allTimeSeries(holdings, {}, MONTHS, {});
+    assert.deepEqual(points.map((p) => p.value), [100, 100, 100, 300]);
+  });
+
+  test("the live price comes from an open lot, not a stale closed one", () => {
+    const flows = [{ date: "2024-01-05", kind: "buy" as const, amount: 100, shares: 10 }];
+    const holdings = [
+      // Sold out long ago, still carrying the price it had then.
+      lot({ id: "old", shares: 0, priceCAD: 3, flows: [] }),
+      lot({ id: "open", accountId: "acc2", shares: 10, priceCAD: 30, flows }),
+    ];
+    const { points } = allTimeSeries(holdings, {}, MONTHS, {});
+    assert.equal(points[3].value, 300, "10 shares at 30, not at the closed lot's 3");
+  });
+
   test("positions are summed across accounts", () => {
     const flows = [{ date: "2024-01-05", kind: "buy" as const, amount: 100, shares: 10 }];
     const { points } = allTimeSeries(
@@ -640,5 +709,75 @@ describe("allTimeSeries", () => {
       MONTHS,
     );
     assert.deepEqual(points.map((p) => p.value), [200, 220, 240, 260]);
+  });
+});
+
+describe("time-weighted return", () => {
+  const pt = (key: string, value: number) => ({ key, label: key, value, cost: 0 });
+
+  test("a deposit is not performance", () => {
+    // Doubles from 100 to 200, but only because 100 was paid in.
+    const points = [pt("2024-01", 100), pt("2024-02", 200)];
+    assert.equal(chainedReturns(points, { "2024-02": 100 })[1], 0);
+  });
+
+  test("growth with no flows is the plain return", () => {
+    const points = [pt("2024-01", 100), pt("2024-02", 110)];
+    assert.equal(chainedReturns(points, {})[1], 10);
+  });
+
+  test("returns chain across months rather than summing", () => {
+    const points = [pt("2024-01", 100), pt("2024-02", 110), pt("2024-03", 121)];
+    const out = chainedReturns(points, {});
+    assert.equal(out[1], 10);
+    assert.equal(out[2], 21, "1.1 × 1.1 − 1, not 10 + 10");
+  });
+
+  test("a mid-month deposit counts as half-present", () => {
+    // Modified Dietz: gain 10 over capital 100 + 50/2 = 125.
+    const points = [pt("2024-01", 100), pt("2024-02", 160)];
+    assert.equal(chainedReturns(points, { "2024-02": 50 })[1], 8);
+  });
+
+  test("a withdrawal does not read as a loss", () => {
+    const points = [pt("2024-01", 200), pt("2024-02", 100)];
+    assert.equal(chainedReturns(points, { "2024-02": -100 })[1], 0);
+  });
+
+  test("a month that started empty contributes no return", () => {
+    const points = [pt("2024-01", 0), pt("2024-02", 500)];
+    assert.equal(chainedReturns(points, { "2024-02": 500 })[1], 0);
+  });
+
+  test("a cash dividend is credited as return, not ignored", () => {
+    // Value flat at 1000 while $50 was paid out: the month earned $50.
+    const points = [pt("2024-01", 1000), pt("2024-02", 1000)];
+    const out = chainedReturns(points, { "2024-02": -50 })[1];
+    assert.ok(out > 4.9 && out < 5.2, `expected about 5%, got ${out}%`);
+  });
+
+  test("a reinvested dividend is not new money", () => {
+    // Dividend out, purchase back in: they net to zero, and the value it
+    // added reads as gain rather than as a contribution.
+    const points = [pt("2024-01", 1000), pt("2024-02", 1050)];
+    assert.equal(chainedReturns(points, { "2024-02": 0 })[1], 5);
+  });
+
+  test("net flows count dividends as money out and net out rotation", () => {
+    const holdings = [
+      {
+        ticker: "A", flows: [
+          { date: "2024-01-10", kind: "buy", amount: 100, shares: 1 },
+          { date: "2024-01-20", kind: "dividend", amount: 5, shares: 0 },
+        ],
+      },
+      {
+        ticker: "B", flows: [
+          { date: "2024-01-15", kind: "sell", amount: 40, shares: -1 },
+        ],
+      },
+    ] as unknown as Holding[];
+    // 100 in, 40 out, 5 paid out as a dividend.
+    assert.deepEqual(netExternalFlows(holdings), { "2024-01": 55 });
   });
 });

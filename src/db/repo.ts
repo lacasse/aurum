@@ -759,6 +759,39 @@ export function parseSnapshotInput(body: unknown): MonthlySnapshot {
   return parseWith(snapshotSchema, body);
 }
 
+/**
+ * Every month's portfolio value, pooled per ticker.
+ *
+ * The chart asks "what was this worth" per security, not per account, so the
+ * pooling happens here. Where the imported spreadsheet history covers a month
+ * it is used alone rather than added to any per-lot rows for the same ticker:
+ * the sheet figure is already the whole position, so summing the two would
+ * count it twice.
+ */
+export async function getSnapshotHistory(): Promise<
+  Record<string, Record<string, number>>
+> {
+  const rows = await db
+    .select({
+      month: monthlySnapshots.month,
+      ticker: monthlySnapshots.ticker,
+      value: sql<string>`COALESCE(
+        SUM(${monthlySnapshots.valueCAD}) FILTER (WHERE ${monthlySnapshots.holdingId} LIKE 'sheet:%'),
+        SUM(${monthlySnapshots.valueCAD})
+      )`,
+    })
+    .from(monthlySnapshots)
+    .groupBy(monthlySnapshots.month, monthlySnapshots.ticker);
+
+  const out: Record<string, Record<string, number>> = {};
+  for (const row of rows) {
+    const value = Number(row.value);
+    if (!Number.isFinite(value) || value === 0) continue;
+    (out[row.month] ??= {})[row.ticker.toUpperCase()] = value;
+  }
+  return out;
+}
+
 export async function getSnapshots(month: string): Promise<MonthlySnapshot[]> {
   const rows = await db
     .select()

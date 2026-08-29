@@ -322,42 +322,33 @@ the provider, and a zero limit means a future one could not either.
 
 The two providers above answer one question — what is this worth *now*. The portfolio
 growth and time-weighted return charts ask a different one: what was it worth in every
-month since the first trade. That is a five-year monthly series for thirty tickers,
-which neither allowance can carry: EODHD's whole day is twenty calls.
+month since the record begins. Neither allowance can carry that. EODHD's whole day is
+twenty calls and its free plan caps history at **one year** regardless of the range
+requested; Twelve Data has no TSX coverage at all.
 
-So history comes from a third source, **Yahoo's chart endpoint**, which returns an entire
-monthly series in one unmetered request. The benchmark line has been read this way since
-it was added; the holdings now use the same path. Nothing time-critical depends on it —
-prices shown as current still come from the paid feeds, and a failure here costs history,
-not the live figure.
+So the history is **not fetched**. It comes from two places, both stored:
 
-Closes are **stored** in `price_history`, one row per ticker per month, because history
-does not change: once March 2023's close is written it is never asked for again, and only
-the current month is refreshed. A cold cache is therefore the only expensive moment, and
-it happens once.
+- **Your own month-end records**, in `monthly_snapshots`. What a position was actually
+  worth at each month end is a better figure than any provider's — it is a record, not a
+  price fetched years later multiplied by a share count replayed from trades. Where the
+  two disagree, the record wins.
+- **The benchmark series**, in `price_history` under source `benchmark`, shipped with the
+  code in migration `0016`. A month-end close does not change once the month is over, so
+  it is data rather than a feed: nothing to poll, no quota, no failure mode.
 
-Yahoo has no published quota but answers a burst from one address with `429`s that last
-minutes, so the fill is **paced rather than capped**: `PRICE_HISTORY_PER_MINUTE` symbols a
-minute (default **6**, `0` disables it and CI pins it there), resumable, with
-the page asking again every 25 seconds until the server reports it is done. A first fill
-takes two or three minutes in the background; the charts show the shorter eighteen-month
-series until the whole set is in, since a half-filled one would put some tickers at market
-and the rest at book cost.
+The current month is the one month never covered, since it is only recorded once it ends;
+it falls back to the live price, which is right for today and wrong for every earlier
+month. That is why the fallback is confined to the last point.
 
-A refusal stops the asking rather than triggering a retry: the history fill goes quiet for
-**20 minutes** and the benchmark for **30**. Yahoo's `429` holds for many minutes and
-requests sent during it appear to extend it, so a retry on the next page load is what keeps
-a rate limit alive — which is exactly why the benchmark had been quietly falling back to
-its simulated line.
+**Yahoo used to serve both of these and has been removed entirely.** Its chart endpoint
+answers a burst from one address with `429`s that last many minutes, and it refused every
+request across a full day of attempts, paced and unpaced alike. Worse, the benchmark route
+fell back to a deterministic simulation when the fetch failed — so the "XEQT" line was a
+random walk wearing its name, marked only by a badge. A number that is quietly invented is
+worse than one that is missing.
 
-Two symbols are spelled differently there than here: Cboe Canada is `.NE` to Yahoo and
-`.NEO` to EODHD, and a coin is a pair (`BTC-CAD`), quoted in the currency the position is
-recorded in so no conversion is needed afterwards. US listings are converted with the
-month's own USD→CAD rate, stored alongside the prices.
-
-A ticker Yahoo carries nothing for — a delisting, a ticker since reused by another
-company — is valued at **book cost** for the months it was held, and the chart says which
-tickers those were. Guessing with today's price would be worse than saying so.
+Extending the benchmark means editing a migration, which is the honest cost of data that
+never changes.
 
 ### What the refresh actually asks for
 
