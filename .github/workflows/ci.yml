@@ -22,11 +22,6 @@ env:
   # against these limits first and a zero limit refuses every reservation.
   TWELVEDATA_MINUTE_LIMIT: "0"
   TWELVEDATA_DAY_LIMIT: "0"
-  # Yahoo, which serves the monthly history, publishes no quota but answers a
-  # burst from one address with 429s that last minutes — a shared runner asking
-  # would spend that budget for everyone. Zero symbols per window refuses every
-  # fetch, on the same reasoning as the two caps above.
-  PRICE_HISTORY_PER_MINUTE: "0"
 
 jobs:
   check:
