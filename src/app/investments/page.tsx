@@ -559,17 +559,6 @@ export default function InvestmentsPage() {
           />
         </div>
 
-        {/* Batch trade entry */}
-        <Card>
-          <CardHeader
-            title="Log trades"
-            subtitle="Record buys, sells, and dividends. A ticker you have never held asks for its details on submit."
-          />
-          <div className="px-3 pb-4">
-            <TradeEntry onComplete={() => {}} />
-          </div>
-        </Card>
-
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
             <CardHeader
@@ -958,7 +947,7 @@ export default function InvestmentsPage() {
                 {data.rows.length === 0 && (
                   <tr>
                     <td colSpan={10} className="py-12 text-center text-xs text-ink-faint">
-                      No holdings yet — add your first position above.
+                      No holdings yet — log your first trade below.
                     </td>
                   </tr>
                 )}
@@ -979,6 +968,17 @@ export default function InvestmentsPage() {
             </span>
           ))}
         </div>
+
+        {/* Batch trade entry */}
+        <Card>
+          <CardHeader
+            title="Log trades"
+            subtitle="Record buys, sells, and dividends. A ticker you have never held asks for its details on submit."
+          />
+          <div className="px-3 pb-4">
+            <TradeEntry onComplete={() => {}} />
+          </div>
+        </Card>
       </div>
 
       <HoldingForm
