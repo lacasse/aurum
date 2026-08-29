@@ -328,10 +328,24 @@ realized gain is settled by what it sold for — so keeping it current on a time
 scarce allowance on a number nobody is looking at. They are priced once, on demand, the
 first time you open the closed-positions section.
 
-**When a price cannot be refreshed** — the allowance is spent, or the request failed —
-the holding keeps its **last known price** and is marked stale: a `STALE` badge on the
-row and a banner saying how many prices are affected and when the limit resets. Nothing
-is silently presented as current, and the prices update on their own after the reset.
+**When a price cannot be refreshed** — the allowance is spent, the market has not closed
+yet, or the request failed — the holding keeps its **last known price** and is marked
+stale: a `STALE` badge on the row and a banner above the table. Nothing is silently
+presented as current.
+
+Staleness is not a duration. A ticker is stale when a refresh returns **no price for it**,
+from either provider, having found nothing in the server's cache either. That cache is
+what decides how long a price stays fresh: **5 minutes** for Twelve Data, **24 hours** for
+EODHD, whose end-of-day figure does not change intraday anyway. It lives in process
+memory, so a restart empties it and every holding is briefly stale after a deployment —
+the prices are not old, the server has simply forgotten them.
+
+Both providers are covered. Earlier this was computed over the EODHD tickers alone, a
+leftover from when that was the only rationed feed, so a coin or US stock that failed to
+quote went on showing its last known price with nothing to say the figure was not current.
+The banner names the daily cap only when the cap is genuinely the cause, since a Twelve
+Data failure has nothing to do with the EODHD allowance and waiting for its reset would
+change nothing.
 
 The same distinction applies to ticker validation, which reports three outcomes rather
 than two: a green tick for a symbol the provider knows, a red cross for one it rejects,

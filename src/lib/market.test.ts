@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   isCoinTicker,
   priceSource,
+  staleTickers,
   toEodhdSymbol,
   toTwelveDataSymbol,
   toUsdCryptoSymbol,
@@ -120,5 +121,43 @@ describe("the portfolio's Canadian holdings after normalisation", () => {
     // old currency rule sent there anyway, so it never priced at all.
     assert.equal(priceSource("REIT"), "twelvedata");
     assert.equal(toTwelveDataSymbol("REIT", "US Equity", "USD"), "REIT");
+  });
+});
+
+describe("staleTickers", () => {
+  test("flags what this refresh could not price", () => {
+    assert.deepEqual(
+      staleTickers(["AAPL", "XEQT.TO", "BTC"], { AAPL: 190, BTC: 80000 }),
+      ["XEQT.TO"],
+    );
+  });
+
+  test("covers Twelve Data, not only EODHD", () => {
+    /*
+     * The regression this exists for: staleness was computed over the EODHD
+     * tickers alone, so a coin or US stock that failed to quote kept showing
+     * its last known price with nothing marking it as old. Both bare tickers
+     * here route to Twelve Data.
+     */
+    assert.deepEqual(staleTickers(["BTC", "AAPL"], {}), ["BTC", "AAPL"]);
+    for (const t of ["BTC", "AAPL"]) assert.equal(priceSource(t), "twelvedata");
+  });
+
+  test("a priced ticker is never stale, whichever feed answered", () => {
+    assert.deepEqual(
+      staleTickers(["AAPL", "XEQT.TO"], { AAPL: 190, "XEQT.TO": 33.1 }),
+      [],
+    );
+  });
+
+  test("nothing requested means nothing stale", () => {
+    assert.deepEqual(staleTickers([], {}), []);
+  });
+
+  test("a zero price still counts as an answer rather than a gap", () => {
+    // Only `undefined` means "no price came back". A provider is not expected
+    // to return 0, but treating it as missing would flag it stale forever
+    // while the row went on showing that same 0.
+    assert.deepEqual(staleTickers(["AAPL"], { AAPL: 0 }), []);
   });
 });

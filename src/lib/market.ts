@@ -88,3 +88,25 @@ export function toEodhdSymbol(ticker: string): string {
 export function priceSource(ticker: string): "twelvedata" | "eodhd" {
   return isExchangeListed(ticker) ? "eodhd" : "twelvedata";
 }
+
+/**
+ * Which of the requested tickers this refresh could not price.
+ *
+ * A ticker is stale when the response carries no price for it — the provider
+ * refused, the request failed, or the day's allowance was gone — and the UI
+ * therefore goes on showing the last value it holds. Anything served from the
+ * server's cache counts as priced: it is a real quote inside its own lifetime,
+ * not a gap.
+ *
+ * Both providers are covered. This used to look only at the EODHD side, a
+ * leftover from when that was the only rationed feed, so a Twelve Data ticker
+ * that failed to quote showed its last known price with nothing to say the
+ * figure was not current. Rare, given Twelve Data's allowance is hundreds a day
+ * against EODHD's twenty — but a missing guarantee rather than a small one.
+ */
+export function staleTickers(
+  tickers: readonly string[],
+  prices: Readonly<Record<string, number>>,
+): string[] {
+  return tickers.filter((ticker) => prices[ticker] === undefined);
+}

@@ -8,6 +8,7 @@ import {
 import { selectEodhdDue, utcDay } from "@/lib/eodhd-quota";
 import {
   priceSource,
+  staleTickers,
   toEodhdSymbol,
   toTwelveDataSymbol,
   toUsdCryptoSymbol,
@@ -263,13 +264,11 @@ export async function GET(req: Request) {
     for (const [ticker, price] of eodhdPrices) prices[ticker] = price;
 
     /*
-     * Anything routed to EODHD that we could not price now keeps whatever the
-     * client already holds — its last known price — and is reported as stale so
-     * the UI can say so rather than showing a figure that looks current.
+     * Anything we could not price keeps whatever the client already holds — its
+     * last known price — and is reported as stale so the UI can say so rather
+     * than showing a figure that looks current.
      */
-    const stale = eodhdItems
-      .map((i) => i.ticker)
-      .filter((ticker) => prices[ticker] === undefined);
+    const stale = staleTickers(tickers, prices);
 
     return {
       prices,
