@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
-import { Badge, Button, Card, CardHeader, Progress, cn } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Progress, Segmented, cn } from "@/components/ui";
 import {
   DonutChart,
   PALETTE,
@@ -26,16 +26,51 @@ import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import type { SortKey } from "@/lib/analytics";
 import {
+  allTimeSeries,
   allocationByClass,
+  firstFlowMonth,
   holdingRows,
+  monthsSince,
   sortHoldingRows,
   portfolioSeries,
   sectorExposure,
+  type CloseHistory,
 } from "@/lib/analytics";
 import { fmtCompact, fmtPct, fmtSignedCAD, fmtCAD, labelMonth } from "@/lib/format";
 import type { Holding } from "@/lib/types";
 
 const POLL_MS = 60 * 60_000;
+
+/*
+ * Windows the growth and return charts can be read over.
+ *
+ * "All" is every month since the first recorded trade — not a fixed span. The
+ * series behind it replays the trades and prices each month at its own close,
+ * so it is the portfolio as it actually stood, back to the day it started.
+ */
+const RANGE_MONTHS = { "3M": 3, "6M": 6, "1Y": 12, "3Y": 36, ALL: Infinity } as const;
+
+type RangeKey = keyof typeof RANGE_MONTHS;
+
+const RANGE_OPTIONS: { value: RangeKey; label: string }[] = [
+  { value: "3M", label: "3M" },
+  { value: "6M", label: "6M" },
+  { value: "1Y", label: "1Y" },
+  { value: "3Y", label: "3Y" },
+  { value: "ALL", label: "All" },
+];
+
+/** Keep the last `n` entries; `Infinity` keeps them all. */
+function windowed<T>(rows: T[], range: RangeKey): T[] {
+  const n = RANGE_MONTHS[range];
+  return Number.isFinite(n) ? rows.slice(-n) : rows;
+}
+
+/** "since Feb ’22" for the full run, "last 6 months" for a window of it. */
+function rangeLabel(range: RangeKey, points: { label: string }[]): string {
+  if (range !== "ALL") return `last ${points.length} months`;
+  return points.length > 0 ? `since ${points[0].label}` : "all time";
+}
 
 interface BenchmarkData {
   name: string;
@@ -130,6 +165,9 @@ export default function InvestmentsPage() {
    * dividends behind a realized gain survive for tax reporting.
    */
   const [showClosed, setShowClosed] = useState(false);
+  const [growthRange, setGrowthRange] = useState<RangeKey>("ALL");
+  const [twrRange, setTwrRange] = useState<RangeKey>("ALL");
+  const [closes, setCloses] = useState<CloseHistory | null>(null);
 
   /* Tickers whose per-account lots are shown; only ever set for pooled rows. */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -259,10 +297,54 @@ export default function InvestmentsPage() {
     return () => clearTimeout(timer);
   }, [showClosed, holdings, fetchPricesFor]);
 
+  /*
+   * Monthly closes, for valuing the portfolio in months it no longer carries a
+   * price for. A cold cache is filled a few tickers a minute — the provider
+   * refuses a burst — so the server answers with whatever it has and says
+   * whether more is coming; we ask again, slowly, until it is done. Once
+   * filled it is stored, and every later load answers from the database on the
+   * first try.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const load = () => {
+      fetch("/api/prices/history", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((d: { closes: CloseHistory; complete: boolean }) => {
+          if (cancelled) return;
+          /*
+           * Only a finished fill is used. A half-filled one would put the
+           * tickers it has at market and the rest at book cost, which is not a
+           * worse all-time chart so much as a different, untrue one — better to
+           * go on showing the shorter series until the whole set is in.
+           */
+          if (d.complete) setCloses(d.closes);
+          else if (attempts++ < 20) timer = setTimeout(load, 25_000);
+        })
+        .catch(() => {});
+    };
+    timer = setTimeout(load, 0);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
+  /*
+   * How far back the charts can go: the month of the first recorded trade.
+   * The benchmark is asked for the same span so the two lines start together.
+   */
+  const spanMonths = useMemo(() => {
+    const start = firstFlowMonth(holdings);
+    return start ? monthsSince(start).length : 18;
+  }, [holdings]);
+
   /* ---- benchmark ---- */
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/benchmark?months=18", { cache: "no-store" })
+    fetch(`/api/benchmark?months=${spanMonths}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: BenchmarkData) => {
         if (!cancelled) setBenchmark(d);
@@ -271,7 +353,7 @@ export default function InvestmentsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [spanMonths]);
 
   const data = useMemo(() => {
     const all = sortHoldingRows(holdingRows(holdings), sort.key, sort.dir);
@@ -312,18 +394,47 @@ export default function InvestmentsPage() {
     };
   }, [holdings, sort, showClosed]);
 
+  /*
+   * The whole run is computed once; the window only trims what is drawn, so
+   * switching ranges is a change of view rather than of data and never
+   * refetches. Until the closes arrive this falls back to the eighteen months
+   * of prices carried on the holdings themselves, so the chart is never empty.
+   */
+  const allTime = useMemo(() => {
+    const start = firstFlowMonth(holdings);
+    if (!start || !closes) return null;
+    return allTimeSeries(holdings, closes, monthsSince(start));
+  }, [holdings, closes]);
+
+  const fullSeries = allTime?.points ?? data.series;
+
+  const growthSeries = useMemo(
+    () => windowed(fullSeries, growthRange),
+    [fullSeries, growthRange],
+  );
+
   const twr = useMemo(() => {
     if (!benchmark || benchmark.series.length < 2) return null;
-    const valueByMonth = new Map(data.series.map((p) => [p.key, p.value]));
+    const valueByMonth = new Map(fullSeries.map((p) => [p.key, p.value]));
     const priceByMonth = new Map(benchmark.series.map((p) => [p.month, p.price]));
+    /*
+     * Rebased to the first month of the window, not to the first month on
+     * record. A time-weighted return over the last quarter has to start the
+     * quarter at zero, otherwise the chart answers the all-time question on a
+     * shorter x-axis.
+     *
+     * Months before the first holding was bought are dropped: dividing by a
+     * portfolio worth nothing is not a return, it is an infinity.
+     */
     const months = benchmark.series
       .map((p) => p.month)
-      .filter((m) => valueByMonth.has(m));
-    if (months.length < 2) return null;
-    const p0 = valueByMonth.get(months[0])!;
-    const b0 = priceByMonth.get(months[0])!;
+      .filter((m) => valueByMonth.has(m) && valueByMonth.get(m)! > 0);
+    const windowedMonths = windowed(months, twrRange);
+    if (windowedMonths.length < 2) return null;
+    const p0 = valueByMonth.get(windowedMonths[0])!;
+    const b0 = priceByMonth.get(windowedMonths[0])!;
     if (!p0 || !b0) return null;
-    const rows = months.map((m) => ({
+    const rows = windowedMonths.map((m) => ({
       key: m,
       label: labelMonth(m),
       portfolio: (valueByMonth.get(m)! / p0 - 1) * 100,
@@ -335,12 +446,12 @@ export default function InvestmentsPage() {
       portfolioTwr: finalRow.portfolio,
       benchmarkTwr: finalRow.benchmark,
       alpha: finalRow.portfolio - finalRow.benchmark,
-      months: months.length,
+      months: windowedMonths.length,
       name: benchmark.name,
       simulated: benchmark.simulated,
       note: benchmark.note,
     };
-  }, [benchmark, data.series]);
+  }, [benchmark, fullSeries, twrRange]);
 
   if (!ready) return <PageSkeleton />;
 
@@ -450,11 +561,18 @@ export default function InvestmentsPage() {
           <Card className="lg:col-span-2">
             <CardHeader
               title="Portfolio growth"
-              subtitle="Market value vs invested cost · 18 months"
+              subtitle={`Market value vs invested cost · ${rangeLabel(growthRange, growthSeries)}`}
+              action={
+                <Segmented
+                  options={RANGE_OPTIONS}
+                  value={growthRange}
+                  onChange={setGrowthRange}
+                />
+              }
             />
             <div className="px-3 pb-4">
               <SeriesChart
-                data={data.series as unknown as Record<string, unknown>[]}
+                data={growthSeries as unknown as Record<string, unknown>[]}
                 xKey="label"
                 series={[
                   { key: "value", name: "Market value", color: "#22d3ee" },
@@ -463,6 +581,12 @@ export default function InvestmentsPage() {
                 height={300}
                 yFmt={fmtCompact}
               />
+              {allTime && allTime.unpriced.length > 0 && (
+                <p className="mt-2 text-center text-[11px] text-ink-faint">
+                  No price history for {allTime.unpriced.join(", ")} — valued at
+                  book cost for the months held.
+                </p>
+              )}
             </div>
           </Card>
 
@@ -493,6 +617,11 @@ export default function InvestmentsPage() {
               subtitle={`Cumulative growth over ${twr.months} months · no cash flows tracked, so TWR equals portfolio growth`}
               action={
                 <div className="flex items-center gap-2">
+                  <Segmented
+                    options={RANGE_OPTIONS}
+                    value={twrRange}
+                    onChange={setTwrRange}
+                  />
                   <Badge tone={twr.alpha >= 0 ? "positive" : "negative"}>
                     {twr.alpha >= 0 ? "+" : ""}
                     {twr.alpha.toFixed(1)}% alpha
