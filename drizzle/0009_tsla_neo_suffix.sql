@@ -1,0 +1,13 @@
+-- Correct an exchange suffix on a personal holding.
+--
+-- This step applied a correction to one person's own portfolio data. Its
+-- statements are deliberately not committed: every deployment runs every
+-- migration, so private holdings, amounts and dates placed here would be
+-- installed into every other database that runs this code.
+--
+-- The statements live outside the repository and are applied by hand to the
+-- one database they describe. Schema changes belong in migrations; personal
+-- records do not.
+--
+-- Kept as an empty step rather than deleted so the journal stays continuous
+-- and databases that already applied it are undisturbed.
