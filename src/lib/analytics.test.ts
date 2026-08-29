@@ -5,6 +5,11 @@ import {
   budgetRows,
   chainedReturns,
   netExternalFlows,
+  annualized,
+  portfolioMwrr,
+  overMonths,
+  portfolioMwrrOver,
+  simpleReturn,
   cashflowSeries,
   consolidateHoldings,
   firstFlowMonth,
@@ -779,5 +784,205 @@ describe("time-weighted return", () => {
     ] as unknown as Holding[];
     // 100 in, 40 out, 5 paid out as a dividend.
     assert.deepEqual(netExternalFlows(holdings), { "2024-01": 55 });
+  });
+});
+
+describe("portfolioMwrr", () => {
+  const holding = (flows: unknown[]): Holding => ({ ticker: "A", flows } as unknown as Holding);
+
+  test("doubling over a year is about 100%", () => {
+    const r = portfolioMwrr(
+      [holding([{ date: "2024-01-01", kind: "buy", amount: 1000, shares: 1 }])],
+      2000,
+      "2025-01-01",
+    );
+    assert.ok(r !== null && r > 99 && r < 101, `expected ~100%, got ${r}`);
+  });
+
+  test("flows from every position are pooled", () => {
+    // Two positions, each 1000 in, 2400 back after a year.
+    const r = portfolioMwrr(
+      [
+        holding([{ date: "2024-01-01", kind: "buy", amount: 1000, shares: 1 }]),
+        holding([{ date: "2024-01-01", kind: "buy", amount: 1000, shares: 1 }]),
+      ],
+      2400,
+      "2025-01-01",
+    );
+    assert.ok(r !== null && r > 19 && r < 21, `expected ~20%, got ${r}`);
+  });
+
+  test("a closed position keeps its flows and adds no value", () => {
+    // Bought for 1000, sold a year later for 1200, nothing held now.
+    const r = portfolioMwrr(
+      [
+        holding([
+          { date: "2024-01-01", kind: "buy", amount: 1000, shares: 1 },
+          { date: "2025-01-01", kind: "sell", amount: 1200, shares: -1 },
+        ]),
+      ],
+      0,
+      "2025-01-01",
+    );
+    assert.ok(r !== null && r > 19 && r < 21, `expected ~20%, got ${r}`);
+  });
+
+  test("dividends count as money received", () => {
+    const withDividend = portfolioMwrr(
+      [
+        holding([
+          { date: "2024-01-01", kind: "buy", amount: 1000, shares: 1 },
+          { date: "2024-07-01", kind: "dividend", amount: 100, shares: 0 },
+        ]),
+      ],
+      1000,
+      "2025-01-01",
+    );
+    const without = portfolioMwrr(
+      [holding([{ date: "2024-01-01", kind: "buy", amount: 1000, shares: 1 }])],
+      1000,
+      "2025-01-01",
+    );
+    assert.ok(without !== null && Math.abs(without) < 0.5, "no dividend, no return");
+    assert.ok(withDividend !== null && withDividend > 9, `dividend should lift it, got ${withDividend}`);
+  });
+
+  test("nothing to solve returns null rather than zero", () => {
+    assert.equal(portfolioMwrr([], 1000, "2025-01-01"), null);
+    assert.equal(portfolioMwrr([holding([])], 1000, "2025-01-01"), null);
+  });
+
+  test("timing is what separates it from a time-weighted return", () => {
+    // Same money, same end value, different timing: money-weighted differs.
+    const early = portfolioMwrr(
+      [holding([
+        { date: "2024-01-01", kind: "buy", amount: 1000, shares: 1 },
+        { date: "2024-02-01", kind: "buy", amount: 1000, shares: 1 },
+      ])],
+      2400, "2025-01-01",
+    );
+    const late = portfolioMwrr(
+      [holding([
+        { date: "2024-01-01", kind: "buy", amount: 1000, shares: 1 },
+        { date: "2024-11-01", kind: "buy", amount: 1000, shares: 1 },
+      ])],
+      2400, "2025-01-01",
+    );
+    assert.ok(early !== null && late !== null && late > early,
+      `money in later earns over less time, so the same gain is a higher rate (${early} vs ${late})`);
+  });
+});
+
+describe("annualized", () => {
+  test("a year of return is already annual", () => {
+    assert.equal(Math.round(annualized(20, 12)!), 20);
+  });
+
+  test("two years of 21% is 10% a year, not 10.5%", () => {
+    assert.ok(Math.abs(annualized(21, 24)! - 10) < 0.01, "compounding, not division");
+  });
+
+  test("a quarter is extrapolated", () => {
+    // 1.05^4 - 1 = 21.55%
+    assert.ok(Math.abs(annualized(5, 3)! - 21.55) < 0.05);
+  });
+
+  test("a total loss has no annual rate to give", () => {
+    assert.equal(annualized(-100, 12), null);
+    assert.equal(annualized(10, 0), null);
+  });
+});
+
+describe("portfolioMwrrOver", () => {
+  const holding = (flows: unknown[]): Holding => ({ ticker: "A", flows } as unknown as Holding);
+
+  test("the opening value counts as money already at work", () => {
+    // Worth 1000 at the start, 1100 a year later, nothing added.
+    const r = portfolioMwrrOver([holding([])], "2024-01", 1000, "2025-01", 1100);
+    assert.ok(r !== null && r > 9.5 && r < 10.5, `expected ~10%, got ${r}`);
+  });
+
+  test("flows outside the window are ignored", () => {
+    const flows = [
+      { date: "2023-06-01", kind: "buy", amount: 5000, shares: 1 },
+      { date: "2026-06-01", kind: "buy", amount: 5000, shares: 1 },
+    ];
+    const r = portfolioMwrrOver([holding(flows)], "2024-01", 1000, "2025-01", 1100);
+    assert.ok(r !== null && r > 9.5 && r < 10.5, `a distant trade must not count, got ${r}`);
+  });
+
+  test("a contribution inside the window is counted", () => {
+    // 1000 at work, 1000 more added at the halfway point, ending at 2100.
+    const r = portfolioMwrrOver(
+      [holding([{ date: "2024-07-01", kind: "buy", amount: 1000, shares: 1 }])],
+      "2024-01", 1000, "2025-01", 2100,
+    );
+    assert.ok(r !== null && r > 0 && r < 10, `a late deposit dilutes the rate, got ${r}`);
+  });
+
+  test("an empty window has nothing to solve", () => {
+    assert.equal(portfolioMwrrOver([holding([])], "2024-01", 0, "2025-01", 0), null);
+  });
+});
+
+describe("overMonths", () => {
+  test("it undoes annualized", () => {
+    const round = overMonths(annualized(26.6, 3)!, 3)!;
+    assert.ok(Math.abs(round - 26.6) < 0.001, `round trip lost the number: ${round}`);
+  });
+
+  test("a quarter of a 10% year is about 2.4%, not 2.5%", () => {
+    assert.ok(Math.abs(overMonths(10, 3)! - 2.411) < 0.01, "compounding, not division");
+  });
+
+  test("a full year is unchanged", () => {
+    assert.ok(Math.abs(overMonths(10, 12)! - 10) < 1e-9);
+  });
+
+  test("a rate that wipes out capital has nothing to restate", () => {
+    assert.equal(overMonths(-100, 6), null);
+    assert.equal(overMonths(10, 0), null);
+  });
+});
+
+describe("simpleReturn", () => {
+  const holding = (flows: unknown[]): Holding => ({ ticker: "A", flows } as unknown as Holding);
+
+  test("in against out and what is still held", () => {
+    const r = simpleReturn(
+      [holding([
+        { date: "2024-01-01", kind: "buy", amount: 1000, shares: 10 },
+        { date: "2024-06-01", kind: "sell", amount: 300, shares: -3 },
+      ])],
+      900,
+    );
+    assert.equal(r.contributed, 1000);
+    assert.equal(r.returned, 300);
+    assert.equal(r.held, 900);
+    assert.equal(r.pct, 20, "300 back plus 900 held on 1000 in");
+  });
+
+  test("dividends count as money back", () => {
+    const r = simpleReturn(
+      [holding([
+        { date: "2024-01-01", kind: "buy", amount: 1000, shares: 10 },
+        { date: "2024-06-01", kind: "dividend", amount: 50, shares: 0 },
+      ])],
+      1000,
+    );
+    assert.equal(r.returned, 50);
+    assert.equal(r.pct, 5);
+  });
+
+  test("it is blind to time, which is the point", () => {
+    const fast = simpleReturn(
+      [holding([{ date: "2024-01-01", kind: "buy", amount: 100, shares: 1 }])], 110);
+    const slow = simpleReturn(
+      [holding([{ date: "2014-01-01", kind: "buy", amount: 100, shares: 1 }])], 110);
+    assert.equal(fast.pct, slow.pct, "ten years and one month read the same");
+  });
+
+  test("nothing paid in has no percentage to give", () => {
+    assert.equal(simpleReturn([], 500).pct, null);
   });
 });

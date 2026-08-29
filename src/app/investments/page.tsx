@@ -31,9 +31,12 @@ import {
   chainedReturns,
   firstFlowMonth,
   netExternalFlows,
+  annualized,
   holdingRows,
   monthsSince,
+  portfolioMwrr,
   sortHoldingRows,
+  simpleReturn,
   portfolioSeries,
   sectorExposure,
   type SnapshotHistory,
@@ -76,7 +79,6 @@ function rangeLabel(range: RangeKey, points: { label: string }[]): string {
 
 interface BenchmarkData {
   name: string;
-  simulated: boolean;
   note?: string;
   series: { month: string; price: number }[];
 }
@@ -414,6 +416,29 @@ export default function InvestmentsPage() {
 
   const flowsByMonth = useMemo(() => netExternalFlows(holdings), [holdings]);
 
+  /*
+   * The three returns, always over the whole record rather than the chart's
+   * window. They are here to be read against each other, and a range selector
+   * would only invite the question of which of them it applied to.
+   */
+  const returns = useMemo(() => {
+    const simple = simpleReturn(holdings, data.totalValue);
+    const mwrr = portfolioMwrr(holdings, data.totalValue);
+    const span = fullSeries.length - 1;
+    const chained = chainedReturns(fullSeries, flowsByMonth);
+    const twrTotal = chained[chained.length - 1] ?? null;
+    const twrAnnual = twrTotal === null ? null : annualized(twrTotal, span);
+    return {
+      simple,
+      mwrr,
+      twrTotal,
+      twrAnnual,
+      months: span,
+      from: fullSeries[0]?.label ?? "",
+      gap: mwrr !== null && twrAnnual !== null ? mwrr - twrAnnual : null,
+    };
+  }, [holdings, data.totalValue, fullSeries, flowsByMonth]);
+
   const twr = useMemo(() => {
     if (!benchmark || benchmark.series.length < 2) return null;
     const valueByMonth = new Map(fullSeries.map((p) => [p.key, p.value]));
@@ -454,6 +479,7 @@ export default function InvestmentsPage() {
       benchmark: (priceByMonth.get(m)! / b0 - 1) * 100,
     }));
     const finalRow = rows[rows.length - 1];
+
     return {
       rows: rows as unknown as Record<string, unknown>[],
       portfolioTwr: finalRow.portfolio,
@@ -461,7 +487,6 @@ export default function InvestmentsPage() {
       alpha: finalRow.portfolio - finalRow.benchmark,
       months: windowedMonths.length,
       name: benchmark.name,
-      simulated: benchmark.simulated,
       note: benchmark.note,
     };
   }, [benchmark, fullSeries, flowsByMonth, twrRange]);
@@ -612,6 +637,119 @@ export default function InvestmentsPage() {
           </Card>
         </div>
 
+        <Card>
+          <CardHeader
+            title="Three ways of asking how it went"
+            subtitle={`Since ${returns.from} · the same portfolio, measured three ways`}
+          />
+          <div className="grid gap-px bg-line sm:grid-cols-3">
+            <div className="bg-surface p-5">
+              <p className="text-xs uppercase tracking-wider text-ink-faint">Simple return</p>
+              <p
+                className={cn(
+                  "mt-1 text-2xl font-semibold tabular-nums",
+                  (returns.simple.pct ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400",
+                )}
+              >
+                {returns.simple.pct === null ? "—" : fmtPct(returns.simple.pct)}
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+                Everything you put in against everything you got back and still hold.
+              </p>
+              <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+                {fmtCAD(returns.simple.contributed)} in · {fmtCAD(returns.simple.returned)}{" "}
+                back · {fmtCAD(returns.simple.held)} held. It ignores time entirely, so the
+                same figure could be one good year or five slow ones.
+              </p>
+            </div>
+
+            <div className="bg-surface p-5">
+              <p className="text-xs uppercase tracking-wider text-ink-faint">
+                Money-weighted · MWRR
+              </p>
+              <p
+                className={cn(
+                  "mt-1 text-2xl font-semibold tabular-nums",
+                  (returns.mwrr ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400",
+                )}
+              >
+                {returns.mwrr === null ? "—" : `${fmtPct(returns.mwrr)}/yr`}
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+                What your actual dollars earned, counting when each one arrived.
+              </p>
+              <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+                Money added just before a fall drags this down; money added before a rise
+                lifts it. This is your return, and it is the one you cannot compare to an
+                index — the index never had your deposits.
+              </p>
+            </div>
+
+            <div className="bg-surface p-5">
+              <p className="text-xs uppercase tracking-wider text-ink-faint">
+                Time-weighted · TWRR
+              </p>
+              <p
+                className={cn(
+                  "mt-1 text-2xl font-semibold tabular-nums",
+                  (returns.twrAnnual ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400",
+                )}
+              >
+                {returns.twrAnnual === null ? "—" : `${fmtPct(returns.twrAnnual)}/yr`}
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+                How the holdings performed, with deposits and withdrawals removed.
+              </p>
+              <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+                {returns.twrTotal === null ? "" : `${fmtPct(returns.twrTotal)} in total over ${returns.months} months. `}
+                Because it ignores when money moved, it judges what you bought rather than
+                when you bought it — which is why it is the one set against XEQT below.
+              </p>
+            </div>
+          </div>
+
+          {returns.gap !== null && (
+            <div className="border-t border-line px-5 py-4">
+              <p className="text-xs leading-relaxed text-ink-dim">
+                <span className="font-medium text-ink">Why they differ.</span>{" "}
+                {Math.abs(returns.gap) < 1 ? (
+                  <>
+                    Your money and your holdings returned about the same, which means the
+                    timing of your contributions made little difference either way.
+                  </>
+                ) : returns.gap < 0 ? (
+                  <>
+                    The holdings earned{" "}
+                    <span className="font-medium text-ink">
+                      {fmtPct(returns.twrAnnual!)}/yr
+                    </span>{" "}
+                    while your money earned{" "}
+                    <span className="font-medium text-rose-400">
+                      {fmtPct(returns.mwrr!)}/yr
+                    </span>
+                    , a gap of {Math.abs(returns.gap).toFixed(1)} points. More was invested
+                    before the falls than before the rises: the choices did better than the
+                    timing.
+                  </>
+                ) : (
+                  <>
+                    Your money earned{" "}
+                    <span className="font-medium text-emerald-400">
+                      {fmtPct(returns.mwrr!)}/yr
+                    </span>{" "}
+                    against the holdings&rsquo;{" "}
+                    <span className="font-medium text-ink">
+                      {fmtPct(returns.twrAnnual!)}/yr
+                    </span>
+                    , a gap of {returns.gap.toFixed(1)} points in your favour — you tended to
+                    add money before the rises.
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+        </Card>
+
         {twr && (
           <Card>
             <CardHeader
@@ -628,39 +766,23 @@ export default function InvestmentsPage() {
                     {twr.alpha >= 0 ? "+" : ""}
                     {twr.alpha.toFixed(1)}% alpha
                   </Badge>
-                  {twr.simulated && (
-                    <Badge tone="neutral">
-                      simulated benchmark
-                    </Badge>
-                  )}
                 </div>
               }
             />
             <div className="px-3 pb-4">
-              <div className="flex items-center gap-4 px-1 pb-2">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 pb-2">
+                <span className="flex items-center gap-2 text-xs text-ink-dim">
                   <span className="h-2 w-2 rounded-full bg-cyan-400" />
-                  <span className="text-xs text-ink-dim">
-                    Portfolio{" "}
-                    <span className="font-medium text-ink">{fmtPct(twr.portfolioTwr)}</span>
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
+                  Portfolio{" "}
+                  <span className="font-medium text-ink">{fmtPct(twr.portfolioTwr)}</span>
+                </span>
+                <span className="flex items-center gap-2 text-xs text-ink-dim">
                   <span className="h-2 w-2 rounded-full bg-amber-400" />
-                  <span className="text-xs text-ink-dim">
-                    {twr.name}{" "}
-                    <span className="font-medium text-ink">{fmtPct(twr.benchmarkTwr)}</span>
-                  </span>
-                </div>
+                  {twr.name}{" "}
+                  <span className="font-medium text-ink">{fmtPct(twr.benchmarkTwr)}</span>
+                </span>
               </div>
-              <TwrChart
-                data={twr.rows}
-                height={300}
-                benchmarkName={twr.simulated ? "XEQT (sim.)" : "XEQT"}
-              />
-              {twr.note && (
-                <p className="mt-2 text-center text-[11px] text-ink-faint">{twr.note}</p>
-              )}
+              <TwrChart data={twr.rows} height={300} benchmarkName="XEQT" />
             </div>
           </Card>
         )}

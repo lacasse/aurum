@@ -318,6 +318,156 @@ function computeMwrr(flows: CashFlow[], marketValue: number, asOf: string): numb
 }
 
 /**
+ * Money-weighted return for the whole portfolio.
+ *
+ * Every dated flow from every position, pooled, closed by what the portfolio
+ * is worth today. This is the counterpart to the time-weighted figure on the
+ * chart, and it answers the other question: the time-weighted return measures
+ * the holdings regardless of when money arrived, while this one measures what
+ * actually happened to the money — a well-timed contribution before a rise
+ * lifts it, and the same amount added at a peak drags it down. Read together
+ * they say whether the timing helped.
+ *
+ * Closed positions keep their flows: money that went in and came back out is
+ * part of the story even when the position no longer is. They contribute
+ * nothing to the closing value, which is what a sold-off holding is worth.
+ *
+ * Null when there is nothing to solve — no flows at all, or every flow on the
+ * same day.
+ */
+export function portfolioMwrr(
+  holdings: Holding[],
+  marketValue: number,
+  asOf: string = currentMonthKey() + "-15",
+): number | null {
+  const dated: DatedFlow[] = [];
+  for (const h of holdings) {
+    for (const f of h.flows) {
+      dated.push({
+        date: f.date,
+        // Money paid in is negative, money received is positive.
+        amount: f.kind === "buy" ? -f.amount : f.amount,
+      });
+    }
+  }
+  if (dated.length === 0) return null;
+  if (marketValue > 0) dated.push({ date: asOf, amount: marketValue });
+  return xirr(dated);
+}
+
+/**
+ * Money-weighted return over one window, rather than over all time.
+ *
+ * The window opens by treating what the portfolio was already worth as a
+ * purchase made that month, and closes by treating what it is worth at the end
+ * as a sale. Between them sit the real flows. That is what makes the figure
+ * comparable to a time-weighted return over the same months: both then answer
+ * for the same period, and the difference between them is the effect of when
+ * money moved rather than an artefact of measuring different spans.
+ *
+ * Null when there is nothing to solve — no opening value and no flows, or
+ * everything landing on one day.
+ */
+export function portfolioMwrrOver(
+  holdings: Holding[],
+  startMonth: string,
+  startValue: number,
+  endMonth: string,
+  endValue: number,
+): number | null {
+  // Mid-month, matching the convention the per-position figure already uses:
+  // a month key names a month, not a day, and the middle is the least wrong
+  // day to stand in for it.
+  const opened = `${startMonth}-15`;
+  const closed = `${endMonth}-15`;
+  const dated: DatedFlow[] = [];
+  if (startValue > 0) dated.push({ date: opened, amount: -startValue });
+  for (const h of holdings) {
+    for (const f of h.flows) {
+      const month = monthKeyOf(f.date);
+      if (month <= startMonth || month > endMonth) continue;
+      dated.push({
+        date: f.date,
+        amount: f.kind === "buy" ? -f.amount : f.amount,
+      });
+    }
+  }
+  if (dated.length === 0) return null;
+  if (endValue > 0) dated.push({ date: closed, amount: endValue });
+  return xirr(dated);
+}
+
+/**
+ * A cumulative return restated as an annual rate.
+ *
+ * Needed because a cumulative figure and an annualized one cannot be compared
+ * or subtracted, and the two returns on the chart are read against each other.
+ * Below a year this extrapolates, which is standard and still worth knowing is
+ * happening: a good quarter annualizes into a spectacular year.
+ */
+export function annualized(cumulativePct: number, months: number): number | null {
+  if (months <= 0) return null;
+  const growth = 1 + cumulativePct / 100;
+  if (growth <= 0) return null;
+  return (Math.pow(growth, 12 / months) - 1) * 100;
+}
+
+export interface SimpleReturn {
+  /** Everything paid in, over every recorded buy. */
+  contributed: number;
+  /** Everything that came back: sales and dividends. */
+  returned: number;
+  /** What is still held, at today's prices. */
+  held: number;
+  /** Gain or loss as a percentage of what was put in, or null if nothing was. */
+  pct: number | null;
+}
+
+/**
+ * The plainest answer: everything in against everything out.
+ *
+ * No dates, no weighting — what was paid in, what came back, and what is still
+ * held. It is the figure a bank statement would give you, and it ignores time
+ * completely: the same 10% looks identical whether it took five months or five
+ * years. That blindness is exactly why the other two measures exist, and why
+ * showing it beside them explains them better than either does alone.
+ */
+export function simpleReturn(holdings: Holding[], marketValue: number): SimpleReturn {
+  let contributed = 0;
+  let returned = 0;
+  for (const h of holdings) {
+    for (const f of h.flows) {
+      if (f.kind === "buy") contributed += f.amount;
+      else returned += f.amount;
+    }
+  }
+  contributed = roundMoney(contributed);
+  returned = roundMoney(returned);
+  const held = roundMoney(marketValue);
+  return {
+    contributed,
+    returned,
+    held,
+    pct: contributed > 0 ? ((returned + held - contributed) / contributed) * 100 : null,
+  };
+}
+
+/**
+ * An annual rate restated over a shorter span — the inverse of `annualized`.
+ *
+ * A money-weighted return is annual by construction, which is unhelpful over a
+ * quarter: a good three months annualizes into a figure nobody should quote.
+ * Below a year both returns are shown over the window instead, and this is
+ * what brings the annual one down to it.
+ */
+export function overMonths(annualPct: number, months: number): number | null {
+  if (months <= 0) return null;
+  const growth = 1 + annualPct / 100;
+  if (growth <= 0) return null;
+  return (Math.pow(growth, months / 12) - 1) * 100;
+}
+
+/**
  * Group stored positions by ticker.
  *
  * Cost basis is summed rather than averaged: the share-weighted average cost
