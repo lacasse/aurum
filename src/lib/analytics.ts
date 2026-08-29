@@ -618,25 +618,43 @@ function closeFor(
   return pick === null ? null : closes[pick];
 }
 
+/** Month-end portfolio values, by month then ticker, in CAD. */
+export type SnapshotHistory = Record<string, Record<string, number>>;
+
 export interface AllTimeSeries {
   points: PortfolioPoint[];
-  /** Tickers valued at book cost because no price history could be found. */
+  /** Tickers valued at book cost because nothing better could be found. */
   unpriced: string[];
+  /** Months whose value came entirely from recorded snapshots. */
+  snapshotMonths: number;
 }
 
 /**
- * Market value and invested cost for every month since the first trade.
+ * Market value and invested cost for every month since the record begins.
  *
- * Shares come from the recorded flows rather than from any stored history, so
- * this is a replay of what was actually held, month by month, rather than
- * today's position projected backwards. Prices come from the stored monthly
- * closes. Both are needed: valuing today's shares at old prices, or old shares
- * at today's price, produces a curve that never happened.
+ * Value prefers the user's own month-end record. That figure is what the
+ * position was actually worth; anything else here is a reconstruction — a
+ * price fetched later, multiplied by a share count replayed from the trades —
+ * and where the two disagree the record is right. Prices fill the months it
+ * does not cover, which in practice means the current month, since it is only
+ * snapshotted once it ends.
+ *
+ * Cost always comes from the trades, never from a snapshot: it is exact there,
+ * and the spreadsheet's own cost basis is not.
+ *
+ * The current month is the one month that is never snapshotted — it is only
+ * recorded once it ends — so it falls back to the live price rather than to a
+ * fetched close. Today's price is right for today and wrong for every earlier
+ * month, which is why the fallback is confined to the last point.
+ *
+ * Both sides are pooled per ticker rather than per lot, because a snapshot is
+ * recorded for a security rather than for each account holding it.
  */
 export function allTimeSeries(
   holdings: Holding[],
   closes: CloseHistory,
   months: string[],
+  snapshots: SnapshotHistory = {},
 ): AllTimeSeries {
   const unpriced = new Set<string>();
   const points = months.map((month) => ({
@@ -646,28 +664,145 @@ export function allTimeSeries(
     cost: 0,
   }));
 
+  // Pool the lots: one share count and one book cost per ticker per month.
+  const byTicker = new Map<string, { shares: Map<string, number>; cost: Map<string, number> }>();
+  const currentPrice = new Map<string, number>();
+  const lastMonth = months[months.length - 1];
+  /*
+   * The live price comes from a lot that is still open. A ticker held in
+   * several accounts has a row per account, and a closed one keeps whatever
+   * price it last had — often years stale — so taking whichever row happened
+   * to come last valued the whole position at a price nobody holds it at.
+   */
+  const closedPrice = new Map<string, number>();
   for (const h of holdings) {
-    const { shares, cost } = walkPositionByMonth(h.flows, months);
-    const series = closes[h.ticker.toUpperCase()];
-    for (let i = 0; i < months.length; i++) {
-      const month = months[i];
+    const px = h.priceCAD ?? h.price;
+    if (!Number.isFinite(px) || px <= 0) continue;
+    const key = h.ticker.toUpperCase();
+    if (h.shares > 0) currentPrice.set(key, px);
+    else if (!closedPrice.has(key)) closedPrice.set(key, px);
+  }
+  for (const [ticker, px] of closedPrice) {
+    if (!currentPrice.has(ticker)) currentPrice.set(ticker, px);
+  }
+
+  for (const h of holdings) {
+    const ticker = h.ticker.toUpperCase();
+    const walked = walkPositionByMonth(h.flows, months);
+    const entry = byTicker.get(ticker);
+    if (!entry) {
+      byTicker.set(ticker, walked);
+      continue;
+    }
+    for (const month of months) {
+      entry.shares.set(month, (entry.shares.get(month) ?? 0) + (walked.shares.get(month) ?? 0));
+      entry.cost.set(month, (entry.cost.get(month) ?? 0) + (walked.cost.get(month) ?? 0));
+    }
+  }
+
+  let snapshotMonths = 0;
+  for (let i = 0; i < months.length; i++) {
+    const month = months[i];
+    const recorded = snapshots[month] ?? {};
+    let fromSnapshot = 0;
+    let fromPrice = 0;
+
+    // A ticker recorded that month, whether or not it is still held — a
+    // position sold years ago was still worth something while it was open.
+    for (const value of Object.values(recorded)) fromSnapshot += value;
+
+    for (const [ticker, { shares, cost }] of byTicker) {
+      points[i].cost += cost.get(month) ?? 0;
+      if (recorded[ticker] !== undefined) continue; // already counted
       const held = shares.get(month) ?? 0;
-      const book = cost.get(month) ?? 0;
-      points[i].cost += book;
       if (held <= 0) continue;
-      const px = closeFor(series, month);
+      const px =
+        month === lastMonth
+          ? (currentPrice.get(ticker) ?? closeFor(closes[ticker], month))
+          : closeFor(closes[ticker], month);
       if (px === null) {
-        unpriced.add(h.ticker);
-        points[i].value += book; // book cost: no price was ever available
+        unpriced.add(ticker);
+        fromPrice += cost.get(month) ?? 0; // book cost: nothing better exists
       } else {
-        points[i].value += held * px;
+        fromPrice += held * px;
       }
     }
+
+    if (fromSnapshot > 0 && fromPrice === 0) snapshotMonths++;
+    points[i].value = fromSnapshot + fromPrice;
   }
 
   for (const p of points) {
     p.value = roundMoney(p.value);
     p.cost = roundMoney(p.cost);
   }
-  return { points, unpriced: [...unpriced].sort() };
+  return { points, unpriced: [...unpriced].sort(), snapshotMonths };
+}
+
+/* ── Time-weighted return ── */
+
+/**
+ * Net external cash flow per month: money put in, less money taken out.
+ *
+ * Buys are money arriving, sells are money leaving, and a rotation from one
+ * holding into another nets to nothing — which is right, since moving between
+ * positions is not a contribution.
+ *
+ * A dividend counts as money leaving, which reads oddly until you notice that
+ * portfolio value here is holdings only: the cash a dividend pays out is not a
+ * tracked position, so it has left the measured portfolio exactly as a
+ * withdrawal would. Recording it that way is what gives the portfolio credit
+ * for having earned it — value stayed flat while $50 walked out, so the month
+ * returned $50.
+ *
+ * It also fixes reinvestment. A DRIP is a dividend out and a purchase back in;
+ * excluding the dividend left the purchase looking like fresh capital, which
+ * cancelled exactly the value it added and erased the distribution from the
+ * return. As a pair they net to zero, and the reinvested value shows up as the
+ * gain it is.
+ */
+export function netExternalFlows(holdings: Holding[]): Record<string, number> {
+  const byMonth: Record<string, number> = {};
+  for (const h of holdings) {
+    for (const f of h.flows) {
+      const month = monthKeyOf(f.date);
+      const signed = f.kind === "buy" ? f.amount : -f.amount;
+      byMonth[month] = (byMonth[month] ?? 0) + signed;
+    }
+  }
+  return byMonth;
+}
+
+/**
+ * Cumulative time-weighted return, in percent, one figure per month.
+ *
+ * The chart used to divide the latest portfolio value by the earliest one,
+ * which answers a different question: it counts every deposit as though the
+ * market had produced it. On a portfolio funded steadily over years this can overstate the return by an order of magnitude — and it was being set beside a
+ * benchmark that *is* time-weighted, so the alpha compared two unlike things.
+ *
+ * Each month's return is measured by Modified Dietz — the gain net of that
+ * month's flows, over the capital that was actually at work, counting a flow
+ * as present for half the month since the day it landed is not recorded. The
+ * monthly returns are then chained, which is what makes the result independent
+ * of when money arrived and comparable to an index.
+ */
+export function chainedReturns(
+  points: readonly PortfolioPoint[],
+  flows: Readonly<Record<string, number>>,
+): number[] {
+  const out: number[] = [0];
+  let chain = 1;
+  for (let i = 1; i < points.length; i++) {
+    const start = points[i - 1].value;
+    const end = points[i].value;
+    const flow = flows[points[i].key] ?? 0;
+    // Average capital at work. A month that began empty and was funded
+    // mid-way has no meaningful denominator, so it contributes no return
+    // rather than an arbitrarily large one.
+    const base = start + flow / 2;
+    if (base > 0) chain *= 1 + (end - start - flow) / base;
+    out.push(roundMoney((chain - 1) * 100));
+  }
+  return out;
 }
