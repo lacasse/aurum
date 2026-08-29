@@ -48,12 +48,18 @@ const HOME_PATH = /(?:^|[\s"'`(=:])(\/Users\/|\/home\/[a-z0-9_.-]+\/)/i;
 /*
  * The EODHD free plan is 20 calls a day for the whole account. Two rules keep
  * that structural rather than remembered: the provider may only be called from
- * the price routes, and any file that calls it must reserve against the ledger
- * in the same file. Without the second rule a new call site could sit next to
- * a reserving one and silently spend the allowance.
+ * a short list of places, and any file that calls it must reserve against the
+ * ledger in the same file. Without the second rule a new call site could sit
+ * next to a reserving one and silently spend the allowance.
+ *
+ * The benchmark filler is on the list because it is not a price route but
+ * genuinely needs the provider: it tops up the shipped XEQT series when a
+ * completed month is missing, once a month, one call however wide the gap. It
+ * reserves like everything else — and against a lowered ceiling, so it cannot
+ * take the last calls a price refresh depends on.
  */
 const EODHD_HOST = "eodhd" + ".com";
-const EODHD_ALLOWED_DIR = "src/app/api/prices/";
+const EODHD_ALLOWED = ["src/app/api/prices/", "src/db/benchmark.ts"];
 
 /*
  * Twelve Data has the same shape of limit — 8 credits a minute, 800 a day — and
@@ -65,9 +71,9 @@ const TWELVEDATA_ALLOWED = ["src/app/api/prices/", "src/lib/fx.ts"];
 
 function check(rel, content) {
   if (content.includes(EODHD_HOST)) {
-    if (!rel.startsWith(EODHD_ALLOWED_DIR)) {
+    if (!EODHD_ALLOWED.some((allowed) => rel.startsWith(allowed))) {
       problems.push(
-        `${rel}: calls ${EODHD_HOST} outside ${EODHD_ALLOWED_DIR} — the daily cap is enforced there`,
+        `${rel}: calls ${EODHD_HOST} outside ${EODHD_ALLOWED.join(" / ")} — the daily cap is enforced there`,
       );
     } else if (!content.includes("reserveEodhdCalls")) {
       problems.push(
