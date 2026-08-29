@@ -85,6 +85,13 @@
       "when": 1788800000000,
       "tag": "0011_price_history_source",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788900000000,
+      "tag": "0012_import_2022_opening_trades",
+      "breakpoints": true
     }
   ]
 }
