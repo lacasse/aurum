@@ -57,6 +57,13 @@
       "when": 1788400000000,
       "tag": "0007_holding_flows",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788500000000,
+      "tag": "0008_normalise_exchange_suffixes",
+      "breakpoints": true
     }
   ]
 }

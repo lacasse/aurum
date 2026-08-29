@@ -97,11 +97,14 @@ export async function GET(req: Request) {
       return { valid: false, checked: true, price: null, ticker: "" };
     }
 
-    const usesEodhd = priceSource(ac, cu, ticker) === "eodhd";
+    const usesEodhd = priceSource(ticker) === "eodhd";
     let result: Lookup;
 
     if (usesEodhd) {
       result = await fetchEodhdPrice(toEodhdSymbol(ticker));
+      // Only a ticker that spelled out its exchange reaches EODHD now, so a
+      // rejection here is a verdict on the symbol rather than on a guessed
+      // ".TO" suffix, and there is nothing to second-guess with another feed.
       if (result.price != null) await recordEodhdFetched([ticker]);
     } else {
       result = await fetchTwelveDataPrice(toTwelveDataSymbol(ticker, ac, cu));
@@ -126,7 +129,7 @@ export async function GET(req: Request) {
        * once the day's EODHD calls were gone.
        */
       checked: result.checked,
-      price: valid ? result.price : null,
+      price: valid && result.price != null && result.price > 0 ? result.price : null,
       ticker,
       quotaExhausted: usesEodhd && !result.checked,
       quota: usesEodhd ? await eodhdUsage() : undefined,
