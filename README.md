@@ -152,15 +152,20 @@ skipped with console errors).
 independent attributes, because they answer different questions:
 
 - **Kind** — what it is and how it behaves: `checking`, `savings`, `cash`, `investment`,
-  `property`, `credit`, `loan`. This decides the balance arithmetic (credit cards and
-  loans store what is *owed*, so the signs invert) and which accounts can hold securities.
+  `crypto`, `property`, `credit`, `loan`. This decides the balance arithmetic (credit cards
+  and loans store what is *owed*, so the signs invert) and which accounts can hold
+  securities. Investment and crypto accounts both hold positions; a wallet or exchange
+  account works the same way as a brokerage.
 - **Registration** — its tax treatment: `non-registered`, `TFSA`, `RRSP`, `FHSA`,
-  `Pension`. Offered on every kind except debts and property, where it is meaningless.
+  `Pension`. Offered on every kind that can be sheltered, so never on credit cards, loans
+  or property.
 
 They are deliberately separate rather than one list: a TFSA may be a cash savings account
 or a portfolio of ETFs, and merging the two would force the cross product ("TFSA savings",
-"TFSA investment", …). Holdings reference an investment account by id, so a position's tax
-treatment is derived from its account instead of being duplicated on the holding.
+"TFSA investment", …). Holdings belong to an **account** by id rather than carrying a
+loose "account type" tag, so a position's tax treatment is derived from its account
+instead of being duplicated on the holding, and a TFSA contribution is an ordinary
+transfer into a real account.
 
 **Transactions have a source and a destination.** One side is always an account of yours;
 the other is either the outside world (named by `payee`) or a second account of yours:
@@ -178,16 +183,19 @@ of it, so they are excluded from income, spending, budgets and the cash-flow cha
 **Recurring transactions** are templates plus a schedule (weekly, every 2 weeks, monthly,
 quarterly, yearly), managed on the Transactions page. Each rule owns a `nextDate`; loading
 the app posts every occurrence a rule owes up to today and advances it past them, so
-reopening the app after three months away posts exactly the three payments it missed.
-Generated rows carry the rule's id, which is also what stops a second run from posting a
-duplicate. Deleting a rule keeps the payments it already made — that money really moved.
-Month-based schedules clamp to short months, so a rule anchored on the 31st posts on
-Feb 28 and then returns to the 31st in March.
+reopening the app after three months away posts exactly the three payments it missed. The
+work is idempotent: rules are materialised on load, generated rows carry the rule's id,
+and that id is what stops a second run from posting a duplicate. Month-based schedules
+clamp to short months, so a rule anchored on the 31st posts on Feb 28 and then returns to
+the 31st in March. Deleting a rule keeps the payments it already made — that money really
+moved.
 
 > **Investment account balances are uninvested cash only.** Securities are valued from the
 > holdings themselves, so an investment account's balance covers just the cash sitting in
-> it. Recording a contribution as a transfer and then adding the holdings you bought with
-> it will count the money twice until you reduce the cash balance to match.
+> it. Buying moves cash out of the balance and into a holding, leaving net worth
+> unchanged; selling and dividends put cash back. Recording a contribution as a transfer
+> and then adding the holdings you bought with it will count the money twice until you
+> reduce the cash balance to match.
 
 > **Money is never stored as a float.** Every monetary, price and quantity
 > column is Postgres `numeric` (see `src/db/schema.ts`), and every total is
@@ -239,55 +247,31 @@ and runs `node --test`, so there is no extra test-framework dependency.
 Every one of the above runs in CI on push and pull request
 (`.github/workflows/ci.yml`), along with a Docker image build.
 
-## Accounts, transfers and recurring transactions
+## Market data
 
-An account has two independent properties: a **kind** (checking, savings, cash,
-investment, crypto, property, credit, loan) describing what it is and how it behaves, and a
-**registration** (Non-registered, TFSA, RRSP, FHSA, Pension) describing its tax
-treatment. They are deliberately not one list — a TFSA can be a cash savings account
-or a portfolio of ETFs, and flattening them would force a "TFSA savings" / "TFSA
-investment" cross product. Registration is only offered on kinds that can be
-sheltered, so never on credit cards, loans or property.
+Prices come from two providers, and **the ticker's exchange suffix decides which one**.
+A ticker naming its listing venue — `XEQT.TO`, `RETL.NEO`, `AUTO.NE` — is quoted by
+EODHD. A bare ticker — `AAPL`, `REIT`, `BTC` — is quoted by Twelve Data.
 
-Holdings belong to an **account** rather than carrying a loose "account type" tag, so a
-contribution to a TFSA is an ordinary transfer into a real account. Investment and
-crypto accounts both hold positions; a crypto wallet or exchange account works the same
-way as a brokerage.
+That rule used to key on the holding's currency instead, which read sensibly until you
+notice the currency is a form field that defaults to CAD. Someone typing a US stock into
+a fresh trade row never said "Canadian" — the default did — and the app went looking for
+`AAPL.TO`, a symbol that does not exist, spending one of a strictly limited twenty daily
+calls to find that out. A suffix is something you write down on purpose, so routing on it
+replaces an inference with a statement and leaves no ambiguous case to guess at. It also
+reaches both crypto cases without a special case: a bare coin goes to Twelve Data, while
+an exchange-listed crypto product like `CRYP-A.TO` stays on EODHD.
 
-Every transaction records **where the money came from and where it went**. One side
-is always an account of yours; the other is either a second account (a transfer) or
-the outside world, named by the payee:
+The rule only holds if no Canadian listing is stored bare, which migration
+`0008_normalise_exchange_suffixes` guarantees. A bare symbol sent to Twelve Data does not
+merely fail — it can match a same-named US listing and return a confident price, in the
+wrong currency, for a security you do not own. A stale price is visible; that is not.
 
-| Type | Source | Destination |
-| --- | --- | --- |
-| Expense | your account | payee |
-| Income | payer | your account |
-| Transfer | your account | your account |
+### The EODHD daily cap
 
-Transfers change nothing about your net worth, so they are excluded from income,
-spending, budgets and the cash-flow charts.
-
-**A positions-holding account's balance is uninvested cash only** — its securities are
-valued from the holdings. Buying therefore moves cash out of the account balance and
-into a holding, leaving net worth unchanged; selling and dividends put cash back.
-Adding a holding by hand records a position you already own and deliberately leaves
-the cash alone.
-
-**Recurring transactions** are templates plus a schedule (weekly, every 2 weeks,
-monthly, quarterly, yearly), managed on the Transactions page. Each rule owns the
-date it should next post, so catching up after the app has been closed for a month is
-just a loop, and the work is idempotent: rules are materialised on load, generated
-transactions are tagged with their rule id, and a rule that is up to date produces
-nothing. Month-based schedules clamp to short months — a rule anchored on the 31st
-posts on Feb 28 and returns to the 31st in March. Deleting a rule keeps the payments
-it already posted, since that money really moved.
-
-## Market data and the EODHD daily cap
-
-Canadian holdings are priced by [EODHD](https://eodhd.com), whose free plan allows
-**20 requests per day**, resetting at **00:00 GMT**. Going over does not degrade
-gracefully — it just fails — so every EODHD call in the app reserves against a ledger
-first and the app never exceeds the cap.
+[EODHD](https://eodhd.com)'s free plan allows **20 requests per day**, resetting at
+**00:00 GMT**. Going over does not degrade gracefully — it just fails — so every EODHD
+call in the app reserves against a ledger first and the app never exceeds the cap.
 
 The count lives in the database (`app_meta.eodhd_quota`, keyed by UTC date), not in
 memory: an in-process counter resets on every container restart, and a few redeploys
@@ -300,10 +284,61 @@ on the tickers that have gone longest without an update, tracked per ticker in
 `app_meta.eodhd_last_fetch`. EOD prices only change after the market close, so nothing
 is spent before 16:00 Eastern.
 
+Type-ahead ticker validation draws on the same twenty calls, but not on equal terms.
+Validation fires on a debounce as you type where the refresh runs once, so left
+unchecked the typing wins — and a stale price is visible on every holding, while a
+validation tick is a convenience on one field. Validation therefore stops short of the
+last `EODHD_VALIDATE_RESERVE` calls (default **5**) and reports that it could not check,
+rather than spending what the prices need.
+
+### The Twelve Data credit ledger
+
+[Twelve Data](https://twelvedata.com) quotes everything without an exchange suffix: US
+equities and coins. Its free plan is limited on **two** axes at once — **8 credits per
+minute** and **800 per day** — and one request costs one credit per symbol, so a
+portfolio refresh can trip the per-minute limit long before the daily one.
+
+Reservations are all-or-nothing, unlike EODHD's: a Twelve Data request carries a batch
+of symbols, and a partial grant would mean deciding which symbols to drop, so callers
+batch to fit instead. The ledger is again in the database — `app_meta.twelvedata_quota`,
+holding a minute bucket and a day bucket (`minute:used|day:used`) — and reserved under a
+row lock, so two concurrent refreshes cannot both see the same headroom and jointly
+exceed the cap.
+
+Both limits keep a reserve rather than spending to the last credit, so an interactive
+lookup is not starved by a background refresh that arrived first:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `TWELVEDATA_MINUTE_LIMIT` | `8` | Provider's per-minute allowance |
+| `TWELVEDATA_DAY_LIMIT` | `800` | Provider's daily allowance |
+| `TWELVEDATA_MINUTE_RESERVE` | `1` | Credits a minute never spends |
+| `TWELVEDATA_DAY_RESERVE` | `100` | Credits a day never spends |
+
+CI pins the minute and day limits to `0`, on the same reasoning as EODHD: no test calls
+the provider, and a zero limit means a future one could not either.
+
+### What the refresh actually asks for
+
+One request per **security**, not per position. The same ticker held in four accounts
+asked for four prices before, spending four calls to learn one number.
+
+**Closed positions are not polled.** A sold-off holding's price changes nothing — its
+realized gain is settled by what it sold for — so keeping it current on a timer spends a
+scarce allowance on a number nobody is looking at. They are priced once, on demand, the
+first time you open the closed-positions section.
+
 **When a price cannot be refreshed** — the allowance is spent, or the request failed —
 the holding keeps its **last known price** and is marked stale: a `STALE` badge on the
 row and a banner saying how many prices are affected and when the limit resets. Nothing
 is silently presented as current, and the prices update on their own after the reset.
+
+The same distinction applies to ticker validation, which reports three outcomes rather
+than two: a green tick for a symbol the provider knows, a red cross for one it rejects,
+and a grey question mark for one **nobody looked up** — the allowance was gone, or the
+request failed. Collapsing that third case into the second is why every ticker once
+appeared to be invalid once the day's EODHD calls were spent. A ticker you already hold
+skips the network entirely: it is held, so it exists.
 
 ## Demo data
 
