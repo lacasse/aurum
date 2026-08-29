@@ -115,6 +115,70 @@ function check(rel, content) {
 walk(ROOT);
 
 /*
+ * Migrations must not carry anyone's personal records.
+ *
+ * Every deployment runs every migration, so a holding, an amount or a dated
+ * trade written into one is installed into every database that runs this code.
+ * That happened: a month-end portfolio history was committed as a migration
+ * and shipped to anyone who deployed the app. Schema belongs in migrations;
+ * personal records belong in the one database they describe.
+ *
+ * The line drawn here is between deriving rows and dictating them. An
+ * `INSERT ... SELECT` builds rows from data already present — 0006 fills in
+ * accounts from the holdings that reference them — and is schema work. A
+ * literal `VALUES` list is somebody's records being typed in.
+ *
+ * price_history is exempt only for the benchmark series, which is a published
+ * closing price rather than anyone's position, and is meant to reach every
+ * deployment.
+ */
+const USER_TABLES =
+  "holdings|monthly_snapshots|transactions|accounts|budgets|recurring_transactions|categories|merchant_rules";
+
+function checkMigrations() {
+  const dir = join(ROOT, "drizzle");
+  let entries;
+  try {
+    entries = readdirSync(dir).filter((f) => f.endsWith(".sql"));
+  } catch {
+    return; // no migrations yet
+  }
+  for (const entry of entries) {
+    const rel = `drizzle/${entry}`;
+    const sql = readFileSync(join(dir, entry), "utf8");
+
+    // Statement-by-statement so one literal insert cannot hide behind a
+    // legitimate derived one in the same file.
+    for (const statement of sql.split(";")) {
+      const insert = new RegExp(`INSERT\\s+INTO\\s+"?(${USER_TABLES})"?`, "i").exec(statement);
+      if (insert && /\bVALUES\b/i.test(statement)) {
+        problems.push(
+          `${rel}: writes literal rows into "${insert[1]}" — personal records must not ship in a migration`,
+        );
+      }
+      if (/INSERT\s+INTO\s+"?price_history"?/i.test(statement) && /\bVALUES\b/i.test(statement)) {
+        if (!/'benchmark'/.test(statement)) {
+          problems.push(
+            `${rel}: writes price_history rows that are not tagged 'benchmark' — only published prices ship`,
+          );
+        }
+      }
+    }
+
+    // A dated money amount in a migration is a transaction, whatever table it
+    // is headed for.
+    const money = sql.match(/\b\d{1,3}(?:,\d{3})+\.\d{2}\b|\$\d[\d,]*\.\d{2}/g);
+    if (money && new RegExp(`\\b(${USER_TABLES})\\b`, "i").test(sql)) {
+      problems.push(
+        `${rel}: contains money amounts alongside a user table (${money.slice(0, 3).join(", ")}…)`,
+      );
+    }
+  }
+}
+
+checkMigrations();
+
+/*
  * The cap itself. Tests and CI pin EODHD_DAY_LIMIT lower, but the fallback is
  * what production runs on, so it must never drift above the free plan's 20.
  */

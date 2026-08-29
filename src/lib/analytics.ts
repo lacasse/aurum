@@ -928,8 +928,10 @@ export function netExternalFlows(holdings: Holding[]): Record<string, number> {
  *
  * The chart used to divide the latest portfolio value by the earliest one,
  * which answers a different question: it counts every deposit as though the
- * market had produced it. On a portfolio funded steadily over years this can overstate the return by an order of magnitude — and it was being set beside a
- * benchmark that *is* time-weighted, so the alpha compared two unlike things.
+ * market had produced it. On a portfolio funded steadily over years that can
+ * overstate the return by an order of magnitude — and it was being set beside
+ * a benchmark that *is* time-weighted, so the alpha compared two unlike
+ * things.
  *
  * Each month's return is measured by Modified Dietz — the gain net of that
  * month's flows, over the capital that was actually at work, counting a flow
