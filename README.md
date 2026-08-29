@@ -318,6 +318,47 @@ lookup is not starved by a background refresh that arrived first:
 CI pins the minute and day limits to `0`, on the same reasoning as EODHD: no test calls
 the provider, and a zero limit means a future one could not either.
 
+### Monthly history, and the all-time charts
+
+The two providers above answer one question — what is this worth *now*. The portfolio
+growth and time-weighted return charts ask a different one: what was it worth in every
+month since the first trade. That is a five-year monthly series for thirty tickers,
+which neither allowance can carry: EODHD's whole day is twenty calls.
+
+So history comes from a third source, **Yahoo's chart endpoint**, which returns an entire
+monthly series in one unmetered request. The benchmark line has been read this way since
+it was added; the holdings now use the same path. Nothing time-critical depends on it —
+prices shown as current still come from the paid feeds, and a failure here costs history,
+not the live figure.
+
+Closes are **stored** in `price_history`, one row per ticker per month, because history
+does not change: once March 2023's close is written it is never asked for again, and only
+the current month is refreshed. A cold cache is therefore the only expensive moment, and
+it happens once.
+
+Yahoo has no published quota but answers a burst from one address with `429`s that last
+minutes, so the fill is **paced rather than capped**: `PRICE_HISTORY_PER_MINUTE` symbols a
+minute (default **6**, `0` disables it and CI pins it there), resumable, with
+the page asking again every 25 seconds until the server reports it is done. A first fill
+takes two or three minutes in the background; the charts show the shorter eighteen-month
+series until the whole set is in, since a half-filled one would put some tickers at market
+and the rest at book cost.
+
+A refusal stops the asking rather than triggering a retry: the history fill goes quiet for
+**20 minutes** and the benchmark for **30**. Yahoo's `429` holds for many minutes and
+requests sent during it appear to extend it, so a retry on the next page load is what keeps
+a rate limit alive — which is exactly why the benchmark had been quietly falling back to
+its simulated line.
+
+Two symbols are spelled differently there than here: Cboe Canada is `.NE` to Yahoo and
+`.NEO` to EODHD, and a coin is a pair (`BTC-CAD`), quoted in the currency the position is
+recorded in so no conversion is needed afterwards. US listings are converted with the
+month's own USD→CAD rate, stored alongside the prices.
+
+A ticker Yahoo carries nothing for — a delisting, a ticker since reused by another
+company — is valued at **book cost** for the months it was held, and the chart says which
+tickers those were. Guessing with today's price would be worse than saying so.
+
 ### What the refresh actually asks for
 
 One request per **security**, not per position. The same ticker held in four accounts
