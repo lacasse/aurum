@@ -520,3 +520,154 @@ export function monthTotals(
         : 0,
   };
 }
+
+/* ── All-time portfolio series ── */
+
+/**
+ * Monthly closing prices in CAD, by ticker then month key, as served by
+ * `/api/prices/history`.
+ */
+export type CloseHistory = Record<string, Record<string, number>>;
+
+/** The month of the earliest recorded trade, or null if nothing is recorded. */
+export function firstFlowMonth(holdings: Holding[]): string | null {
+  let earliest: string | null = null;
+  for (const h of holdings) {
+    for (const f of h.flows) {
+      const key = monthKeyOf(f.date);
+      if (earliest === null || key < earliest) earliest = key;
+    }
+  }
+  return earliest;
+}
+
+/** Month keys from `start` through the current month, oldest first. */
+export function monthsSince(start: string, end = currentMonthKey()): string[] {
+  const [sy, sm] = start.split("-").map(Number);
+  const [ey, em] = end.split("-").map(Number);
+  const count = (ey - sy) * 12 + (em - sm) + 1;
+  if (!Number.isFinite(count) || count < 1) return [end];
+  return lastMonthKeys(count, end);
+}
+
+interface MonthlyPosition {
+  /** Shares held at the end of each month, and the book cost of them. */
+  shares: Map<string, number>;
+  cost: Map<string, number>;
+}
+
+/**
+ * Walk one position's flows forward, recording where it stood each month end.
+ *
+ * The same average-cost arithmetic as `replayFlows`, stopped at every month
+ * boundary instead of only at the end: a buy adds what was paid, a sell
+ * disposes of its proportional share of the basis, and a dividend touches
+ * neither. Kept beside it rather than folded into it because the two answer
+ * different questions — one totals a position, this one traces it.
+ */
+function walkPositionByMonth(flows: CashFlow[], months: string[]): MonthlyPosition {
+  const ordered = [...flows].sort((a, b) => a.date.localeCompare(b.date));
+  const shares = new Map<string, number>();
+  const cost = new Map<string, number>();
+  let held = 0;
+  let basis = 0;
+  let i = 0;
+  for (const month of months) {
+    while (i < ordered.length && monthKeyOf(ordered[i].date) <= month) {
+      const f = ordered[i++];
+      if (f.kind === "buy") {
+        held += f.shares;
+        basis += f.amount;
+      } else if (f.kind === "sell") {
+        const sold = Math.min(Math.abs(f.shares), held);
+        basis -= held > 0 ? basis * (sold / held) : 0;
+        held -= sold;
+      }
+    }
+    // Floating dust: a position sold out should read as exactly empty.
+    shares.set(month, held < 1e-9 ? 0 : held);
+    cost.set(month, held < 1e-9 ? 0 : basis);
+  }
+  return { shares, cost };
+}
+
+/**
+ * The price to value a ticker at in a given month.
+ *
+ * Falls back to the nearest month on record — carrying the first known price
+ * backwards and the last known price forwards — because a gap in the series is
+ * a gap in what the provider carries, not a month the position was worthless.
+ * A ticker with no history at all is valued at its book cost, which is the one
+ * figure that is certainly true of it.
+ */
+function closeFor(
+  closes: Record<string, number> | undefined,
+  month: string,
+): number | null {
+  if (!closes) return null;
+  const exact = closes[month];
+  if (exact !== undefined) return exact;
+  let below: string | null = null;
+  let above: string | null = null;
+  for (const m of Object.keys(closes)) {
+    if (m <= month) {
+      if (below === null || m > below) below = m;
+    } else if (above === null || m < above) above = m;
+  }
+  const pick = below ?? above;
+  return pick === null ? null : closes[pick];
+}
+
+export interface AllTimeSeries {
+  points: PortfolioPoint[];
+  /** Tickers valued at book cost because no price history could be found. */
+  unpriced: string[];
+}
+
+/**
+ * Market value and invested cost for every month since the first trade.
+ *
+ * Shares come from the recorded flows rather than from any stored history, so
+ * this is a replay of what was actually held, month by month, rather than
+ * today's position projected backwards. Prices come from the stored monthly
+ * closes. Both are needed: valuing today's shares at old prices, or old shares
+ * at today's price, produces a curve that never happened.
+ */
+export function allTimeSeries(
+  holdings: Holding[],
+  closes: CloseHistory,
+  months: string[],
+): AllTimeSeries {
+  const unpriced = new Set<string>();
+  const points = months.map((month) => ({
+    key: month,
+    label: labelMonth(month),
+    value: 0,
+    cost: 0,
+  }));
+
+  for (const h of holdings) {
+    const { shares, cost } = walkPositionByMonth(h.flows, months);
+    const series = closes[h.ticker.toUpperCase()];
+    for (let i = 0; i < months.length; i++) {
+      const month = months[i];
+      const held = shares.get(month) ?? 0;
+      const book = cost.get(month) ?? 0;
+      points[i].cost += book;
+      if (held <= 0) continue;
+      const px = closeFor(series, month);
+      if (px === null) {
+        unpriced.add(h.ticker);
+        points[i].value += book; // book cost: no price was ever available
+      } else {
+        points[i].value += held * px;
+      }
+    }
+  }
+
+  for (const p of points) {
+    p.value = roundMoney(p.value);
+    p.cost = roundMoney(p.cost);
+  }
+  return { points, unpriced: [...unpriced].sort() };
+}

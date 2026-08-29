@@ -1,9 +1,12 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
+  allTimeSeries,
   budgetRows,
   cashflowSeries,
   consolidateHoldings,
+  firstFlowMonth,
+  monthsSince,
   replayFlows,
   sortHoldingRows,
   monthTotals,
@@ -518,5 +521,124 @@ describe("realized gain and MWRR on a row", () => {
       "2026-01-01",
     );
     assert.equal(row.realizedGain, 10, "+50 in one account, -40 in the other");
+  });
+});
+
+describe("allTimeSeries", () => {
+  const lot = (over: Partial<Holding>): Holding =>
+    ({
+      id: "h",
+      ticker: "AAA",
+      name: "AAA",
+      assetClass: "US Equity",
+      sector: "Other",
+      shares: 0,
+      avgCost: 0,
+      price: 0,
+      history: [],
+      dividendsReceived: 0,
+      accountId: "acc",
+      currency: "CAD",
+      priceCAD: 0,
+      avgCostCAD: 0,
+      dividendsReceivedCAD: 0,
+      historyCAD: [],
+      flows: [],
+      ...over,
+    }) as Holding;
+
+  const MONTHS = ["2024-01", "2024-02", "2024-03", "2024-04"];
+
+  test("the first trade sets where the series can start", () => {
+    const holdings = [
+      lot({ flows: [{ date: "2023-07-14", kind: "buy", amount: 100, shares: 1 }] }),
+      lot({ id: "b", flows: [{ date: "2022-11-02", kind: "buy", amount: 50, shares: 1 }] }),
+    ];
+    assert.equal(firstFlowMonth(holdings), "2022-11");
+    assert.equal(firstFlowMonth([lot({})]), null, "nothing recorded, nothing to plot");
+  });
+
+  test("monthsSince spans both ends inclusively", () => {
+    assert.deepEqual(monthsSince("2024-01", "2024-04"), MONTHS);
+    assert.deepEqual(monthsSince("2024-04", "2024-04"), ["2024-04"]);
+  });
+
+  test("values the shares actually held that month, not today's", () => {
+    const holdings = [
+      lot({
+        shares: 10,
+        flows: [
+          { date: "2024-02-10", kind: "buy", amount: 200, shares: 10 },
+        ],
+      }),
+    ];
+    const closes = { AAA: { "2024-01": 15, "2024-02": 20, "2024-03": 25, "2024-04": 30 } };
+    const { points } = allTimeSeries(holdings, closes, MONTHS);
+    assert.equal(points[0].value, 0, "not yet bought");
+    assert.equal(points[1].value, 200);
+    assert.equal(points[3].value, 300);
+    assert.deepEqual(
+      points.map((p) => p.cost),
+      [0, 200, 200, 200],
+      "cost appears when it was paid and stays put",
+    );
+  });
+
+  test("a sale removes its share of the basis and stops the valuation", () => {
+    const holdings = [
+      lot({
+        flows: [
+          { date: "2024-01-05", kind: "buy", amount: 400, shares: 20 },
+          { date: "2024-03-05", kind: "sell", amount: 600, shares: -20 },
+        ],
+      }),
+    ];
+    const closes = { AAA: { "2024-01": 20, "2024-02": 25, "2024-03": 30, "2024-04": 35 } };
+    const { points } = allTimeSeries(holdings, closes, MONTHS);
+    assert.deepEqual(points.map((p) => p.value), [400, 500, 0, 0]);
+    assert.deepEqual(points.map((p) => p.cost), [400, 400, 0, 0]);
+  });
+
+  test("a dividend changes neither the shares nor the cost", () => {
+    const holdings = [
+      lot({
+        flows: [
+          { date: "2024-01-05", kind: "buy", amount: 100, shares: 10 },
+          { date: "2024-02-05", kind: "dividend", amount: 9, shares: 0 },
+        ],
+      }),
+    ];
+    const closes = { AAA: { "2024-01": 10, "2024-02": 10, "2024-03": 10, "2024-04": 10 } };
+    const { points } = allTimeSeries(holdings, closes, MONTHS);
+    assert.deepEqual(points.map((p) => p.value), [100, 100, 100, 100]);
+    assert.deepEqual(points.map((p) => p.cost), [100, 100, 100, 100]);
+  });
+
+  test("a gap in the price series carries the nearest close, not a zero", () => {
+    const holdings = [
+      lot({ flows: [{ date: "2024-01-05", kind: "buy", amount: 100, shares: 10 }] }),
+    ];
+    // Only February is known: January carries it back, March and April forward.
+    const { points } = allTimeSeries(holdings, { AAA: { "2024-02": 12 } }, MONTHS);
+    assert.deepEqual(points.map((p) => p.value), [120, 120, 120, 120]);
+  });
+
+  test("a ticker with no prices at all falls back to book cost and says so", () => {
+    const holdings = [
+      lot({ flows: [{ date: "2024-01-05", kind: "buy", amount: 100, shares: 10 }] }),
+    ];
+    const { points, unpriced } = allTimeSeries(holdings, {}, MONTHS);
+    assert.deepEqual(points.map((p) => p.value), [100, 100, 100, 100]);
+    assert.deepEqual(unpriced, ["AAA"]);
+  });
+
+  test("positions are summed across accounts", () => {
+    const flows = [{ date: "2024-01-05", kind: "buy" as const, amount: 100, shares: 10 }];
+    const { points } = allTimeSeries(
+      [lot({ id: "a", flows }), lot({ id: "b", accountId: "acc2", flows })],
+      { AAA: { "2024-01": 10, "2024-02": 11, "2024-03": 12, "2024-04": 13 } },
+      MONTHS,
+    );
+    assert.deepEqual(points.map((p) => p.value), [200, 220, 240, 260]);
   });
 });
