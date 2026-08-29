@@ -140,3 +140,38 @@ export const monthlySnapshots = pgTable(
     }),
   ],
 );
+
+/*
+ * Monthly closing prices, one row per ticker per month, kept so the portfolio
+ * can be valued at any month it was held rather than only over the eighteen
+ * months of prices carried on the holding itself.
+ *
+ * Stored rather than fetched per page load because it is history: a close from
+ * March 2023 is settled and will not change, so re-asking for it is pure waste.
+ * Only the current month is ever refreshed.
+ *
+ * `close` is in the currency the symbol trades in, which `currency` records.
+ * The USD→CAD rate is kept here too, under the ticker `USDCAD` — it is fetched
+ * on the same request, keyed by the same month, and read on the same path, so
+ * giving it a table of its own would only duplicate this one.
+ */
+export const priceHistory = pgTable(
+  "price_history",
+  {
+    ticker: text("ticker").notNull(),
+    /** Month key, "2024-03". */
+    month: text("month").notNull(),
+    close: unitPrice("close").notNull(),
+    currency: text("currency").notNull().default("CAD"),
+    /**
+     * Where the figure came from: `snapshot` for one derived from the user's
+     * own month-end records, `provider` for one fetched from a market feed.
+     * A snapshot is the better source — it is what the position was actually
+     * worth, not a reconstruction — so a provider write never overwrites one.
+     */
+    source: text("source").notNull().default("provider"),
+  },
+  (t) => [
+    primaryKey({ name: "price_history_pkey", columns: [t.ticker, t.month] }),
+  ],
+);

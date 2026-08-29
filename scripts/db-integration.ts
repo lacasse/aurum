@@ -493,6 +493,58 @@ async function main() {
     );
     await repo.upsertBudget("Fees", 25);
 
+    console.log("monthly price history");
+    {
+      const ph = await import("../src/db/price-history");
+      await ph.writePriceHistory([
+        { ticker: "TEST.TO", month: "2024-01", close: 10.5, currency: "CAD" },
+        { ticker: "TEST.TO", month: "2024-02", close: 11.25, currency: "CAD" },
+        { ticker: "USDCAD", month: "2024-01", close: 1.34, currency: "CAD" },
+      ]);
+      let rows = await ph.readPriceHistory(["TEST.TO", "USDCAD"]);
+      expect(rows.length === 3, `three closes stored (got ${rows.length})`);
+      expect(
+        rows[0].month <= rows[rows.length - 1].month,
+        "closes come back oldest first",
+      );
+
+      // The current month is written while it is still running, so a second
+      // write of the same month has to replace the first rather than fail.
+      await ph.writePriceHistory([
+        { ticker: "TEST.TO", month: "2024-02", close: 12.75, currency: "CAD" },
+      ]);
+      rows = await ph.readPriceHistory(["TEST.TO"]);
+      const feb = rows.find((r) => r.month === "2024-02");
+      expect(rows.length === 2, `re-writing a month updates it (got ${rows.length} rows)`);
+      expect(feb?.close === 12.75, `the newer close wins (got ${feb?.close})`);
+      expect(
+        (await ph.readPriceHistory([])).length === 0,
+        "asking for no tickers queries nothing",
+      );
+
+      /*
+       * The user's own month-end record outranks anything fetched. A backfill
+       * arriving later must not overwrite it — the snapshot is what the
+       * position was actually worth, the fetched close is a reconstruction.
+       */
+      await ph.writePriceHistory([
+        { ticker: "TEST.TO", month: "2024-01", close: 9.99, currency: "CAD", source: "snapshot" },
+      ]);
+      await ph.writePriceHistory([
+        { ticker: "TEST.TO", month: "2024-01", close: 42, currency: "CAD" },
+      ]);
+      const jan = (await ph.readPriceHistory(["TEST.TO"])).find((r) => r.month === "2024-01");
+      expect(jan?.close === 9.99, `a provider close cannot overwrite a snapshot (got ${jan?.close})`);
+      expect(jan?.source === "snapshot", `the snapshot keeps its source (got ${jan?.source})`);
+
+      // …but a corrected snapshot replaces the earlier one.
+      await ph.writePriceHistory([
+        { ticker: "TEST.TO", month: "2024-01", close: 10.25, currency: "CAD", source: "snapshot" },
+      ]);
+      const revised = (await ph.readPriceHistory(["TEST.TO"])).find((r) => r.month === "2024-01");
+      expect(revised?.close === 10.25, `a newer snapshot wins (got ${revised?.close})`);
+    }
+
     await repo.deleteDemoData();
     state = await repo.getState();
     expect(!state.demoPresent, "demo data reported absent after deletion");
