@@ -11,6 +11,16 @@ export interface ImportedRow {
   type: TxnType;
   note?: string;
   sourceFile: string;
+  /**
+   * The account this row belongs to, when the file said so.
+   *
+   * A card statement is one account from top to bottom, so the account is
+   * chosen per file. An activity export is not: most of it is the chequing
+   * account, but the withholding tax on a US dividend belongs to the RRSP that
+   * received it. That row carries its registration here and the per-file choice
+   * does not apply to it.
+   */
+  accountHint?: string;
   csvCategory?: string;
   category: string; // current selection (suggestion, possibly edited)
   suggestedCategory: string; // original auto-suggestion
