@@ -30,6 +30,7 @@ import {
 } from "@/lib/types";
 import { todayISO } from "@/lib/format";
 import { useFinance } from "@/lib/store";
+import { rewardFlows } from "@/lib/rewards";
 import { useTickerValidation } from "@/lib/hooks";
 import { isCoinTicker } from "@/lib/market";
 import { Button, Field, Input, Modal, Select } from "./ui";
@@ -907,7 +908,7 @@ function HoldingFormInner({
 
 /* ---------------- Trade batch entry ---------------- */
 
-type TradeAction = "buy" | "sell" | "dividend";
+type TradeAction = "buy" | "sell" | "dividend" | "reward";
 
 interface TradeRow {
   id: string;
@@ -1272,6 +1273,37 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
           amount: Math.abs(proceedsCad),
           shares: -qty,
         });
+      } else if (row.action === "reward") {
+        /*
+         * Tokens that arrived without being bought: income equal to what they
+         * were worth that day, and an acquisition at that same value. Leaving
+         * the price empty records the units and lists the reward for the
+         * figure to be filled in later — better than calling them free, which
+         * is what makes every dollar they later fetch look like profit.
+         */
+        if (!Number.isFinite(qty) || qty <= 0) {
+          setError(`Reward ${ticker}: quantity must be > 0.`);
+          return;
+        }
+        const perUnit = row.price.trim() === "" ? 0 : px;
+        if (!Number.isFinite(perUnit) || perUnit < 0) {
+          setError(`Reward ${ticker}: value must be a number, or left empty.`);
+          return;
+        }
+        const valueCad = isUsd
+          ? Number(row.cadAmount) || qty * perUnit * usdCadRate
+          : qty * perUnit;
+        // No cash moves: a reward is paid in tokens, so nothing arrives in the
+        // account's balance the way a distribution would.
+        const newShares = lot.shares + qty;
+        lot.avgCost =
+          lot.shares > 0
+            ? (lot.shares * lot.avgCost + valueCad) / newShares
+            : valueCad / qty;
+        lot.shares = newShares;
+        if (lot.price <= 0 && perUnit > 0) lot.price = perUnit;
+        if (valueCad > 0) lot.dividends += valueCad;
+        lot.flows.push(...rewardFlows(row.date, qty, valueCad));
       } else if (row.action === "dividend") {
         const cadAmount = isUsd ? Number(row.cadAmount) || 0 : Number(row.price) || 0;
         if (!Number.isFinite(cadAmount) || cadAmount <= 0) {
@@ -1374,7 +1406,7 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
     const seen = new Set<string>();
     for (const row of active) {
       const ticker = row.ticker.trim().toUpperCase();
-      if (row.action !== "buy" || seen.has(ticker)) continue;
+      if ((row.action !== "buy" && row.action !== "reward") || seen.has(ticker)) continue;
       if (holdings.some((h) => h.ticker.toUpperCase() === ticker)) continue;
       seen.add(ticker);
       needed.push({
@@ -1420,6 +1452,7 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
               <option value="buy">Buy</option>
               <option value="sell">Sell</option>
               <option value="dividend">Dividend</option>
+              <option value="reward">Staking reward</option>
             </Select>
           </Field>
           <Field label={idx === 0 ? "Ticker" : undefined}>
@@ -1446,9 +1479,11 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
               placeholder={
                 row.action === "dividend"
                   ? "Amount"
-                  : row.action === "sell"
-                    ? "Market"
-                    : "0.00"
+                  : row.action === "reward"
+                    ? "Value each"
+                    : row.action === "sell"
+                      ? "Market"
+                      : "0.00"
               }
             />
           </Field>

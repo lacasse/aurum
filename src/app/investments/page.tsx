@@ -12,7 +12,16 @@ import {
 } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
-import { Badge, Button, Card, CardHeader, Progress, Segmented, cn } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  Input,
+  Progress,
+  Segmented,
+  cn,
+} from "@/components/ui";
 import {
   DonutChart,
   ExposurePie,
@@ -45,10 +54,13 @@ import {
   fmtPct,
   fmtSignedCAD,
   fmtCAD,
+  labelDate,
   labelMonth,
   currentMonthKey,
 } from "@/lib/format";
 import type { Holding } from "@/lib/types";
+import { awaitingPrice, priceReward } from "@/lib/rewards";
+import { replayFlows } from "@/lib/analytics";
 
 const POLL_MS = 60 * 60_000;
 
@@ -130,6 +142,93 @@ function SortHeader({
         <Arrow size={10} className={cn("shrink-0", !active && "invisible")} />
       </button>
     </th>
+  );
+}
+
+/**
+ * Rewards that arrived without a value, waiting for one.
+ *
+ * Left alone they are units with no cost, which quietly turns their whole
+ * eventual sale into a capital gain and leaves the income they were never
+ * recorded as. So they are listed until someone types what a unit was worth
+ * on the day it landed — the one figure the app cannot work out for itself,
+ * since it fetches today's price and nothing else.
+ */
+function PendingRewards() {
+  const holdings = useFinance((s) => s.holdings);
+  const updateHolding = useFinance((s) => s.updateHolding);
+  const usdCadRate = useFinance((s) => s.usdCadRate);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const pending = useMemo(() => awaitingPrice(holdings), [holdings]);
+  if (pending.length === 0) return null;
+
+  const keyOf = (r: (typeof pending)[number]) =>
+    `${r.holdingId}|${r.date}|${r.units}`;
+
+  const apply = (r: (typeof pending)[number]) => {
+    const perUnit = Number(values[keyOf(r)]);
+    if (!Number.isFinite(perUnit) || perUnit <= 0) return;
+    const holding = holdings.find((h) => h.id === r.holdingId);
+    if (!holding) return;
+    const flows = priceReward(holding.flows, r.date, r.units, perUnit * r.units);
+    // Cost and income both follow from the flows, so they are replayed rather
+    // than adjusted: the same arithmetic that reports them everywhere else.
+    const { costCAD, shares, dividendsCAD } = replayFlows(flows);
+    /*
+     * Flows are in Canadian dollars and `avgCost` is in the listing currency,
+     * so a US-listed position converts back on the way in — the store derives
+     * the CAD mirror from this figure, and handing it a CAD number for a USD
+     * holding would multiply the cost base by the exchange rate.
+     */
+    const toListing = (cad: number) =>
+      holding.currency === "USD" && usdCadRate > 0 ? cad / usdCadRate : cad;
+    updateHolding(holding.id, {
+      ...holding,
+      flows,
+      avgCost:
+        shares > 0 ? Math.round(toListing(costCAD / shares) * 10000) / 10000 : 0,
+      dividendsReceived: Math.round(toListing(dividendsCAD) * 100) / 100,
+    });
+  };
+
+  return (
+    <Card className="border-amber-500/40 bg-amber-500/5 p-4">
+      <p className="text-sm font-medium text-amber-400">
+        {pending.length} staking reward{pending.length === 1 ? "" : "s"} without
+        a value
+      </p>
+      <p className="mt-1 text-xs text-ink-dim">
+        These units were recorded as arriving for nothing, so their whole value
+        counts as a gain when sold and none of it as income. Enter what one unit
+        was worth in Canadian dollars on the day it landed.
+      </p>
+      <ul className="mt-3 space-y-2">
+        {pending.map((r) => (
+          <li key={keyOf(r)} className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="tabular-nums text-ink-dim">{labelDate(r.date)}</span>
+            <span className="font-medium">
+              {r.units} {r.ticker}
+            </span>
+            <span className="ml-auto flex items-center gap-2">
+              <Input
+                type="number"
+                step="any"
+                min="0"
+                className="w-28"
+                placeholder="CAD each"
+                value={values[keyOf(r)] ?? ""}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setValues((prev) => ({ ...prev, [keyOf(r)]: e.target.value }))
+                }
+              />
+              <Button size="sm" variant="secondary" onClick={() => apply(r)}>
+                Record
+              </Button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
@@ -586,6 +685,7 @@ export default function InvestmentsPage() {
             </p>
           </Card>
         )}
+        <PendingRewards />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Portfolio value"
