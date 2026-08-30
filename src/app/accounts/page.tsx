@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import {
+  ArrowRight,
   Banknote,
   Bitcoin,
   CreditCard,
@@ -24,6 +26,7 @@ import { AccountForm, ConfirmDelete } from "@/components/forms";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import { accountCadBalance, netWorthSeries } from "@/lib/analytics";
+import { summarize as summarizePension } from "@/lib/pension";
 import { fmtCompact, fmtSignedCAD, fmtCAD, labelMonth, lastMonthKeys } from "@/lib/format";
 import {
   ACCOUNT_KIND_LABELS,
@@ -53,6 +56,7 @@ export default function AccountsPage() {
   const ready = useReady();
   const accounts = useFinance((s) => s.accounts);
   const holdings = useFinance((s) => s.holdings);
+  const transactions = useFinance((s) => s.transactions);
   const deleteAccount = useFinance((s) => s.deleteAccount);
   const usdCadRate = useFinance((s) => s.usdCadRate);
 
@@ -71,8 +75,17 @@ export default function AccountsPage() {
       else if (isPension(a.kind)) pension += value;
       else assets += value;
     }
-    return { series, assets, liabilities, pension };
-  }, [accounts, holdings, usdCadRate]);
+    /*
+     * The pension is two numbers, not one: what the plan says it is worth,
+     * and what was paid in to earn it. The gap between them is the employer's
+     * side and the growth, which is the part of it that never appears on a
+     * pay stub.
+     */
+    const pensions = accounts
+      .filter((a) => isPension(a.kind))
+      .map((a) => ({ account: a, summary: summarizePension(a, transactions) }));
+    return { series, assets, liabilities, pension, pensions };
+  }, [accounts, holdings, transactions, usdCadRate]);
 
   if (!ready) return <PageSkeleton />;
 
@@ -177,6 +190,99 @@ export default function AccountsPage() {
             />
           </div>
         </Card>
+
+        {data.pensions.map(({ account, summary }) => (
+          <Card key={account.id}>
+            <CardHeader
+              title={account.name}
+              subtitle={
+                summary.asOf
+                  ? `Transfer value from your plan · last entered ${labelMonth(summary.asOf)}`
+                  : "Transfer value · nothing entered yet"
+              }
+              action={
+                <Link href="/guide#pension">
+                  <Button variant="ghost" size="sm">
+                    How this works <ArrowRight size={13} />
+                  </Button>
+                </Link>
+              }
+            />
+            <div className="grid gap-4 px-5 pb-5 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className="text-[11px] text-ink-faint">Transfer value</p>
+                <p className="text-lg font-semibold tabular-nums">
+                  {fmtCAD(summary.value)}
+                </p>
+                {summary.estimated ? (
+                  <Badge className="mt-1">Estimated</Badge>
+                ) : null}
+              </div>
+              <div>
+                <p className="text-[11px] text-ink-faint">You have contributed</p>
+                <p className="text-lg font-semibold tabular-nums">
+                  {fmtCAD(summary.contributed)}
+                </p>
+                <p className="mt-1 text-[11px] text-ink-faint">
+                  {fmtCAD(summary.monthly)} a month lately
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-ink-faint">Beyond contributions</p>
+                <p
+                  className={
+                    "text-lg font-semibold tabular-nums " +
+                    (summary.beyondContributions >= 0 ? "text-positive" : "text-negative")
+                  }
+                >
+                  {fmtSignedCAD(summary.beyondContributions)}
+                </p>
+                <p className="mt-1 text-[11px] text-ink-faint">
+                  employer’s side and growth
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-ink-faint">If you stay</p>
+                <p className="text-lg font-semibold tabular-nums">
+                  {account.pensionAnnual
+                    ? `${fmtCAD(account.pensionAnnual)}/yr`
+                    : "—"}
+                </p>
+                <p className="mt-1 text-[11px] text-ink-faint">
+                  {account.pensionService
+                    ? `${account.pensionService} years of service`
+                    : "Add it from your statement"}
+                </p>
+              </div>
+            </div>
+            {summary.series.length > 1 ? (
+              <div className="px-3 pb-4">
+                <SeriesChart
+                  data={
+                    summary.series.map((p) => ({
+                      label: labelMonth(p.month),
+                      value: p.value,
+                      contributed: p.contributed,
+                    })) as unknown as Record<string, unknown>[]
+                  }
+                  xKey="label"
+                  series={[
+                    { key: "value", name: "Transfer value", color: "#f59e0b" },
+                    {
+                      key: "contributed",
+                      name: "Contributed",
+                      color: "#6e6e79",
+                      kind: "line",
+                      dashed: true,
+                    },
+                  ]}
+                  height={200}
+                  yFmt={fmtCompact}
+                />
+              </div>
+            ) : null}
+          </Card>
+        ))}
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {accounts.map((acc) => {
