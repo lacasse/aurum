@@ -6,8 +6,11 @@ import {
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
+  Banknote,
   Coins,
+  LineChart,
   PiggyBank,
+  TrendingUp,
   Wallet,
 } from "lucide-react";
 import { Shell } from "@/components/shell";
@@ -25,6 +28,7 @@ import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import {
   cashflowSeries,
+  consolidateHoldings,
   monthlyAverages,
   monthTotals,
   netWorthSeries,
@@ -68,7 +72,29 @@ export default function DashboardPage() {
     ) as unknown as Record<string, unknown>[];
     const port = portfolioSeries(holdings, 18);
     const avg = monthlyAverages(transactions, 12);
-    return { nwAll, nw, cf, totals, spend, stacked, port, avg };
+    /*
+     * What net worth is made of. The portfolio is the largest part of it and
+     * moves on its own, so the top row breaks it out rather than leaving one
+     * number to stand for everything.
+     */
+    const rows = consolidateHoldings(holdings).filter((r) => !r.closed);
+    const invested = rows.reduce((sum, r) => sum + r.costBasis, 0);
+    const market = rows.reduce((sum, r) => sum + r.marketValue, 0);
+    const dividends = rows.reduce((sum, r) => sum + r.totalDividends, 0);
+    return {
+      nwAll,
+      nw,
+      cf,
+      totals,
+      spend,
+      stacked,
+      port,
+      avg,
+      invested,
+      market,
+      dividends,
+      positions: rows.length,
+    };
   }, [accounts, transactions, holdings, range]);
 
   if (!ready) return <PageSkeleton />;
@@ -77,6 +103,16 @@ export default function DashboardPage() {
   const nwPrev = data.nw[data.nw.length - 2] ?? nwLast;
   const nwDelta =
     nwPrev.net !== 0 ? ((nwLast.net - nwPrev.net) / Math.abs(nwPrev.net)) * 100 : 0;
+
+  const portLast = data.port[data.port.length - 1];
+  const portPrev = data.port[data.port.length - 2] ?? portLast;
+  const portDelta =
+    portPrev.value !== 0
+      ? ((portLast.value - portPrev.value) / portPrev.value) * 100
+      : 0;
+  // Dividends count: they are return the position paid out rather than kept.
+  const unrealized = data.market - data.invested + data.dividends;
+  const unrealizedPct = data.invested > 0 ? (unrealized / data.invested) * 100 : 0;
 
   const totalSpend = data.spend.reduce((s, c) => s + c.value, 0);
   const recent = transactions.slice(0, 8);
@@ -95,7 +131,7 @@ export default function DashboardPage() {
       }
     >
       <div className="space-y-4">
-        {/* KPI cards */}
+        {/* What net worth is made of */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <StatCard
             label="Net Worth"
@@ -107,6 +143,45 @@ export default function DashboardPage() {
             sparkKey="v"
             sparkColor="#8b5cf6"
           />
+          <StatCard
+            label="Investments"
+            value={fmtCAD(data.market)}
+            delta={portDelta}
+            deltaLabel="vs last month"
+            icon={<LineChart size={16} />}
+            spark={data.port.map((p) => ({ v: p.value }))}
+            sparkKey="v"
+            sparkColor="#22d3ee"
+          />
+          <StatCard
+            label="Unrealized gain"
+            value={fmtSignedCAD(unrealized)}
+            delta={unrealizedPct}
+            deltaLabel="of what you paid"
+            tone={unrealized >= 0 ? "positive" : "negative"}
+            icon={<TrendingUp size={16} />}
+          />
+          <StatCard
+            label="Invested"
+            value={fmtCAD(data.invested)}
+            deltaValue={`${data.positions} positions`}
+            deltaLabel="cost basis"
+            icon={<Coins size={16} />}
+          />
+          <StatCard
+            label="Cash and accounts"
+            value={fmtCAD(nwLast.assets)}
+            deltaLabel="everything outside the portfolio"
+            tone={nwLast.assets >= 0 ? "neutral" : "negative"}
+            icon={<Banknote size={16} />}
+            spark={data.nw.map((p) => ({ v: p.assets }))}
+            sparkKey="v"
+            sparkColor="#f59e0b"
+          />
+        </div>
+
+        {/* How the months average out */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Average income"
             value={fmtCAD(data.avg.income)}
