@@ -6,6 +6,7 @@ import {
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
+  Coins,
   PiggyBank,
   Wallet,
 } from "lucide-react";
@@ -24,6 +25,7 @@ import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import {
   cashflowSeries,
+  monthlyAverages,
   monthTotals,
   netWorthSeries,
   portfolioSeries,
@@ -55,10 +57,6 @@ export default function DashboardPage() {
     const nw = nwAll.slice(-Number(range));
     const cf = cashflowSeries(transactions, 12);
     const totals = monthTotals(transactions);
-    const prevTotals = (() => {
-      const prevKey = cf.length >= 2 ? cf[cf.length - 2].key : undefined;
-      return prevKey ? monthTotals(transactions, prevKey) : totals;
-    })();
     const spend = spendByCategory(transactions, cf[cf.length - 1]?.key);
     const topCats = spendByCategory(transactions)
       .slice(0, 5)
@@ -69,7 +67,8 @@ export default function DashboardPage() {
       12,
     ) as unknown as Record<string, unknown>[];
     const port = portfolioSeries(holdings, 18);
-    return { nwAll, nw, cf, totals, prevTotals, spend, stacked, port };
+    const avg = monthlyAverages(transactions, 12);
+    return { nwAll, nw, cf, totals, spend, stacked, port, avg };
   }, [accounts, transactions, holdings, range]);
 
   if (!ready) return <PageSkeleton />;
@@ -78,15 +77,6 @@ export default function DashboardPage() {
   const nwPrev = data.nw[data.nw.length - 2] ?? nwLast;
   const nwDelta =
     nwPrev.net !== 0 ? ((nwLast.net - nwPrev.net) / Math.abs(nwPrev.net)) * 100 : 0;
-
-  const incDelta =
-    data.prevTotals.income !== 0
-      ? ((data.totals.income - data.prevTotals.income) / data.prevTotals.income) * 100
-      : 0;
-  const expDelta =
-    data.prevTotals.expenses !== 0
-      ? ((data.totals.expenses - data.prevTotals.expenses) / data.prevTotals.expenses) * 100
-      : 0;
 
   const totalSpend = data.spend.reduce((s, c) => s + c.value, 0);
   const recent = transactions.slice(0, 8);
@@ -106,7 +96,7 @@ export default function DashboardPage() {
     >
       <div className="space-y-4">
         {/* KPI cards */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <StatCard
             label="Net Worth"
             value={fmtCAD(nwLast.net)}
@@ -118,36 +108,45 @@ export default function DashboardPage() {
             sparkColor="#8b5cf6"
           />
           <StatCard
-            label="Income · this month"
-            value={fmtCAD(data.totals.income)}
-            delta={incDelta}
-            deltaLabel="vs last month"
+            label="Average income"
+            value={fmtCAD(data.avg.income)}
+            deltaValue={`last ${data.avg.months} mo`}
+            deltaLabel="per month"
             icon={<ArrowDownRight size={16} className="text-positive" />}
-            spark={data.cf.map((p) => ({ v: p.income }))}
+            spark={data.avg.series.map((p) => ({ v: p.income }))}
             sparkKey="v"
             sparkColor="#34d399"
           />
           <StatCard
-            label="Expenses · this month"
-            value={fmtCAD(data.totals.expenses)}
-            delta={expDelta}
-            deltaLabel="vs last month"
-            tone={expDelta > 0 ? "negative" : "positive"}
+            label="Average expenses"
+            value={fmtCAD(data.avg.expenses)}
+            deltaValue={`last ${data.avg.months} mo`}
+            deltaLabel="per month"
             icon={<ArrowUpRight size={16} className="text-negative" />}
-            spark={data.cf.map((p) => ({ v: p.expenses }))}
+            spark={data.avg.series.map((p) => ({ v: p.expenses }))}
             sparkKey="v"
             sparkColor="#fb7185"
           />
           <StatCard
-            label="Savings rate"
-            value={`${data.totals.savingsRate.toFixed(1)}%`}
-            deltaLabel={`kept ${fmtCAD(data.totals.net)} of income`}
+            label="Average uncommitted"
+            value={fmtCAD(data.avg.uncommitted)}
+            deltaValue={`last ${data.avg.months} mo`}
+            deltaLabel="after committed costs"
+            tone={data.avg.uncommitted >= 0 ? "positive" : "negative"}
             icon={<PiggyBank size={16} />}
-            spark={data.cf.map((p) => ({
-              v: p.income > 0 ? ((p.income - p.expenses) / p.income) * 100 : 0,
-            }))}
+            spark={data.avg.series.map((p) => ({ v: p.uncommitted }))}
             sparkKey="v"
             sparkColor="#22d3ee"
+          />
+          <StatCard
+            label="Average passive income"
+            value={fmtCAD(data.avg.passive)}
+            deltaValue={`last ${data.avg.months} mo`}
+            deltaLabel="dividends and interest"
+            icon={<Coins size={16} />}
+            spark={data.avg.series.map((p) => ({ v: p.passive }))}
+            sparkKey="v"
+            sparkColor="#a78bfa"
           />
         </div>
 
