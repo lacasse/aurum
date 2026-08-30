@@ -3,15 +3,20 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# Cache mount: a lockfile change re-runs the install, but from a warm npm
+# cache rather than re-downloading every tarball.
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 FROM node:22-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# API routes are force-dynamic, so the build never touches the database
-RUN npm run build
+# API routes are force-dynamic, so the build never touches the database.
+# .next/cache carries Next's compiler output between builds; without the mount
+# every image build compiles the whole app from cold, which is most of the
+# minutes a rebuild costs.
+RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 FROM node:22-alpine AS runner
 WORKDIR /app

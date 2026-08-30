@@ -5,7 +5,8 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "outDir": ".test-build",
-    "incremental": false,
+    "incremental": true,
+    "tsBuildInfoFile": ".test-build/.tsbuildinfo",
     "types": ["node"]
   },
   "include": ["src/lib/**/*.ts"],
