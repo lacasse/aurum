@@ -16,7 +16,6 @@ import { Badge, Button, Card, CardHeader, Progress, Segmented, cn } from "@/comp
 import {
   DonutChart,
   ExposurePie,
-  PALETTE,
   SeriesChart,
   SignedHBars,
   TwrChart,
@@ -508,6 +507,7 @@ export default function InvestmentsPage() {
   const last = data.series[data.series.length - 1];
   const prev = data.series[data.series.length - 2] ?? last;
   const monthDelta = prev.value !== 0 ? ((last.value - prev.value) / prev.value) * 100 : 0;
+  const monthDeltaCAD = last.value - prev.value;
   const unrealized = data.totalValue - data.totalCost + data.totalDividends;
   const unrealizedPct =
     data.totalCost > 0 ? (unrealized / data.totalCost) * 100 : 0;
@@ -568,6 +568,7 @@ export default function InvestmentsPage() {
             label="Portfolio value"
             value={fmtCAD(data.totalValue)}
             delta={monthDelta}
+            deltaValue={fmtSignedCAD(monthDeltaCAD)}
             deltaLabel="vs last month"
             icon={<TrendingUp size={16} />}
             spark={data.series.map((p) => ({ v: p.value }))}
@@ -1082,19 +1083,6 @@ export default function InvestmentsPage() {
             </table>
           </div>
         </Card>
-
-        {/* Allocation legend colors reference */}
-        <div className="flex flex-wrap gap-x-5 gap-y-1 px-1 text-[11px] text-ink-faint">
-          {data.allocation.map((a, i) => (
-            <span key={a.name} className="inline-flex items-center gap-1.5">
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{ background: PALETTE[i % PALETTE.length] }}
-              />
-              {a.name} {((a.value / Math.max(1, data.totalValue)) * 100).toFixed(0)}%
-            </span>
-          ))}
-        </div>
 
         {/* Batch trade entry */}
         <Card>
