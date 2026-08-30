@@ -576,6 +576,61 @@ describe("monthlyAverages", () => {
   });
 });
 
+describe("monthlyAverages · the year before", () => {
+  const complete = lastCompleteMonthKey();
+  const months = lastMonthKeys(24, complete);
+  const at = (month: string, amount: number, type: "income" | "expense", category = "Groceries") =>
+    txn({ amount, type, category, date: `${month}-10` });
+
+  test("compares the last twelve months with the twelve before them", () => {
+    const transactions = [
+      ...months.slice(12).map((m) => at(m, 1000, "income", "Salary")),
+      ...months.slice(0, 12).map((m) => at(m, 800, "income", "Salary")),
+    ];
+    const avg = monthlyAverages(transactions, 12, complete);
+    assert.equal(avg.income, 1000);
+    assert.equal(avg.previous?.income, 800);
+    assert.equal(avg.previous?.months, 12);
+  });
+
+  test("the two windows do not overlap by a month", () => {
+    // One month of income, in the oldest month of the current window: it
+    // belongs to the current average and not to the previous one.
+    const avg = monthlyAverages([at(months[12], 1200, "income", "Salary")], 12, complete);
+    assert.equal(avg.income, 1200);
+    assert.equal(avg.previous, null);
+  });
+
+  test("nothing recorded before is no answer, not a fall to zero", () => {
+    // A record that starts inside the window would otherwise report every
+    // figure as an infinite improvement.
+    const avg = monthlyAverages([at(months[20], 500, "expense")], 12, complete);
+    assert.equal(avg.previous, null);
+  });
+
+  test("the previous window uses the same rules as the current one", () => {
+    const transactions = [
+      at(months[0], 3000, "income", "Salary"),
+      at(months[0], 1000, "expense", "Housing"),
+      at(months[0], 200, "income", "Dividends"),
+      at(months[0], 400, "expense", "Shopping"),
+    ];
+    const { previous } = monthlyAverages(transactions, 12, complete);
+    assert.equal(previous?.income, 3200, "dividends are income");
+    assert.equal(previous?.expenses, 1400);
+    assert.equal(previous?.passive, 200);
+    // Liquid income less committed spending: shopping is not committed.
+    assert.equal(previous?.uncommitted, 3200 - 1000);
+  });
+
+  test("months that did not happen are not averaged into the previous window", () => {
+    const transactions = months.slice(0, 3).map((m) => at(m, 900, "income", "Salary"));
+    const { previous } = monthlyAverages(transactions, 12, complete);
+    assert.equal(previous?.months, 3);
+    assert.equal(previous?.income, 900, "not 225");
+  });
+});
+
 describe("holdingExposure", () => {
   const lot = (over: Partial<Holding>): Holding =>
     ({
