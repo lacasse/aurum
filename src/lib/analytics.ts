@@ -69,7 +69,17 @@ export function accountValueAt(acc: Account, monthKey: string): number {
   const lastPoint = acc.history[acc.history.length - 1];
   if (monthKey < first.month) return first.value;
   if (monthKey > lastPoint.month) return acc.balance;
-  return lastPoint.value;
+  /*
+   * A gap in the middle holds the last figure recorded *before* it, which is
+   * what the balance was until something changed it. Reaching for the end of
+   * the history instead read a later month's balance back into an earlier one.
+   */
+  let carried = first.value;
+  for (const p of acc.history) {
+    if (p.month > monthKey) break;
+    carried = p.value;
+  }
+  return carried;
 }
 
 function portfolioValueAt(holdings: Holding[], monthsAgoFromEnd: number): number {
