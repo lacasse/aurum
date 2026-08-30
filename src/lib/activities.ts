@@ -229,6 +229,7 @@ export function parseActivitiesCsv(
         type: kind,
         note,
         sourceFile: fileName,
+        accountHint: registration ?? undefined,
         csvCategory: hint,
         category: s.category,
         suggestedCategory: s.category,

@@ -44,6 +44,9 @@ import { fmtCAD } from "@/lib/format";
 
 type Step = "upload" | "review" | "done";
 
+/** Sentinel for "the file says which account each row belongs to". */
+const MATCH_THE_FILE = "__match__";
+
 /**
  * One import for every kind of file.
  *
@@ -70,7 +73,13 @@ export default function ImportPage() {
   const [files, setFiles] = useState<RoutedFile[]>([]);
   const [cashRows, setCashRows] = useState<ImportedRow[]>([]);
   const [tradeRows, setTradeRows] = useState<TradeRow[]>([]);
-  const [accountId, setAccountId] = useState("");
+  /*
+   * Which account each file is about, chosen per file rather than per import.
+   * A card statement is one account from end to end; an activity export covers
+   * the chequing account and every investment account at once, and says which
+   * on each row, so it is left to match itself.
+   */
+  const [fileAccounts, setFileAccounts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [result, setResult] = useState<{
@@ -84,10 +93,36 @@ export default function ImportPage() {
 
   const investmentAccounts = accounts.filter((a) => isInvestmentAccount(a.kind));
   const cashAccountId =
-    accounts.find((a) => !isInvestmentAccount(a.kind) && !isLiability(a.kind))?.id ?? "";
-  const effectiveAccountId = accountId || cashAccountId || accounts[0]?.id || "";
+    accounts.find((a) => a.kind === "checking")?.id ??
+    accounts.find((a) => !isInvestmentAccount(a.kind) && !isLiability(a.kind))?.id ??
+    "";
+  const cardAccountId = accounts.find((a) => a.kind === "credit")?.id ?? "";
   const accountIdFor = (registration: Registration): string =>
     investmentAccounts.find((a) => a.registration === registration)?.id ?? "";
+
+  /** The account a file defaults to: the card for a statement, matching for the rest. */
+  const defaultAccountFor = (file: RoutedFile): string =>
+    file.kind === "card" ? cardAccountId || cashAccountId : MATCH_THE_FILE;
+  const accountForFile = (name: string): string => {
+    const chosen = fileAccounts[name];
+    if (chosen) return chosen;
+    const file = files.find((f) => f.fileName === name);
+    return file ? defaultAccountFor(file) : cashAccountId;
+  };
+
+  /**
+   * Where one row lands: what the row itself said, then what the file was set
+   * to, then the everyday account.
+   */
+  const accountForRow = (row: ImportedRow): string => {
+    const chosen = accountForFile(row.sourceFile);
+    if (chosen !== MATCH_THE_FILE) return chosen;
+    if (row.accountHint) {
+      const matched = accountIdFor(row.accountHint as Registration);
+      if (matched) return matched;
+    }
+    return cashAccountId;
+  };
 
   const existingTxnKeys = useMemo(
     () => new Set(transactions.map((t) => txnKey(t.date, t.amount, t.payee))),
@@ -180,7 +215,7 @@ export default function ImportPage() {
   const save = () => {
     let learned = 0;
     const validCash = includedCash.filter(
-      (r) => r.payee.trim() && r.amount > 0 && r.date && effectiveAccountId,
+      (r) => r.payee.trim() && r.amount > 0 && r.date && accountForRow(r),
     );
     for (const r of validCash) {
       addTransaction({
@@ -188,7 +223,7 @@ export default function ImportPage() {
         type: r.type,
         amount: r.amount,
         category: r.category,
-        ...sidesFor(r.type, effectiveAccountId),
+        ...sidesFor(r.type, accountForRow(r)),
         payee: r.payee.trim(),
         note: r.note,
       });
@@ -420,25 +455,60 @@ export default function ImportPage() {
               </Card>
             )}
 
+            {files.some((f) => f.cash.length > 0) && (
+              <Card>
+                <CardHeader
+                  title="Which account is each file about?"
+                  subtitle="A card statement is one account; an activity export names its own"
+                />
+                <ul className="space-y-2 px-5 pb-5">
+                  {files
+                    .filter((f) => f.cash.length > 0)
+                    .map((f) => (
+                      <li
+                        key={f.fileName}
+                        className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-elevated/40 px-3 py-2"
+                      >
+                        <FileText size={14} className="shrink-0 text-ink-faint" />
+                        <span className="min-w-0 flex-1 truncate text-xs">
+                          {f.fileName}
+                          <span className="ml-2 text-[11px] text-ink-faint">
+                            {labelFor(f.kind)} · {f.cash.length} row
+                            {f.cash.length === 1 ? "" : "s"}
+                          </span>
+                        </span>
+                        <Select
+                          value={accountForFile(f.fileName)}
+                          onChange={(e) =>
+                            setFileAccounts((prev) => ({
+                              ...prev,
+                              [f.fileName]: e.target.value,
+                            }))
+                          }
+                          className="h-8 w-auto py-0 text-xs"
+                          aria-label={`Account for ${f.fileName}`}
+                        >
+                          <option value={MATCH_THE_FILE}>
+                            Match the file (chequing and investments)
+                          </option>
+                          {accounts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name}
+                            </option>
+                          ))}
+                        </Select>
+                      </li>
+                    ))}
+                </ul>
+              </Card>
+            )}
+
             {cashRows.length > 0 && (
               <Card>
                 <CardHeader
                   title="Money in and out"
                   subtitle="Change a category and it is remembered for that merchant"
-                  action={
-                    <Select
-                      value={effectiveAccountId}
-                      onChange={(e) => setAccountId(e.target.value)}
-                      className="h-8 w-auto py-0 text-xs"
-                      aria-label="Account these belong to"
-                    >
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
-                      ))}
-                    </Select>
-                  }
+
                 />
                 <div className="max-h-[28rem] overflow-auto px-3 pb-4">
                   <table className="w-full text-xs">
@@ -449,6 +519,7 @@ export default function ImportPage() {
                         <th className="px-2 py-2 text-left">Payee</th>
                         <th className="px-2 py-2 text-left">Type</th>
                         <th className="px-2 py-2 text-left">Category</th>
+                        <th className="px-2 py-2 text-left">Account</th>
                         <th className="px-2 py-2 text-right">Amount</th>
                       </tr>
                     </thead>
@@ -508,6 +579,9 @@ export default function ImportPage() {
                                 </option>
                               ))}
                             </Select>
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-1.5 text-[11px] text-ink-faint">
+                            {accounts.find((a) => a.id === accountForRow(r))?.name ?? "—"}
                           </td>
                           <td
                             className={cn(
