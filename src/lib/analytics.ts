@@ -708,6 +708,126 @@ export function monthTotals(
   };
 }
 
+/* ── Monthly averages ── */
+
+/**
+ * Spending that arrives whether or not you decide anything this month.
+ *
+ * The distinction is the one the spreadsheet drew as Necessary against
+ * Discretionary, kept because it is what makes an average meaningful: rent and
+ * a debt payment are already spoken for, so what is left after them is the
+ * figure that answers "what can I actually do with this month".
+ */
+export const COMMITTED_CATEGORIES = new Set([
+  "Housing",
+  "Utilities",
+  "Insurance",
+  "Transport",
+  "Groceries",
+  "Health",
+  "Dog",
+  "Subscriptions",
+  "Fees",
+  "Debt Repayment",
+  "Taxes",
+]);
+
+/** Money the holdings made, as opposed to money the job made. */
+export const PASSIVE_INCOME_CATEGORIES = new Set(["Dividends", "Interest"]);
+
+/**
+ * Income that cannot be spent as it arrives.
+ *
+ * A pension contribution is income in every sense except the one that matters
+ * to a cash-flow figure — it lands in an account that cannot be drawn on — and
+ * a loan drawn down is somebody else's money passing through.
+ */
+export const ILLIQUID_INCOME_CATEGORIES = new Set(["RSP / Pension", "Loan Proceeds"]);
+
+export interface MonthlyAverage {
+  /** How many months were averaged; fewer than asked for when the record is short. */
+  months: number;
+  income: number;
+  expenses: number;
+  passive: number;
+  /** Liquid income less the spending already committed to. */
+  uncommitted: number;
+  from: string;
+  to: string;
+  /** Per-month figures, oldest first, for the sparklines. */
+  series: {
+    key: string;
+    income: number;
+    expenses: number;
+    passive: number;
+    uncommitted: number;
+  }[];
+}
+
+/**
+ * The last `months` complete months, averaged.
+ *
+ * The month in progress is left out. A partial month drags every average down
+ * by however much of it has not happened yet, which on the first of the month
+ * would read as a collapse in income.
+ */
+export function monthlyAverages(
+  transactions: Transaction[],
+  months = 12,
+): MonthlyAverage {
+  const current = currentMonthKey();
+  const keys = lastMonthKeys(months + 1).filter((k) => k !== current);
+
+  const series = keys.map((key) => {
+    let income = 0;
+    let expenses = 0;
+    let passive = 0;
+    let liquidIncome = 0;
+    let committed = 0;
+    for (const t of transactions) {
+      if (monthKeyOf(t.date) !== key) continue;
+      const cents = toCents(t.amount);
+      if (t.type === "income") {
+        income += cents;
+        if (PASSIVE_INCOME_CATEGORIES.has(t.category)) passive += cents;
+        if (!ILLIQUID_INCOME_CATEGORIES.has(t.category)) liquidIncome += cents;
+      } else if (t.type === "expense") {
+        expenses += cents;
+        if (COMMITTED_CATEGORIES.has(t.category)) committed += cents;
+      }
+    }
+    return {
+      key,
+      income: fromCents(income),
+      expenses: fromCents(expenses),
+      passive: fromCents(passive),
+      uncommitted: fromCents(liquidIncome - committed),
+    };
+  });
+
+  /*
+   * Months before the record starts are not zero-income months, they are
+   * months that did not happen, and averaging over them halves the answer.
+   */
+  const active = series.filter(
+    (m) => m.income !== 0 || m.expenses !== 0,
+  );
+  const n = active.length;
+  const mean = (pick: (m: (typeof series)[number]) => number) =>
+    n === 0 ? 0 : roundMoney(active.reduce((sum, m) => sum + pick(m), 0) / n);
+
+  return {
+    months: n,
+    income: mean((m) => m.income),
+    expenses: mean((m) => m.expenses),
+    passive: mean((m) => m.passive),
+    uncommitted: mean((m) => m.uncommitted),
+    from: active[0]?.key ?? "",
+    to: active[active.length - 1]?.key ?? "",
+    series,
+  };
+}
+
 /* ── All-time portfolio series ── */
 
 /**

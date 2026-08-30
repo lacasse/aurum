@@ -12,6 +12,7 @@ import {
   simpleReturn,
   cashflowSeries,
   consolidateHoldings,
+  monthlyAverages,
   holdingExposure,
   firstFlowMonth,
   monthsSince,
@@ -20,7 +21,7 @@ import {
   monthTotals,
   spendByCategory,
 } from "./analytics";
-import { currentMonthKey } from "./format";
+import { currentMonthKey, lastMonthKeys } from "./format";
 import type { Budget, Holding, Transaction } from "./types";
 
 const MONTH = currentMonthKey();
@@ -220,6 +221,76 @@ describe("consolidateHoldings", () => {
       lot({ id: "b", accountId: "acc-rrsp", priceCAD: 40 }),
     ]);
     assert.equal(rows[0].priceCAD, 40);
+  });
+});
+
+describe("monthlyAverages", () => {
+  const months = lastMonthKeys(4).filter((k) => k !== MONTH);
+  const [m1, m2, m3] = months;
+
+  test("averages over months with activity, not over empty ones", () => {
+    // One month of income among three: the average is that month's figure
+    // spread over the months that happened, not over the whole window.
+    const avg = monthlyAverages(
+      [txn({ amount: 3000, type: "income", category: "Salary", date: `${m3}-15` })],
+      12,
+    );
+    assert.equal(avg.months, 1);
+    assert.equal(avg.income, 3000);
+  });
+
+  test("ignores the month in progress", () => {
+    const avg = monthlyAverages(
+      [
+        txn({ amount: 100, type: "income", category: "Salary", date: `${m3}-02` }),
+        txn({ amount: 9999, type: "income", category: "Salary", date: DAY }),
+      ],
+      12,
+    );
+    assert.equal(avg.income, 100, "a partial month would drag every average");
+  });
+
+  test("passive income counts dividends and interest only", () => {
+    const avg = monthlyAverages(
+      [
+        txn({ amount: 4000, type: "income", category: "Salary", date: `${m3}-01` }),
+        txn({ amount: 120, type: "income", category: "Dividends", date: `${m3}-02` }),
+        txn({ amount: 30, type: "income", category: "Interest", date: `${m3}-03` }),
+      ],
+      12,
+    );
+    assert.equal(avg.passive, 150);
+    assert.equal(avg.income, 4150);
+  });
+
+  test("uncommitted takes committed costs off spendable income", () => {
+    const avg = monthlyAverages(
+      [
+        txn({ amount: 5000, type: "income", category: "Salary", date: `${m3}-01` }),
+        // Illiquid: a pension contribution cannot be spent this month.
+        txn({ amount: 500, type: "income", category: "RSP / Pension", date: `${m3}-01` }),
+        txn({ amount: 1500, type: "expense", category: "Housing", date: `${m3}-02` }),
+        txn({ amount: 400, type: "expense", category: "Debt Repayment", date: `${m3}-03` }),
+        // Discretionary spending is not committed, so it does not reduce it.
+        txn({ amount: 300, type: "expense", category: "Dining", date: `${m3}-04` }),
+      ],
+      12,
+    );
+    assert.equal(avg.income, 5500);
+    assert.equal(avg.expenses, 2200);
+    assert.equal(avg.uncommitted, 5000 - 1500 - 400);
+  });
+
+  test("months with only expenses still count", () => {
+    const avg = monthlyAverages(
+      [
+        txn({ amount: 1000, type: "expense", category: "Groceries", date: `${m1}-05` }),
+        txn({ amount: 2000, type: "expense", category: "Groceries", date: `${m2}-05` }),
+      ],
+      12,
+    );
+    assert.equal(avg.months, 2);
+    assert.equal(avg.expenses, 1500);
   });
 });
 
