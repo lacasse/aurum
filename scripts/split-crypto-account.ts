@@ -9,9 +9,9 @@
  *
  * What moves:
  *
- *   - positions in coins held directly, and in the funds that are only a
- *     wrapper around one — a Bitcoin ETF is a crypto position bought through a
- *     broker, not a diversified holding;
+ *   - positions in coins held directly, but not funds that merely track one:
+ *     an exchange-traded Bitcoin fund is a share purchase, and lives in
+ *     registered accounts that could never hold the coin;
  *   - the account's cash flows from before the equity era, which is what paid
  *     for those coins.
  *
@@ -31,17 +31,15 @@ import { and, eq, lt, like, or, sql } from "drizzle-orm";
 import { isCoinTicker } from "@/lib/market";
 
 /**
- * Funds that are a coin in a wrapper.
+ * Funds that follow the coins anyway.
  *
- * `isCoinTicker` cannot see these — they carry an exchange suffix like any
- * share — but a Bitcoin ETF belongs with the Bitcoin, not with the equities.
+ * Empty on purpose. A Bitcoin ETF tracks a coin, but it is bought and sold on
+ * a stock exchange through a broker, in registered accounts that cannot hold
+ * the coin itself — which makes it a share purchase whatever it happens to
+ * track. Anything listed therefore stays with the equities, and this is here
+ * only to say that the question was asked and answered.
  */
-const CRYPTO_FUNDS = new Set([
-  "BTCX-B.TO",
-  "ETHX-B.TO",
-  "BTCC.TO",
-  "BTCY.TO",
-]);
+const CRYPTO_FUNDS = new Set<string>([]);
 
 /**
  * Three ways of being crypto, because no one of them catches everything.
