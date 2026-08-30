@@ -63,6 +63,7 @@ function toAccount(row: AccountRow): Account {
     institution: row.institution,
     kind: row.kind as AccountKind,
     balance: row.balance,
+    balanceUSD: row.balanceUSD ?? 0,
     history: row.history,
     registration: (row.registration ?? undefined) as Account["registration"],
   };
@@ -183,6 +184,7 @@ export async function seed(data: FinanceData): Promise<void> {
         institution: a.institution,
         kind: a.kind,
         balance: a.balance,
+        balanceUSD: a.balanceUSD ?? 0,
         history: a.history,
         position: i,
         registration: a.registration ?? null,
@@ -463,6 +465,7 @@ export async function insertAccount(a: Account, position: number): Promise<void>
     institution: a.institution,
     kind: a.kind,
     balance: a.balance,
+    balanceUSD: a.balanceUSD ?? 0,
     history: a.history,
     position,
     registration: a.registration ?? null,
@@ -477,6 +480,7 @@ export async function replaceAccount(a: Account): Promise<void> {
       institution: a.institution,
       kind: a.kind,
       balance: a.balance,
+      balanceUSD: a.balanceUSD ?? 0,
       history: a.history,
       registration: a.registration ?? null,
     })

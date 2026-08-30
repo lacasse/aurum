@@ -13,6 +13,7 @@ import {
   cashflowSeries,
   consolidateHoldings,
   monthlyAverages,
+  accountValueAt,
   holdingExposure,
   firstFlowMonth,
   monthsSince,
@@ -221,6 +222,34 @@ describe("consolidateHoldings", () => {
       lot({ id: "b", accountId: "acc-rrsp", priceCAD: 40 }),
     ]);
     assert.equal(rows[0].priceCAD, 40);
+  });
+});
+
+describe("accountValueAt", () => {
+  const acc = {
+    id: "a",
+    name: "Chequing",
+    institution: "Bank",
+    kind: "checking",
+    balance: 500,
+    history: [
+      { month: "2026-01", value: 100 },
+      { month: "2026-02", value: 200 },
+    ],
+  } as unknown as Parameters<typeof accountValueAt>[0];
+
+  test("reads the recorded month when there is one", () => {
+    assert.equal(accountValueAt(acc, "2026-02"), 200);
+  });
+
+  test("before the history starts, holds the earliest figure", () => {
+    assert.equal(accountValueAt(acc, "2025-11"), 100);
+  });
+
+  test("after the history ends, holds today's balance", () => {
+    // Not the earliest: a chart running past the last recorded month used to
+    // fall back to the oldest value and drew a cliff at its right edge.
+    assert.equal(accountValueAt(acc, "2026-06"), 500);
   });
 });
 

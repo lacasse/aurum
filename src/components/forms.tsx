@@ -322,18 +322,26 @@ function AccountFormInner({
     initial?.registration ?? "non-registered",
   );
   const [balance, setBalance] = useState(initial ? String(initial.balance) : "");
+  const [balanceUSD, setBalanceUSD] = useState(
+    initial?.balanceUSD ? String(initial.balanceUSD) : "",
+  );
   const [error, setError] = useState("");
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const bal = Number(balance);
+    const usd = balanceUSD.trim() === "" ? 0 : Number(balanceUSD);
     if (!name.trim()) return setError("Please name the account.");
     if (!Number.isFinite(bal)) return setError("Balance must be a number.");
+    if (!Number.isFinite(usd)) return setError("US balance must be a number.");
     const payload = {
       name: name.trim(),
       institution: institution.trim() || "—",
       kind,
       balance: Math.round(bal * 100) / 100,
+      // Only investment accounts settle trades in a second currency; asking
+      // every chequing account for a US balance would be noise.
+      balanceUSD: isInvestmentAccount(kind) ? Math.round(usd * 100) / 100 : 0,
       // Debts and property are never sheltered, so the field is not stored
       // for them at all rather than being stored as a meaningless default.
       registration: supportsRegistration(kind) ? registration : undefined,
@@ -385,7 +393,7 @@ function AccountFormInner({
           </Field>
         ) : null}
         <Field
-          label={isInvestmentAccount(kind) ? "Cash balance" : "Current balance"}
+          label={isInvestmentAccount(kind) ? "Cash balance (CAD)" : "Current balance"}
           hint={
             isInvestmentAccount(kind)
               ? "Uninvested cash only — holdings are valued separately"
@@ -401,6 +409,21 @@ function AccountFormInner({
             placeholder="0.00"
           />
         </Field>
+        {isInvestmentAccount(kind) ? (
+          <Field
+            label="Cash balance (USD)"
+            hint="Held as US dollars — converted for totals, not on the way in"
+          >
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={balanceUSD}
+              onChange={(e) => setBalanceUSD(e.target.value)}
+              placeholder="0.00"
+            />
+          </Field>
+        ) : null}
       </div>
       {error ? <p className="mt-3 text-xs text-negative">{error}</p> : null}
       <FormActions onCancel={onClose} label={initial ? "Save changes" : "Add account"} />

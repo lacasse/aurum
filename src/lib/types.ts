@@ -34,6 +34,12 @@ export interface Account {
   institution: string;
   kind: AccountKind;
   balance: number; // assets >= 0, liabilities stored as positive amount owed
+  /**
+   * US-dollar cash, for accounts that hold it. Kept separate from `balance`
+   * rather than converted on the way in: the rate on the day it settles is not
+   * the rate today, and a USD listing is paid for out of this side.
+   */
+  balanceUSD?: number;
   history: MonthlyPoint[];
   /** Tax treatment. Undefined for kinds where it does not apply. */
   registration?: Registration;
