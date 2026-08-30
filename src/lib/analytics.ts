@@ -36,11 +36,33 @@ export interface NetWorthPoint {
   net: number;
 }
 
+/**
+ * An account's cash in Canadian dollars, both sides of it.
+ *
+ * The US balance is converted here rather than when it is entered: the rate
+ * moves, and storing a converted figure would freeze whatever it happened to be
+ * on the day, then quietly drift away from the truth.
+ */
+export function accountCadBalance(acc: Account, usdCadRate: number): number {
+  return roundMoney(acc.balance + (acc.balanceUSD ?? 0) * usdCadRate);
+}
+
 export function accountValueAt(acc: Account, monthKey: string): number {
   const pt = acc.history.find((p) => p.month === monthKey);
   if (pt) return pt.value;
-  if (acc.history.length > 0) return acc.history[0].value; // backfill with earliest
-  return acc.balance;
+  if (acc.history.length === 0) return acc.balance;
+  /*
+   * Off either end of the recorded history, hold the nearest value rather than
+   * always reaching for the first one. A month after the last recorded point is
+   * the account as it stands now — reading the oldest figure there drew a cliff
+   * at the right edge of every chart the moment a history stopped one month
+   * short of today.
+   */
+  const first = acc.history[0];
+  const lastPoint = acc.history[acc.history.length - 1];
+  if (monthKey < first.month) return first.value;
+  if (monthKey > lastPoint.month) return acc.balance;
+  return lastPoint.value;
 }
 
 function portfolioValueAt(holdings: Holding[], monthsAgoFromEnd: number): number {
@@ -59,13 +81,21 @@ export function netWorthSeries(
   accounts: Account[],
   holdings: Holding[],
   n = 18,
+  usdCadRate = 1,
 ): NetWorthPoint[] {
   const keys = lastMonthKeys(n);
+  const last = keys[keys.length - 1];
   return keys.map((key, i) => {
     let assetCents = 0;
     let liabilityCents = 0;
     for (const acc of accounts) {
-      const v = toCents(accountValueAt(acc, key));
+      /*
+       * History is recorded in Canadian dollars and has no second currency in
+       * it, so the US side can only be added to the month that is current —
+       * which is the one it is a fact about.
+       */
+      const usd = key === last ? (acc.balanceUSD ?? 0) * usdCadRate : 0;
+      const v = toCents(accountValueAt(acc, key) + usd);
       if (isLiability(acc.kind)) liabilityCents += v;
       else assetCents += v;
     }

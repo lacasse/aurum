@@ -22,7 +22,7 @@ import { SeriesChart, Sparkline } from "@/components/charts";
 import { AccountForm, ConfirmDelete } from "@/components/forms";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
-import { netWorthSeries } from "@/lib/analytics";
+import { accountCadBalance, netWorthSeries } from "@/lib/analytics";
 import { fmtCompact, fmtSignedCAD, fmtCAD, labelMonth, lastMonthKeys } from "@/lib/format";
 import {
   ACCOUNT_KIND_LABELS,
@@ -47,21 +47,23 @@ export default function AccountsPage() {
   const accounts = useFinance((s) => s.accounts);
   const holdings = useFinance((s) => s.holdings);
   const deleteAccount = useFinance((s) => s.deleteAccount);
+  const usdCadRate = useFinance((s) => s.usdCadRate);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [deleting, setDeleting] = useState<Account | null>(null);
 
   const data = useMemo(() => {
-    const series = netWorthSeries(accounts, holdings, 18);
+    const series = netWorthSeries(accounts, holdings, 18, usdCadRate);
     let assets = 0;
     let liabilities = 0;
     for (const a of accounts) {
-      if (isLiability(a.kind)) liabilities += a.balance;
-      else assets += a.balance;
+      const value = accountCadBalance(a, usdCadRate);
+      if (isLiability(a.kind)) liabilities += value;
+      else assets += value;
     }
     return { series, assets, liabilities };
-  }, [accounts, holdings]);
+  }, [accounts, holdings, usdCadRate]);
 
   if (!ready) return <PageSkeleton />;
 
@@ -204,8 +206,21 @@ export default function AccountsPage() {
                       {liability ? "Owed" : "Balance"}
                     </p>
                     <p className="text-xl font-semibold tabular-nums">
-                      {fmtCAD(acc.balance)}
+                      {fmtCAD(accountCadBalance(acc, usdCadRate))}
                     </p>
+                    {/* Both sides shown when there is a US balance: the total
+                        above is converted at today's rate, which is not the
+                        rate it will settle at. */}
+                    {acc.balanceUSD ? (
+                      <p className="mt-0.5 text-[11px] tabular-nums text-ink-faint">
+                        {fmtCAD(acc.balance)} CAD · $
+                        {acc.balanceUSD.toLocaleString("en-CA", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}{" "}
+                        USD
+                      </p>
+                    ) : null}
                   </div>
                   {delta !== undefined && delta !== 0 ? (
                     <Badge tone={(delta >= 0) !== liability ? "positive" : "negative"}>
