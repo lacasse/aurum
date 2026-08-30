@@ -461,7 +461,7 @@ export default function AccountsPage() {
                       data={hist}
                       dataKey="v"
                       color={liability ? "#fb7185" : "#8b5cf6"}
-                      height={44}
+                      height={72}
                     />
                     <div className="mt-1 flex justify-between text-[10px] text-ink-faint">
                       <span>{labelMonth(acc.history[0].month)}</span>
