@@ -8,7 +8,6 @@ import {
   ArrowUpRight,
   Banknote,
   Coins,
-  ShieldCheck,
   LineChart,
   PiggyBank,
   TrendingUp,
@@ -236,7 +235,7 @@ export default function DashboardPage() {
         <SectionHeading title="Net worth" note="what you own, as it stands today" />
 
         {/* What net worth is made of */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <StatCard
             label="Net Worth"
             value={fmtCAD(nwLast.net)}
@@ -282,17 +281,6 @@ export default function DashboardPage() {
             sparkKey="v"
             sparkColor="#f59e0b"
           />
-          {nwLast.pension > 0 ? (
-            <StatCard
-              label="Pension"
-              value={fmtCAD(nwLast.pension)}
-              deltaLabel="transfer value, not spendable"
-              icon={<ShieldCheck size={16} />}
-              spark={spark.map((p) => ({ v: p.pension }))}
-              sparkKey="v"
-              sparkColor="#fbbf24"
-            />
-          ) : null}
         </div>
 
         {/* The whole record */}

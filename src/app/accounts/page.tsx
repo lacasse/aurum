@@ -123,7 +123,7 @@ export default function AccountsPage() {
       }
     >
       <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Total assets"
             value={fmtCAD(data.assets)}
@@ -152,17 +152,6 @@ export default function AccountsPage() {
             deltaLabel="tracked separately on Investments"
             icon={<Landmark size={16} />}
           />
-          {data.pension > 0 ? (
-            <StatCard
-              label="Pension"
-              value={fmtCAD(data.pension)}
-              deltaLabel="transfer value · payable only on leaving"
-              icon={<ShieldCheck size={16} />}
-              spark={data.series.map((p) => ({ v: p.pension }))}
-              sparkKey="v"
-              sparkColor="#f59e0b"
-            />
-          ) : null}
         </div>
 
         <Card>
