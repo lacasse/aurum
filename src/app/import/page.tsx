@@ -18,6 +18,7 @@ import {
   Card,
   CardHeader,
   EmptyState,
+  Input,
   Select,
   cn,
 } from "@/components/ui";
@@ -32,6 +33,11 @@ import {
   tradeKey,
 } from "@/lib/trades";
 import { RoutedFile, labelFor, routeFile } from "@/lib/import-router";
+import {
+  CorporateAction,
+  applyAction,
+  describeAction,
+} from "@/lib/corporate-actions";
 import {
   REGISTRATION_LABELS,
   Registration,
@@ -73,6 +79,7 @@ export default function ImportPage() {
   const [files, setFiles] = useState<RoutedFile[]>([]);
   const [cashRows, setCashRows] = useState<ImportedRow[]>([]);
   const [tradeRows, setTradeRows] = useState<TradeRow[]>([]);
+  const [actions, setActions] = useState<CorporateAction[]>([]);
   /*
    * Which account each file is about, chosen per file rather than per import.
    * A card statement is one account from end to end; an activity export covers
@@ -88,6 +95,7 @@ export default function ImportPage() {
     updated: number;
     transfers: number;
     learned: number;
+    actions: number;
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -180,6 +188,7 @@ export default function ImportPage() {
     setFiles((prev) => [...prev, ...routed]);
     setCashRows((prev) => [...prev, ...routed.flatMap((r) => r.cash)]);
     setTradeRows((prev) => [...prev, ...routed.flatMap((r) => r.trades)]);
+    setActions((prev) => [...prev, ...routed.flatMap((r) => r.actions)]);
     setBusy(false);
   };
 
@@ -187,12 +196,29 @@ export default function ImportPage() {
     setFiles((prev) => prev.filter((f) => f.fileName !== name));
     setCashRows((prev) => prev.filter((r) => r.sourceFile !== name));
     setTradeRows((prev) => prev.filter((r) => r.sourceFile !== name));
+    setActions((prev) => prev.filter((r) => r.sourceFile !== name));
   };
 
   const updateCash = (id: string, patch: Partial<ImportedRow>) =>
     setCashRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const updateTrade = (id: string, patch: Partial<TradeRow>) =>
     setTradeRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const updateAction = (id: string, patch: Partial<CorporateAction>) =>
+    setActions((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  /*
+   * The holding a corporate action starts from, matched in the account the
+   * action happened in — the same ticker in another account is a different
+   * position with its own cost basis.
+   */
+  const holdingFor = (ticker: string, registration: Registration | null) => {
+    const accountId = registration ? accountIdFor(registration) : "";
+    return holdings.find(
+      (h) =>
+        h.ticker.toUpperCase() === ticker.toUpperCase() &&
+        (!accountId || h.accountId === accountId),
+    );
+  };
 
   const changeType = (row: ImportedRow, type: ImportedRow["type"]) => {
     const s = suggestCategory(
@@ -235,6 +261,56 @@ export default function ImportPage() {
         setMerchantRule(r.payee, r.category);
         learned += 1;
       }
+    }
+
+    /*
+     * Corporate actions run first. They decide what the shares cost, and the
+     * sale that follows in the same file is measured against that: applied
+     * afterwards, the gain would be computed from a basis that did not exist
+     * yet.
+     */
+    let actionsApplied = 0;
+    for (const action of actions.filter((a) => a.include)) {
+      const parent = holdingFor(action.from, action.registration);
+      const applied = applyAction(action, parent);
+      if (!applied || !parent) continue;
+      if (applied.parent) {
+        updateHolding(parent.id, {
+          ...parent,
+          avgCost: applied.parent.avgCostCAD,
+          // The exact CAD figure, not one re-derived from today's rate: this
+          // basis was fixed when the parent shares were bought.
+          avgCostCADOverride: applied.parent.avgCostCAD,
+          shares: action.kind === "merger" ? 0 : parent.shares,
+        });
+      }
+      const existingChild = holdingFor(applied.child.ticker, action.registration);
+      if (existingChild) {
+        updateHolding(existingChild.id, {
+          ...existingChild,
+          shares: existingChild.shares + applied.child.shares,
+          avgCost: applied.child.avgCostCAD,
+          avgCostCADOverride: applied.child.avgCostCAD,
+          flows: [...(existingChild.flows ?? []), applied.child.flow],
+        });
+      } else {
+        addHolding({
+          ticker: applied.child.ticker,
+          name: applied.child.ticker,
+          assetClass: parent.assetClass,
+          shares: applied.child.shares,
+          avgCost: applied.child.avgCostCAD,
+          avgCostCADOverride: applied.child.avgCostCAD,
+          // No price of its own yet: the feed fills it in on the next refresh,
+          // and until then what it cost is the best figure available.
+          price: applied.child.avgCostCAD,
+          dividendsReceived: 0,
+          accountId: parent.accountId,
+          currency: parent.currency,
+          flows: [applied.child.flow],
+        });
+      }
+      actionsApplied += 1;
     }
 
     const { positions, cashDeltas, transfers } = accumulatePositions(
@@ -281,10 +357,12 @@ export default function ImportPage() {
       updated,
       transfers: transfers.length,
       learned,
+      actions: actionsApplied,
     });
     setFiles([]);
     setCashRows([]);
     setTradeRows([]);
+    setActions([]);
     setStep("done");
   };
 
@@ -600,6 +678,74 @@ export default function ImportPage() {
               </Card>
             )}
 
+            {actions.length > 0 && (
+              <Card>
+                <CardHeader
+                  title="Mergers and demergers"
+                  subtitle="A share of the parent's cost basis follows the new shares — the company publishes the split"
+                />
+                <ul className="space-y-3 px-5 pb-5">
+                  {actions.map((a) => {
+                    const parent = holdingFor(a.from, a.registration);
+                    const applied = applyAction(a, parent);
+                    return (
+                      <li
+                        key={a.id}
+                        className={cn(
+                          "rounded-lg border border-line bg-elevated/40 p-3",
+                          !a.include && "opacity-40",
+                        )}
+                      >
+                        <div className="flex flex-wrap items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={a.include}
+                            onChange={(e) =>
+                              updateAction(a.id, { include: e.target.checked })
+                            }
+                            aria-label={`Include ${a.from} ${a.kind}`}
+                          />
+                          <span className="text-xs font-medium">
+                            {a.date} · {a.from} → {a.to}
+                          </span>
+                          <span className="text-[11px] text-ink-faint">
+                            {a.registration
+                              ? REGISTRATION_LABELS[a.registration]
+                              : a.registrationRaw}
+                          </span>
+                          {a.kind === "demerger" && (
+                            <label className="ml-auto flex items-center gap-2 text-[11px] text-ink-dim">
+                              Cost basis moving
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max="100"
+                                value={a.allocationPct}
+                                onChange={(e) =>
+                                  updateAction(a.id, {
+                                    allocationPct: Number(e.target.value) || 0,
+                                  })
+                                }
+                                className="h-7 w-20 py-0 text-right text-[11px]"
+                                aria-label={`Percentage of ${a.from} cost basis moving to ${a.to}`}
+                              />
+                              %
+                            </label>
+                          )}
+                        </div>
+                        <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+                          {parent
+                            ? describeAction(a, applied?.movedBasis ?? 0)
+                            : `No ${a.from} position in this account to divide — add it first, or leave this out.`}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Card>
+            )}
+
             {checkedTrades.length > 0 && (
               <Card>
                 <CardHeader
@@ -690,6 +836,9 @@ export default function ImportPage() {
                 `${result.created} new position${result.created === 1 ? "" : "s"}`,
                 `${result.updated} updated`,
                 `${result.transfers} transfer${result.transfers === 1 ? "" : "s"}`,
+                result.actions > 0
+                  ? `${result.actions} corporate action${result.actions === 1 ? "" : "s"}`
+                  : "",
                 result.learned > 0
                   ? `${result.learned} categor${result.learned === 1 ? "y" : "ies"} remembered`
                   : "",
