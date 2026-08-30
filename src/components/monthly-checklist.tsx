@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   ArrowRight,
   CheckCircle2,
@@ -207,9 +208,14 @@ function ImportStep({
 
   return (
     <Card className="p-6">
-      <h3 className="text-sm font-semibold">Step 2 · Import credit card CSV</h3>
+      <h3 className="text-sm font-semibold">Step 2 · Import your statements</h3>
       <p className="mt-1 text-xs text-ink-faint">
-        Drag and drop your credit card CSV export below.
+        Drop the card statement here, or take both exports — the card and the
+        account activity — to{" "}
+        <Link href="/import" className="text-brand underline-offset-2 hover:underline">
+          Import
+        </Link>
+        , which reads trades and dividends out of them as well.
       </p>
 
       {rows.length === 0 ? (
@@ -342,7 +348,8 @@ function TradesStep({ onNext }: { onNext: () => void }) {
     <Card className="p-6">
       <h3 className="text-sm font-semibold">Step 3 · Log any trades</h3>
       <p className="mt-1 text-xs text-ink-faint">
-        Record any buys, sells, or dividends from the past month.
+        Anything the account activity export did not already carry — buys,
+        sells or dividends recorded somewhere else.
       </p>
       <div className="mt-4">
         <TradeEntry onComplete={onNext} />
