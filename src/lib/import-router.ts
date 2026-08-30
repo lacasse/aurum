@@ -2,6 +2,7 @@ import Papa from "papaparse";
 import { ImportedRow, detectFormat, parseCsvRecords } from "./csv";
 import { TradeRow, parseTradeCsv } from "./trades";
 import { isActivityExport, parseActivitiesCsv } from "./activities";
+import { CorporateAction } from "./corporate-actions";
 
 /**
  * One import, whatever the file happens to be.
@@ -20,6 +21,7 @@ export interface RoutedFile {
   kind: FileKind | null;
   cash: ImportedRow[];
   trades: TradeRow[];
+  actions: CorporateAction[];
   skipped: { reason: string; count: number }[];
   needsAttention: string[];
   error?: string;
@@ -82,6 +84,7 @@ export async function routeFile(
       kind: "activities",
       cash: res.cash,
       trades: res.trades,
+      actions: res.actions,
       skipped: res.skipped,
       needsAttention: res.needsAttention,
     };
@@ -106,6 +109,7 @@ export async function routeFile(
       kind: "card",
       cash: res.rows,
       trades: [],
+      actions: [],
       skipped: [
         { reason: "card payments", count: res.skippedPayments },
         { reason: "rows that could not be read", count: res.skippedInvalid },
@@ -122,6 +126,7 @@ export async function routeFile(
       kind: "trades",
       cash: [],
       trades: rows,
+      actions: [],
       skipped: [],
       needsAttention: [],
     };
@@ -139,6 +144,7 @@ function blank(fileName: string, error: string): RoutedFile {
     kind: null,
     cash: [],
     trades: [],
+    actions: [],
     skipped: [],
     needsAttention: [],
     error,

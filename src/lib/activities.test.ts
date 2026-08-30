@@ -132,19 +132,26 @@ describe("parseActivitiesCsv", () => {
     assert.equal(res.cash[0].amount, 11.24);
   });
 
-  test("selling shares from a demerger pays out the holding they came from", () => {
+  test("a demerger becomes an action on the parent, and the sale stays a sale", () => {
     const res = parse(
       "2026-07-01,00:00:00,,BB2,RRSP,CorporateAction,DEMERGER,TRVM: Corrected quantity of shares by 16.0000,LONG,TRVM,Trevaine Mobility Inc.,,16,,,",
       "2026-07-01,00:00:00,,BB2,RRSP,CorporateAction,DEMERGER,TRVN: Corrected quantity of shares by 0.0000,LONG,TRVN,Trevaine Group Inc.,,0,,,",
       '2026-07-31,13:18:27,2026-08-03,BB2,RRSP,Trade,SELL,"TRVM: Sold 16.0000 shares at $20.38 per share, FX Rate: 1.4014",LONG,TRVM,Trevaine Mobility Inc.,USD,-16,20.3842,0,326.15',
     );
-    // The shares were never bought, so selling them is not a sale: it is the
-    // parent holding paying out.
+    // The shares are a real position carved out of the parent, so the sale is
+    // an ordinary sale measured against whatever basis came across with them.
+    assert.equal(res.actions.length, 1);
+    const [a] = res.actions;
+    assert.equal(a.kind, "demerger");
+    assert.equal(a.from, "TRVN");
+    assert.equal(a.to, "TRVM");
+    assert.equal(a.shares, 16);
+    assert.equal(a.registration, "RRSP");
+    assert.equal(a.allocationPct, 0, "the company's allocation is asked for, not guessed");
+
     assert.equal(res.trades.length, 1);
-    const [t] = res.trades;
-    assert.equal(t.type, "dividend");
-    assert.equal(t.ticker, "TRVN");
-    assert.equal(t.transactedAmount, 326.15);
+    assert.equal(res.trades[0].type, "sell");
+    assert.equal(res.trades[0].ticker, "TRVM");
     assert.equal(res.needsAttention.length, 0);
   });
 
