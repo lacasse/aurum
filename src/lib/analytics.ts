@@ -18,6 +18,7 @@ import {
   lastMonthKeys,
   lastCompleteMonthKey,
   monthKeyOf,
+  todayISO,
 } from "./format";
 import { DatedFlow, xirr } from "./xirr";
 import {
@@ -499,6 +500,22 @@ export function replayFlows(flows: CashFlow[]): {
  * months, which gave a position bought last month and one held five years the
  * same denominator.
  */
+/**
+ * The date the closing value is dated at: today, or the last flow if a trade
+ * is dated later than that.
+ *
+ * The default used to be the fifteenth of the current month, and anything
+ * bought after it broke the calculation outright: the series then ended on the
+ * purchase rather than on the value, so the money-weighted return of a
+ * position was money going out and never coming back, which has no rate.
+ * XEQT was bought on the 17th and had no figure at all for a fortnight.
+ */
+function valuationDate(flows: readonly CashFlow[], asOf: string): string {
+  let latest = asOf;
+  for (const f of flows) if (f.date > latest) latest = f.date;
+  return latest;
+}
+
 function computeMwrr(flows: CashFlow[], marketValue: number, asOf: string): number | null {
   if (flows.length === 0) return null;
   const dated: DatedFlow[] = flows.map((f) => ({
@@ -508,7 +525,9 @@ function computeMwrr(flows: CashFlow[], marketValue: number, asOf: string): numb
   }));
   // What the position is worth today closes the series: selling it now is the
   // final inflow.
-  if (marketValue > 0) dated.push({ date: asOf, amount: marketValue });
+  if (marketValue > 0) {
+    dated.push({ date: valuationDate(flows, asOf), amount: marketValue });
+  }
   return xirr(dated);
 }
 
@@ -533,20 +552,18 @@ function computeMwrr(flows: CashFlow[], marketValue: number, asOf: string): numb
 export function portfolioMwrr(
   holdings: Holding[],
   marketValue: number,
-  asOf: string = currentMonthKey() + "-15",
+  asOf: string = todayISO(),
 ): number | null {
-  const dated: DatedFlow[] = [];
-  for (const h of holdings) {
-    for (const f of h.flows) {
-      dated.push({
-        date: f.date,
-        // Money paid in is negative, money received is positive.
-        amount: f.kind === "buy" ? -f.amount : f.amount,
-      });
-    }
-  }
+  const flows = holdings.flatMap((h) => h.flows);
+  const dated: DatedFlow[] = flows.map((f) => ({
+    date: f.date,
+    // Money paid in is negative, money received is positive.
+    amount: f.kind === "buy" ? -f.amount : f.amount,
+  }));
   if (dated.length === 0) return null;
-  if (marketValue > 0) dated.push({ date: asOf, amount: marketValue });
+  if (marketValue > 0) {
+    dated.push({ date: valuationDate(flows, asOf), amount: marketValue });
+  }
   return xirr(dated);
 }
 
@@ -673,7 +690,7 @@ export function overMonths(annualPct: number, months: number): number | null {
  */
 export function consolidateHoldings(
   holdings: Holding[],
-  asOf: string = currentMonthKey() + "-15",
+  asOf: string = todayISO(),
 ): HoldingRow[] {
   const groups = new Map<string, Holding[]>();
   for (const h of holdings) {
