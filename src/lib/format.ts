@@ -82,6 +82,24 @@ export function lastMonthKeys(n: number, endKey = currentMonthKey()): string[] {
   return out;
 }
 
+/** The month before `key`. */
+export function previousMonthKey(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 2, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * The last month that has finished.
+ *
+ * A chart of monthly totals reads the month in progress as a collapse — on the
+ * second of the month, a full month of spending is drawn as two days of it —
+ * so anything comparing months ends here instead of at today.
+ */
+export function lastCompleteMonthKey(): string {
+  return previousMonthKey(currentMonthKey());
+}
+
 /** "2026-08" -> "Aug ’26" */
 export function labelMonth(key: string): string {
   const [y, m] = key.split("-").map(Number);

@@ -35,6 +35,22 @@ export const PALETTE = [
   "#fb7185",
 ];
 
+/**
+ * One colour per category, assigned in the order given.
+ *
+ * Shared so that a category is the same colour wherever it is drawn: the
+ * average-month donut and the stacked trend beside it are the same spending
+ * seen two ways, and reading them together means matching Housing to Housing
+ * by eye. Pass the categories in one ranking and both charts agree.
+ */
+export function categoryColors(names: readonly string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  names.forEach((name, i) => {
+    if (out[name] === undefined) out[name] = PALETTE[i % PALETTE.length];
+  });
+  return out;
+}
+
 const GRID_PROPS = {
   stroke: "var(--line)",
   strokeDasharray: "3 3",
@@ -285,13 +301,18 @@ export function DonutChart({
   centerLabel,
   centerValue,
   fmt,
+  colors,
 }: {
   data: { name: string; value: number }[];
   height?: number;
   centerLabel?: string;
   centerValue?: string;
   fmt?: (n: number) => string;
+  /** Colour per category name. Falls back to the palette in slice order. */
+  colors?: Record<string, string>;
 }) {
+  const colorOf = (name: string, i: number) =>
+    colors?.[name] ?? PALETTE[i % PALETTE.length];
   return (
     <div>
       <div className="relative">
@@ -305,9 +326,10 @@ export function DonutChart({
               outerRadius="88%"
               paddingAngle={2}
               strokeWidth={0}
+              isAnimationActive={false}
             >
-              {data.map((_, i) => (
-                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
+              {data.map((d, i) => (
+                <Cell key={i} fill={colorOf(d.name, i)} />
               ))}
             </Pie>
             <Tooltip content={<ChartTooltip fmt={fmt} />} />
@@ -325,7 +347,7 @@ export function DonutChart({
           <li key={d.name} className="flex items-center gap-2 text-xs">
             <span
               className="h-2 w-2 shrink-0 rounded-full"
-              style={{ background: PALETTE[i % PALETTE.length] }}
+              style={{ background: colorOf(d.name, i) }}
             />
             <span className="truncate text-ink-dim">{d.name}</span>
             <span className="ml-auto font-medium tabular-nums text-ink">
