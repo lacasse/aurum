@@ -12,6 +12,7 @@ import {
   simpleReturn,
   cashflowSeries,
   consolidateHoldings,
+  holdingExposure,
   firstFlowMonth,
   monthsSince,
   replayFlows,
@@ -143,7 +144,6 @@ describe("consolidateHoldings", () => {
       ticker: "XEQT",
       name: "XEQT",
       assetClass: "US Equity",
-      sector: "Other",
       shares: 10,
       avgCost: 30,
       price: 40,
@@ -223,6 +223,59 @@ describe("consolidateHoldings", () => {
   });
 });
 
+describe("holdingExposure", () => {
+  const lot = (over: Partial<Holding>): Holding =>
+    ({
+      id: "h",
+      ticker: "XEQT",
+      name: "XEQT",
+      assetClass: "US Equity",
+      shares: 10,
+      avgCost: 30,
+      price: 40,
+      history: [40],
+      dividendsReceived: 0,
+      accountId: "acc-tfsa",
+      currency: "CAD",
+      priceCAD: 40,
+      avgCostCAD: 30,
+      dividendsReceivedCAD: 0,
+      historyCAD: [40],
+      flows: [],
+      ...over,
+    }) as Holding;
+
+  test("pools a ticker across accounts and drops closed positions", () => {
+    const slices = holdingExposure([
+      lot({ id: "a", shares: 10 }),
+      lot({ id: "b", accountId: "acc-rrsp", ticker: "xeqt", shares: 5 }),
+      lot({ id: "c", ticker: "CRM", shares: 0 }),
+    ]);
+    assert.equal(slices.length, 1);
+    assert.equal(slices[0].value, 15 * 40);
+  });
+
+  test("prefers the fuller of two names for the same ticker", () => {
+    const slices = holdingExposure([
+      lot({ id: "a", name: "XEQT" }),
+      lot({ id: "b", accountId: "acc-rrsp", name: "Global Equity" }),
+    ]);
+    assert.equal(slices[0].name, "Global Equity");
+  });
+
+  test("groups sit together, largest group and holding first", () => {
+    const slices = holdingExposure([
+      lot({ id: "a", ticker: "BTC", assetClass: "Crypto", shares: 1, priceCAD: 100 }),
+      lot({ id: "b", ticker: "AAA", shares: 1, priceCAD: 300 }),
+      lot({ id: "c", ticker: "BBB", shares: 1, priceCAD: 500 }),
+    ]);
+    assert.deepEqual(
+      slices.map((s) => s.ticker),
+      ["BBB", "AAA", "BTC"],
+    );
+  });
+});
+
 describe("sortHoldingRows", () => {
   const lot = (over: Partial<Holding>): Holding =>
     ({
@@ -230,7 +283,6 @@ describe("sortHoldingRows", () => {
       ticker: "XEQT",
       name: "iShares Core Equity ETF",
       assetClass: "US Equity",
-      sector: "Other",
       shares: 10,
       avgCost: 30,
       price: 40,
@@ -306,7 +358,6 @@ describe("closed positions", () => {
       ticker: "XEQT",
       name: "iShares Core Equity ETF",
       assetClass: "US Equity",
-      sector: "Other",
       shares: 10,
       avgCost: 30,
       price: 40,
@@ -442,7 +493,6 @@ describe("realized gain and MWRR on a row", () => {
       ticker: "XEQT",
       name: "XEQT",
       assetClass: "US Equity",
-      sector: "Other",
       shares: 0,
       avgCost: 0,
       price: 40,
@@ -538,7 +588,6 @@ describe("allTimeSeries", () => {
       ticker: "AAA",
       name: "AAA",
       assetClass: "US Equity",
-      sector: "Other",
       shares: 0,
       avgCost: 0,
       price: 0,
