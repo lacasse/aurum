@@ -36,6 +36,8 @@ interface CashflowRow {
   month: string; // month-end date, YYYY-MM-DD
   pension: number | null;
   cash: number | null;
+  /** What the student loan still owed at that month end, unsigned. */
+  loanOwed?: number | null;
   taxable: number | null;
   tfsa: number | null;
   rrsp: number | null;
@@ -97,6 +99,10 @@ async function main() {
   const cashHistory = rows
     .filter((r) => r.cash != null)
     .map((r) => ({ month: r.month.slice(0, 7), value: Number(r.cash) }));
+  // Debts are stored as the amount owed, positive.
+  const loanHistory = rows
+    .filter((r) => r.loanOwed != null)
+    .map((r) => ({ month: r.month.slice(0, 7), value: Number(r.loanOwed) }));
 
   const [{ count: replacing }] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -117,6 +123,7 @@ async function main() {
   console.log(`partial transfers to remove: ${replacing}`);
   console.log(`pension history months: ${pensionHistory.length}, latest ${last.pension}`);
   console.log(`cash history months:    ${cashHistory.length}, latest ${last.cash}`);
+  console.log(`loan history months:    ${loanHistory.length}, latest ${last.loanOwed ?? "—"}`);
   if (!commit) {
     console.log("\ndry run — pass --commit to write");
     process.exit(0);
@@ -161,6 +168,17 @@ async function main() {
       .set({ balance: Number(last.cash), history: cashHistory })
       .where(eq(accounts.id, cash.id));
   }
+  const loan = all.find((a) => a.kind === "loan");
+  if (loan && loanHistory.length > 0) {
+    await db
+      .update(accounts)
+      .set({
+        balance: loanHistory[loanHistory.length - 1].value,
+        history: loanHistory,
+      })
+      .where(eq(accounts.id, loan.id));
+  }
+
   /*
    * The sheet counts cash on hand once, across every account, and holds it in
    * the figure above: the investment accounts keep no idle cash of their own.

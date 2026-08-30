@@ -4,8 +4,8 @@ import { useMemo, useState } from "react";
 import {
   Banknote,
   Bitcoin,
-  Car,
   CreditCard,
+  HandCoins,
   Home,
   Landmark,
   Pencil,
@@ -39,7 +39,9 @@ const KIND_ICON: Record<AccountKind, typeof Wallet> = {
   crypto: Bitcoin,
   property: Home,
   credit: CreditCard,
-  loan: Car,
+  // Not a car: the loans here are student and personal debt, and an icon that
+  // names a kind of purchase says the wrong thing about all of them.
+  loan: HandCoins,
 };
 
 export default function AccountsPage() {
