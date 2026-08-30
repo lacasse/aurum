@@ -1,5 +1,9 @@
 #!/bin/sh
 set -e
+# A dump is written through a pipe into gzip. Without pipefail a pg_dump that
+# dies mid-stream still leaves gzip exiting 0, and the failure is invisible:
+# what lands is a small, perfectly valid gzip of nothing.
+set -o pipefail 2>/dev/null || true
 
 # Configuration
 DB_HOST="${POSTGRES_HOST:-db}"
@@ -15,6 +19,9 @@ RETENTION="${RETENTION:-14}"
 # Optional passphrase to encrypt backup dumps with openssl (AES-256-CBC).
 # Leave empty for plain gzip dumps.
 ENCRYPTION_KEY="${BACKUP_ENCRYPTION_KEY:-}"
+# Anything smaller than this is not a real dump of this database. Configurable
+# because a brand-new, nearly empty database is legitimately small.
+MIN_BYTES="${BACKUP_MIN_BYTES:-2048}"
 
 export PGPASSWORD="$DB_PASSWORD"
 
@@ -27,30 +34,63 @@ backup_now() {
   if [ -n "$ENCRYPTION_KEY" ]; then
     FILE="${BACKUP_DIR}/${DB_NAME}_${STAMP}.sql.gz.enc"
     log "dumping + encrypting ${DB_NAME} -> ${FILE}"
-    pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
+    if ! pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
       --format=plain --no-owner --no-privileges | gzip | openssl enc -aes-256-cbc -pbkdf2 -e \
-      -pass pass:"$ENCRYPTION_KEY" > "$FILE.tmp"
+      -pass pass:"$ENCRYPTION_KEY" > "$FILE.tmp"; then
+      log "ERROR: pg_dump failed — nothing written"
+      rm -f "$FILE.tmp"
+      return 1
+    fi
   else
     FILE="${BACKUP_DIR}/${DB_NAME}_${STAMP}.sql.gz"
     log "dumping ${DB_NAME} -> ${FILE}"
-    pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
-      --format=plain --no-owner --no-privileges | gzip > "$FILE.tmp"
+    if ! pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
+      --format=plain --no-owner --no-privileges | gzip > "$FILE.tmp"; then
+      log "ERROR: pg_dump failed — nothing written"
+      rm -f "$FILE.tmp"
+      return 1
+    fi
   fi
   mv "$FILE.tmp" "$FILE"
 
-  # Verify the file is valid and not empty.
+  # Verify the file is valid, and that it is a whole dump.
+  #
+  # gzip -t alone is not enough: an empty dump compresses to a couple of dozen
+  # bytes that pass it happily. That is not hypothetical — a scheduled run that
+  # fires while the database is unreachable produces exactly that, and because
+  # retention counts files rather than good ones, enough of them would push the
+  # real backups out. So the size is floored and the dump has to carry the
+  # trailer pg_dump only writes once it has finished.
   if [ -n "$ENCRYPTION_KEY" ]; then
-    check="$(openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:"$ENCRYPTION_KEY" -in "$FILE" | gzip -t 2>/dev/null && echo ok)"
-    if [ "$check" != "ok" ]; then
+    PLAIN="openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:${ENCRYPTION_KEY} -in ${FILE} | gzip -dc"
+    if ! openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:"$ENCRYPTION_KEY" -in "$FILE" | gzip -t 2>/dev/null; then
       log "ERROR: backup failed integrity check, removing ${FILE}"
       rm -f "$FILE"
       return 1
     fi
+    TAIL="$(eval "$PLAIN" 2>/dev/null | tail -n 5)"
   elif ! gzip -t "$FILE" 2>/dev/null; then
     log "ERROR: backup failed integrity check, removing ${FILE}"
     rm -f "$FILE"
     return 1
+  else
+    TAIL="$(gzip -dc "$FILE" 2>/dev/null | tail -n 5)"
   fi
+
+  SIZE="$(wc -c < "$FILE" | tr -d ' ')"
+  if [ "$SIZE" -lt "$MIN_BYTES" ]; then
+    log "ERROR: backup is ${SIZE} bytes, under the ${MIN_BYTES}-byte floor — removing ${FILE}"
+    rm -f "$FILE"
+    return 1
+  fi
+
+  if ! echo "$TAIL" | grep -q "PostgreSQL database dump complete"; then
+    log "ERROR: backup has no completion marker (truncated dump) — removing ${FILE}"
+    rm -f "$FILE"
+    return 1
+  fi
+
+  log "backup ok (${SIZE} bytes)"
 
   prune
 }
