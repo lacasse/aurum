@@ -8,6 +8,7 @@ export function StatCard({
   label,
   value,
   delta,
+  deltaValue,
   deltaLabel,
   icon,
   tone = "neutral",
@@ -18,6 +19,8 @@ export function StatCard({
   label: string;
   value: string;
   delta?: number; // percent
+  /** The same move in money, shown beside the percentage. */
+  deltaValue?: string;
   deltaLabel?: string;
   icon?: ReactNode;
   tone?: "neutral" | "positive" | "negative";
@@ -40,6 +43,11 @@ export function StatCard({
           <Badge tone={tone === "neutral" ? (positive ? "positive" : "negative") : tone}>
             {positive ? "▲" : "▼"} {Math.abs(delta).toFixed(1)}%
           </Badge>
+        ) : null}
+        {deltaValue ? (
+          <span className="text-[11px] font-medium tabular-nums text-ink-dim">
+            {deltaValue}
+          </span>
         ) : null}
         {deltaLabel ? (
           <span className="text-[11px] text-ink-faint">{deltaLabel}</span>
