@@ -186,6 +186,55 @@ export default function GuidePage() {
         </Section>
 
         <Section
+          id="rewards"
+          title="Staking rewards"
+          lead="Tokens that arrive without being bought"
+        >
+          <p>
+            A reward is not a free acquisition, however it looks on a
+            statement. It is two things at once:{" "}
+            <strong className="text-ink">income</strong> equal to what the
+            tokens were worth on the day they landed, and an{" "}
+            <strong className="text-ink">acquisition</strong> of those tokens at
+            that same value. The second half is what keeps the cost base
+            honest — the amount counts once as income, and because it is also
+            the cost, it is not counted again as a capital gain when the tokens
+            are sold.
+          </p>
+          <p>
+            Recorded as arriving for nothing, the income disappears and the
+            whole future sale becomes a gain. So the app writes the pair
+            instead, and no cash moves: a reward is paid in tokens, not into
+            your account.
+          </p>
+          <p>
+            The one figure it cannot work out is the value on the day — it
+            fetches today’s price and nothing else. Enter a reward without one
+            and the units are still recorded, flagged, and listed on the
+            Investments page until you fill it in.
+          </p>
+          <Table>
+            <Row
+              figure="Units received"
+              source="Your wallet or exchange"
+              where={
+                <>
+                  <Link href="/investments" className="text-brand hover:underline">
+                    Investments
+                  </Link>{" "}
+                  → Log trades → <strong>Staking reward</strong>
+                </>
+              }
+            />
+            <Row
+              figure="Value on the day"
+              source="The price in CAD when the tokens landed"
+              where="Same row, or later from the card that lists rewards without one"
+            />
+          </Table>
+        </Section>
+
+        <Section
           id="monthly"
           title="The rest of the month"
           lead="What the checklist collects, and what it derives"
