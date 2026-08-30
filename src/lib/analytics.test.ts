@@ -21,8 +21,13 @@ import {
   sortHoldingRows,
   monthTotals,
   spendByCategory,
+  stackedSpend,
+  avgSpendByCategory,
+  firstAccountMonth,
+  netWorthOver,
+  netWorthSeries,
 } from "./analytics";
-import { currentMonthKey, lastMonthKeys } from "./format";
+import { currentMonthKey, lastCompleteMonthKey, lastMonthKeys } from "./format";
 import type { Budget, Holding, Transaction } from "./types";
 
 const MONTH = currentMonthKey();
@@ -105,6 +110,198 @@ describe("cashflowSeries", () => {
     assert.equal(current.income, 0.3);
     assert.equal(current.expenses, 0.1);
     assert.equal(current.net, 0.2);
+  });
+});
+
+describe("charts that compare months end at the last complete one", () => {
+  const complete = lastCompleteMonthKey();
+  const lastDay = `${complete}-15`;
+
+  test("cashflowSeries can stop before the month in progress", () => {
+    const series = cashflowSeries(
+      [
+        txn({ amount: 100, type: "expense" }),
+        txn({ amount: 40, type: "expense", date: lastDay }),
+      ],
+      12,
+      complete,
+    );
+    // The partial month is a short month, not a frugal one, so it is not drawn
+    // beside twelve whole ones.
+    assert.equal(series.find((p) => p.key === MONTH), undefined);
+    assert.equal(series[series.length - 1].key, complete);
+    assert.equal(series[series.length - 1].expenses, 40);
+  });
+
+  test("stackedSpend stops there too, so the two line up", () => {
+    const rows = stackedSpend(
+      [txn({ amount: 40, type: "expense", date: lastDay })],
+      ["Groceries"],
+      12,
+      complete,
+    );
+    assert.equal(rows[rows.length - 1].key, complete);
+    assert.equal(rows[rows.length - 1].Groceries, 40);
+  });
+});
+
+describe("avgSpendByCategory", () => {
+  const complete = lastCompleteMonthKey();
+  const months = lastMonthKeys(12, complete);
+  const spend = (month: string, amount: number, category: string) =>
+    txn({ amount, type: "expense", category, date: `${month}-10` });
+
+  test("divides by the months on record, not by the twelve asked for", () => {
+    // Three months of history, $300 of rent in each: the average month has
+    // $300 of rent in it, not $75.
+    const rows = avgSpendByCategory(
+      months.slice(-3).map((m) => spend(m, 300, "Housing")),
+      12,
+      complete,
+    );
+    assert.deepEqual(rows, [{ name: "Housing", value: 300 }]);
+  });
+
+  test("ranks the categories by what they cost per month", () => {
+    const rows = avgSpendByCategory(
+      [
+        spend(months[10], 100, "Groceries"),
+        spend(months[11], 900, "Housing"),
+        spend(months[11], 50, "Groceries"),
+      ],
+      12,
+      complete,
+    );
+    assert.deepEqual(
+      rows.map((r) => r.name),
+      ["Housing", "Groceries"],
+    );
+    assert.equal(rows[0].value, 450);
+    assert.equal(rows[1].value, 75);
+  });
+
+  test("the slices add up to the average-expenses figure beside them", () => {
+    const transactions = [
+      spend(months[10], 100, "Groceries"),
+      spend(months[11], 900, "Housing"),
+      txn({ amount: 2000, type: "income", date: `${months[11]}-01` }),
+    ];
+    const total = avgSpendByCategory(transactions, 12, complete).reduce(
+      (sum, r) => sum + r.value,
+      0,
+    );
+    assert.equal(total, monthlyAverages(transactions, 12).expenses);
+  });
+
+  test("the month in progress is not one of the months averaged", () => {
+    const rows = avgSpendByCategory(
+      [spend(MONTH, 500, "Housing"), spend(months[11], 100, "Housing")],
+      12,
+      complete,
+    );
+    assert.deepEqual(rows, [{ name: "Housing", value: 100 }]);
+  });
+
+  test("nothing recorded is no slices, rather than a division by zero", () => {
+    assert.deepEqual(avgSpendByCategory([], 12, complete), []);
+  });
+});
+
+describe("netWorthSeries", () => {
+  test("an account counts nothing before its own record begins", () => {
+    // The same rule as `netWorthOver`, so the accounts page and the dashboard
+    // do not disagree about the same month.
+    const months = lastMonthKeys(3);
+    const opened = {
+      id: "p",
+      kind: "investment",
+      balance: 900,
+      history: [{ month: months[2], value: 900 }],
+    } as unknown as Parameters<typeof netWorthSeries>[0][number];
+    const series = netWorthSeries([opened], [], 3);
+    assert.equal(series[0].assets, 0);
+    assert.equal(series[1].assets, 0);
+    assert.equal(series[2].assets, 900);
+  });
+});
+
+describe("firstAccountMonth", () => {
+  const acc = (id: string, first: string) =>
+    ({
+      id,
+      kind: "checking",
+      balance: 0,
+      history: [{ month: first, value: 0 }],
+    }) as unknown as Parameters<typeof firstAccountMonth>[0][number];
+
+  test("finds the earliest recorded month across the accounts", () => {
+    assert.equal(firstAccountMonth([acc("a", "2022-06"), acc("b", "2020-02")]), "2020-02");
+  });
+
+  test("says nothing when no account has a history", () => {
+    assert.equal(firstAccountMonth([]), null);
+  });
+});
+
+describe("netWorthOver", () => {
+  const portfolio = [
+    { key: "2020-01", label: "Jan ’20", value: 0, cost: 0 },
+    { key: "2023-01", label: "Jan ’23", value: 1000, cost: 900 },
+    { key: "2026-01", label: "Jan ’26", value: 5000, cost: 3000 },
+  ];
+  const chequing = {
+    id: "c",
+    kind: "checking",
+    balance: 300,
+    history: [
+      { month: "2020-01", value: 100 },
+      { month: "2023-01", value: 200 },
+    ],
+  } as unknown as Parameters<typeof netWorthOver>[0][number];
+  const pension = {
+    id: "p",
+    kind: "investment",
+    balance: 40000,
+    history: [{ month: "2026-01", value: 40000 }],
+  } as unknown as Parameters<typeof netWorthOver>[0][number];
+  const loan = {
+    id: "l",
+    kind: "loan",
+    balance: 50,
+    history: [{ month: "2020-01", value: 500 }],
+  } as unknown as Parameters<typeof netWorthOver>[0][number];
+
+  test("spans exactly the months the portfolio series covers", () => {
+    const series = netWorthOver([chequing], portfolio);
+    assert.deepEqual(series.map((p) => p.key), ["2020-01", "2023-01", "2026-01"]);
+  });
+
+  test("an account is worth nothing before its own record begins", () => {
+    // Holding the first known balance backwards would put a pension opened
+    // this year into years that never had it.
+    const series = netWorthOver([chequing, pension], portfolio);
+    assert.equal(series[0].assets, 100);
+    assert.equal(series[1].assets, 200);
+    assert.equal(series[2].assets, 300 + 40000);
+  });
+
+  test("liabilities come off, and the portfolio comes from the series", () => {
+    const series = netWorthOver([chequing, loan], portfolio);
+    assert.equal(series[0].liabilities, 500);
+    assert.equal(series[0].net, 100 - 500);
+    assert.equal(series[2].portfolio, 5000);
+    // Past the end of both histories, each account holds today's balance.
+    assert.equal(series[2].net, 300 + 5000 - 50);
+  });
+
+  test("the US side of an account belongs only to the current month", () => {
+    const usd = {
+      ...(chequing as unknown as Record<string, unknown>),
+      balanceUSD: 100,
+    } as unknown as Parameters<typeof netWorthOver>[0][number];
+    const series = netWorthOver([usd], portfolio, 1.4);
+    assert.equal(series[0].assets, 100);
+    assert.equal(series[2].assets, 300 + 140);
   });
 });
 
