@@ -107,6 +107,7 @@ export const accountSchema = z.object({
   institution: coercedString("—"),
   kind: enumWithDefault<AccountKind>(ACCOUNT_KINDS, "checking"),
   balance: moneyOrZero,
+  balanceUSD: moneyOrZero,
   history: z.array(monthlyPointSchema).catch([]),
   registration: z
     .enum(REGISTRATIONS as unknown as [Registration, ...Registration[]])

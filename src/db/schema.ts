@@ -33,6 +33,8 @@ export const accounts = pgTable("accounts", {
   institution: text("institution").notNull().default("—"),
   kind: text("kind").notNull(),
   balance: money("balance").notNull().default(0),
+  /** US-dollar cash, kept apart because converting it is a decision, not a fact. */
+  balanceUSD: money("balance_usd").notNull().default(0),
   history: jsonb("history").$type<MonthlyPoint[]>().notNull(),
   position: integer("position").notNull().default(0),
   /** Tax treatment; null for kinds where it does not apply. */

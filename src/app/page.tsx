@@ -52,12 +52,13 @@ export default function DashboardPage() {
   const accounts = useFinance((s) => s.accounts);
   const transactions = useFinance((s) => s.transactions);
   const holdings = useFinance((s) => s.holdings);
+  const usdCadRate = useFinance((s) => s.usdCadRate);
   const [range, setRange] = useState<Range>("12");
   const [addOpen, setAddOpen] = useState(false);
   const [checklistOpen, setChecklistOpen] = useState(false);
 
   const data = useMemo(() => {
-    const nwAll = netWorthSeries(accounts, holdings, 18);
+    const nwAll = netWorthSeries(accounts, holdings, 18, usdCadRate);
     const nw = nwAll.slice(-Number(range));
     const cf = cashflowSeries(transactions, 12);
     const totals = monthTotals(transactions);
@@ -95,7 +96,7 @@ export default function DashboardPage() {
       dividends,
       positions: rows.length,
     };
-  }, [accounts, transactions, holdings, range]);
+  }, [accounts, transactions, holdings, range, usdCadRate]);
 
   if (!ready) return <PageSkeleton />;
 

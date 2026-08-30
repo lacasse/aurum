@@ -53,6 +53,7 @@ export type AccountInput = {
   institution: string;
   kind: Account["kind"];
   balance: number;
+  balanceUSD?: number;
   registration?: Account["registration"];
 };
 
