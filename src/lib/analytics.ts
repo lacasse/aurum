@@ -89,6 +89,10 @@ export function netWorthSeries(
     let assetCents = 0;
     let liabilityCents = 0;
     for (const acc of accounts) {
+      // Nothing recorded yet is nothing held: an account joins the line in the
+      // month its own record starts. See `netWorthOver` for why.
+      const begins = acc.history[0]?.month;
+      if (begins && key < begins) continue;
       /*
        * History is recorded in Canadian dollars and has no second currency in
        * it, so the US side can only be added to the month that is current —
@@ -111,6 +115,60 @@ export function netWorthSeries(
   });
 }
 
+/** The earliest month any account has a recorded balance for. */
+export function firstAccountMonth(accounts: Account[]): string | null {
+  let earliest: string | null = null;
+  for (const acc of accounts) {
+    const first = acc.history[0]?.month;
+    if (first && (earliest === null || first < earliest)) earliest = first;
+  }
+  return earliest;
+}
+
+/**
+ * Net worth for every month a portfolio series covers, however far back it goes.
+ *
+ * The portfolio is passed in rather than derived here because the good
+ * long-run figure comes from recorded month-end values (`allTimeSeries`),
+ * which the caller has to fetch; this adds the accounts around whatever it is
+ * given, so both halves of net worth span the same months.
+ *
+ * An account is worth nothing before its own record begins. Holding its first
+ * known balance backwards — which is right for a gap in the middle of a
+ * history — would draw a pension opened last year as though it had been full
+ * since the chart's first month, and put tens of thousands of dollars into
+ * years that never had them.
+ */
+export function netWorthOver(
+  accounts: Account[],
+  portfolio: readonly PortfolioPoint[],
+  usdCadRate = 1,
+): NetWorthPoint[] {
+  const last = portfolio[portfolio.length - 1]?.key;
+  return portfolio.map((point) => {
+    let assetCents = 0;
+    let liabilityCents = 0;
+    for (const acc of accounts) {
+      const begins = acc.history[0]?.month;
+      if (begins && point.key < begins) continue;
+      // As in `netWorthSeries`: history carries no second currency, so the US
+      // side belongs only to the month it is a fact about.
+      const usd = point.key === last ? (acc.balanceUSD ?? 0) * usdCadRate : 0;
+      const v = toCents(accountValueAt(acc, point.key) + usd);
+      if (isLiability(acc.kind)) liabilityCents += v;
+      else assetCents += v;
+    }
+    return {
+      key: point.key,
+      label: point.label,
+      assets: fromCents(assetCents),
+      liabilities: fromCents(liabilityCents),
+      portfolio: point.value,
+      net: fromCents(assetCents + toCents(point.value) - liabilityCents),
+    };
+  });
+}
+
 export interface CashflowPoint {
   key: string;
   label: string;
@@ -119,8 +177,20 @@ export interface CashflowPoint {
   net: number;
 }
 
-export function cashflowSeries(transactions: Transaction[], n = 12): CashflowPoint[] {
-  const keys = lastMonthKeys(n);
+/**
+ * Income and spending, month by month.
+ *
+ * `end` defaults to the month in progress, but a chart that compares one month
+ * against the next should pass the last complete one: a partial month is drawn
+ * as a short one, and the drop is a calendar artefact rather than anything
+ * that happened.
+ */
+export function cashflowSeries(
+  transactions: Transaction[],
+  n = 12,
+  end = currentMonthKey(),
+): CashflowPoint[] {
+  const keys = lastMonthKeys(n, end);
   const map = new Map<string, { income: number; expenses: number }>();
   for (const k of keys) map.set(k, { income: 0, expenses: 0 });
   for (const t of transactions) {
@@ -157,13 +227,45 @@ export function spendByCategory(
     .sort((a, b) => b.value - a.value);
 }
 
+/**
+ * What a typical month's spending is made of, category by category.
+ *
+ * The same window and the same denominator as `monthlyAverages`, so the slices
+ * add up to the average-expenses figure beside them: months with nothing
+ * recorded are months that did not happen rather than frugal ones, and
+ * averaging over them would halve every slice.
+ */
+export function avgSpendByCategory(
+  transactions: Transaction[],
+  months = 12,
+  end = currentMonthKey(),
+): { name: string; value: number }[] {
+  const keys = new Set(lastMonthKeys(months, end));
+  const totals = new Map<string, number>();
+  const active = new Set<string>();
+  for (const t of transactions) {
+    const key = monthKeyOf(t.date);
+    if (!keys.has(key)) continue;
+    if (t.type !== "income" && t.type !== "expense") continue;
+    active.add(key);
+    if (t.type !== "expense") continue;
+    totals.set(t.category, (totals.get(t.category) ?? 0) + toCents(t.amount));
+  }
+  const n = active.size;
+  if (n === 0) return [];
+  return [...totals.entries()]
+    .map(([name, cents]) => ({ name, value: roundMoney(fromCents(cents) / n) }))
+    .sort((a, b) => b.value - a.value);
+}
+
 /** Monthly totals for each of the given categories (top-N spending). */
 export function stackedSpend(
   transactions: Transaction[],
   categories: string[],
   n = 12,
+  end = currentMonthKey(),
 ): Record<string, number | string>[] {
-  const keys = lastMonthKeys(n);
+  const keys = lastMonthKeys(n, end);
   return keys.map((key) => {
     const cents = new Map<string, number>(categories.map((c) => [c, 0]));
     for (const t of transactions) {
