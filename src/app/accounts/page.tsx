@@ -10,6 +10,7 @@ import {
   Landmark,
   Pencil,
   PiggyBank,
+  ShieldCheck,
   Plus,
   Trash2,
   TrendingUp,
@@ -29,6 +30,7 @@ import {
   Account,
   AccountKind,
   isLiability,
+  isPension,
 } from "@/lib/types";
 
 const KIND_ICON: Record<AccountKind, typeof Wallet> = {
@@ -37,6 +39,9 @@ const KIND_ICON: Record<AccountKind, typeof Wallet> = {
   cash: Banknote,
   investment: TrendingUp,
   crypto: Bitcoin,
+  // A promise rather than a pot of money: the icon says "guaranteed", not
+  // "invested".
+  pension: ShieldCheck,
   property: Home,
   credit: CreditCard,
   // Not a car: the loans here are student and personal debt, and an icon that
@@ -59,17 +64,23 @@ export default function AccountsPage() {
     const series = netWorthSeries(accounts, holdings, 18, usdCadRate);
     let assets = 0;
     let liabilities = 0;
+    let pension = 0;
     for (const a of accounts) {
       const value = accountCadBalance(a, usdCadRate);
       if (isLiability(a.kind)) liabilities += value;
+      else if (isPension(a.kind)) pension += value;
       else assets += value;
     }
-    return { series, assets, liabilities };
+    return { series, assets, liabilities, pension };
   }, [accounts, holdings, usdCadRate]);
 
   if (!ready) return <PageSkeleton />;
 
-  const netWorth = data.assets + (data.series[data.series.length - 1]?.portfolio ?? 0) - data.liabilities;
+  const portfolio = data.series[data.series.length - 1]?.portfolio ?? 0;
+  const netWorth = data.assets + data.pension + portfolio - data.liabilities;
+  // Everything you could actually reach. The pension is yours and counts in
+  // net worth, but it cannot pay a bill until you leave the plan.
+  const liquid = netWorth - data.pension;
   const ratio = data.assets > 0 ? (data.liabilities / data.assets) * 100 : 0;
 
   const accountDelta1m = (acc: Account): number | undefined => {
@@ -99,8 +110,13 @@ export default function AccountsPage() {
       }
     >
       <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Total assets" value={fmtCAD(data.assets)} icon={<Landmark size={16} />} />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <StatCard
+            label="Total assets"
+            value={fmtCAD(data.assets)}
+            deltaLabel="cash and balances, excluding the pension"
+            icon={<Landmark size={16} />}
+          />
           <StatCard
             label="Total liabilities"
             value={fmtCAD(data.liabilities)}
@@ -111,7 +127,7 @@ export default function AccountsPage() {
           <StatCard
             label="Net worth"
             value={fmtCAD(netWorth)}
-            deltaLabel={`incl. ${fmtCAD(data.series[data.series.length - 1]?.portfolio ?? 0)} portfolio`}
+            deltaLabel={`${fmtCAD(liquid)} of it reachable today`}
             icon={<PiggyBank size={16} />}
             spark={data.series.map((p) => ({ v: p.net }))}
             sparkKey="v"
@@ -119,10 +135,21 @@ export default function AccountsPage() {
           />
           <StatCard
             label="Portfolio"
-            value={fmtCAD(data.series[data.series.length - 1]?.portfolio ?? 0)}
+            value={fmtCAD(portfolio)}
             deltaLabel="tracked separately on Investments"
             icon={<Landmark size={16} />}
           />
+          {data.pension > 0 ? (
+            <StatCard
+              label="Pension"
+              value={fmtCAD(data.pension)}
+              deltaLabel="transfer value · payable only on leaving"
+              icon={<ShieldCheck size={16} />}
+              spark={data.series.map((p) => ({ v: p.pension }))}
+              sparkKey="v"
+              sparkColor="#f59e0b"
+            />
+          ) : null}
         </div>
 
         <Card>
@@ -137,6 +164,12 @@ export default function AccountsPage() {
               stacked
               series={[
                 { key: "assets", name: "Assets", color: "#8b5cf6" },
+                /*
+                 * Its own band rather than a share of the first one. Stacked
+                 * in with chequing it was nine tenths of "assets", and the
+                 * chart said there was $41,118 to hand when there was $3,628.
+                 */
+                { key: "pension", name: "Pension", color: "#f59e0b" },
                 { key: "liabilities", name: "Liabilities", color: "#fb7185" },
               ]}
               height={280}

@@ -6,6 +6,7 @@ export type AccountKind =
   | "cash"
   | "investment"
   | "crypto"
+  | "pension"
   | "property"
   | "credit"
   | "loan";
@@ -204,6 +205,7 @@ export const ACCOUNT_KINDS: AccountKind[] = [
   "cash",
   "investment",
   "crypto",
+  "pension",
   "property",
   "credit",
   "loan",
@@ -217,6 +219,7 @@ export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
   cash: "Cash",
   investment: "Investment",
   crypto: "Crypto",
+  pension: "Pension",
   property: "Property",
   credit: "Credit Card",
   loan: "Loan",
@@ -229,6 +232,24 @@ export const ACCOUNT_KIND_LABELS: Record<AccountKind, string> = {
  * are valued from the holdings.
  */
 export const INVESTMENT_KINDS: AccountKind[] = ["investment", "crypto"];
+
+/**
+ * A defined benefit pension, which is not an account holding money.
+ *
+ * What it holds is a promise: an income stream earned by service, whose only
+ * cash figure is the transfer value — the lump sum payable if you left, which
+ * moves with interest rates as much as with what you put in. That figure
+ * belongs in net worth, since it is yours, but it is not spendable and it must
+ * not be stacked in beside chequing: on this record the pension is nine
+ * tenths of what the balance sheet called "assets", which made $3,628 of
+ * actual cash read as $41,118.
+ *
+ * So it is its own kind, drawn in its own band, and left out of every figure
+ * that means "money you could use".
+ */
+export function isPension(kind: AccountKind): boolean {
+  return kind === "pension";
+}
 
 /**
  * Registration is meaningless for debts and for property, so it is only

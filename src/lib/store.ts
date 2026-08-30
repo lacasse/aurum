@@ -16,7 +16,8 @@ import {
 } from "./types";
 import { generateSampleData } from "./sample";
 import { HISTORY_MONTHS } from "./types";
-import { currentMonthKey, lastMonthKeys } from "./format";
+import { currentMonthKey } from "./format";
+import { withBalanceRecorded } from "./analytics";
 import { api } from "./api";
 
 export function uid(): string {
@@ -178,20 +179,6 @@ function synthHistory(ticker: string, price: number): number[] {
   return out;
 }
 
-/** Rebuild an 18-month series for an account, backfilling gaps and pinning "now" to its balance. */
-function extendAccountHistory(acc: Account): Account {
-  const months = lastMonthKeys(HISTORY_MONTHS);
-  const byMonth = new Map(acc.history.map((p) => [p.month, p.value]));
-  const first = acc.history.length > 0 ? acc.history[0].value : acc.balance;
-  const history = months.map((m) => ({
-    month: m,
-    value: byMonth.get(m) ?? first,
-  }));
-  const curKey = months[months.length - 1];
-  history[history.length - 1] = { month: curKey, value: acc.balance };
-  return { ...acc, history };
-}
-
 const report = (err: unknown) => console.error("[sync]", err);
 
 /** Convert a value to CAD based on currency and current rate. */
@@ -348,7 +335,7 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
         set((s) => ({
           accounts: s.accounts.map((a) => {
             if (a.id !== id) return a;
-            updated = extendAccountHistory({
+            updated = withBalanceRecorded({
               ...a,
               name: input.name,
               institution: input.institution,

@@ -8,6 +8,7 @@ import {
   Currency,
   Holding,
   isLiability,
+  isPension,
   Transaction,
 } from "./types";
 import {
@@ -30,9 +31,12 @@ import {
 export interface NetWorthPoint {
   key: string;
   label: string;
+  /** Cash and balances you could actually draw on. Excludes the pension. */
   assets: number;
   liabilities: number;
   portfolio: number;
+  /** Defined benefit pensions, at their transfer value. Yours, but not money. */
+  pension: number;
   net: number;
 }
 
@@ -88,6 +92,7 @@ export function netWorthSeries(
   return keys.map((key, i) => {
     let assetCents = 0;
     let liabilityCents = 0;
+    let pensionCents = 0;
     for (const acc of accounts) {
       // Nothing recorded yet is nothing held: an account joins the line in the
       // month its own record starts. See `netWorthOver` for why.
@@ -101,6 +106,7 @@ export function netWorthSeries(
       const usd = key === last ? (acc.balanceUSD ?? 0) * usdCadRate : 0;
       const v = toCents(accountValueAt(acc, key) + usd);
       if (isLiability(acc.kind)) liabilityCents += v;
+      else if (isPension(acc.kind)) pensionCents += v;
       else assetCents += v;
     }
     const portfolio = portfolioValueAt(holdings, keys.length - 1 - i);
@@ -110,9 +116,29 @@ export function netWorthSeries(
       assets: fromCents(assetCents),
       liabilities: fromCents(liabilityCents),
       portfolio,
-      net: fromCents(assetCents + toCents(portfolio) - liabilityCents),
+      pension: fromCents(pensionCents),
+      net: fromCents(assetCents + pensionCents + toCents(portfolio) - liabilityCents),
     };
   });
+}
+
+/**
+ * An account with its current balance recorded against a month.
+ *
+ * Editing a balance is a statement about now, so it writes one month and
+ * leaves the rest of the record alone. The version this replaced rebuilt the
+ * series as the last eighteen months, backfilling anything missing with the
+ * earliest value on record — so a single edit threw away the six years the
+ * chequing account carries and invented five months that never happened.
+ */
+export function withBalanceRecorded(
+  acc: Account,
+  month = currentMonthKey(),
+): Account {
+  const history = acc.history.filter((p) => p.month !== month);
+  history.push({ month, value: acc.balance });
+  history.sort((a, b) => a.month.localeCompare(b.month));
+  return { ...acc, history };
 }
 
 /** The earliest month any account has a recorded balance for. */
@@ -148,6 +174,7 @@ export function netWorthOver(
   return portfolio.map((point) => {
     let assetCents = 0;
     let liabilityCents = 0;
+    let pensionCents = 0;
     for (const acc of accounts) {
       const begins = acc.history[0]?.month;
       if (begins && point.key < begins) continue;
@@ -156,6 +183,7 @@ export function netWorthOver(
       const usd = point.key === last ? (acc.balanceUSD ?? 0) * usdCadRate : 0;
       const v = toCents(accountValueAt(acc, point.key) + usd);
       if (isLiability(acc.kind)) liabilityCents += v;
+      else if (isPension(acc.kind)) pensionCents += v;
       else assetCents += v;
     }
     return {
@@ -164,7 +192,10 @@ export function netWorthOver(
       assets: fromCents(assetCents),
       liabilities: fromCents(liabilityCents),
       portfolio: point.value,
-      net: fromCents(assetCents + toCents(point.value) - liabilityCents),
+      pension: fromCents(pensionCents),
+      net: fromCents(
+        assetCents + pensionCents + toCents(point.value) - liabilityCents,
+      ),
     };
   });
 }

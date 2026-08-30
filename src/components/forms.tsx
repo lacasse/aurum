@@ -25,6 +25,7 @@ import {
   Transaction,
   TxnType,
   isInvestmentAccount,
+  isPension,
   supportsRegistration,
 } from "@/lib/types";
 import { todayISO } from "@/lib/format";
@@ -393,11 +394,19 @@ function AccountFormInner({
           </Field>
         ) : null}
         <Field
-          label={isInvestmentAccount(kind) ? "Cash balance (CAD)" : "Current balance"}
+          label={
+            isPension(kind)
+              ? "Transfer value"
+              : isInvestmentAccount(kind)
+                ? "Cash balance (CAD)"
+                : "Current balance"
+          }
           hint={
-            isInvestmentAccount(kind)
-              ? "Uninvested cash only — holdings are valued separately"
-              : "For credit cards & loans, enter the amount owed"
+            isPension(kind)
+              ? "The lump sum the plan would pay out — update it at month end"
+              : isInvestmentAccount(kind)
+                ? "Uninvested cash only — holdings are valued separately"
+                : "For credit cards & loans, enter the amount owed"
           }
         >
           <Input
