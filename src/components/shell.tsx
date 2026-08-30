@@ -6,6 +6,7 @@ import { useTheme } from "next-themes";
 import { useState } from "react";
 import {
   ArrowLeftRight,
+  BookOpen,
   Landmark,
   LayoutDashboard,
   Menu,
@@ -31,6 +32,7 @@ const NAV = [
   { href: "/budgets", label: "Budgets", icon: Target },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/import", label: "Import", icon: Upload },
+  { href: "/guide", label: "How this works", icon: BookOpen },
 ] as const;
 
 function ThemeToggle() {

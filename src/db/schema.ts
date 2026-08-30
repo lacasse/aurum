@@ -39,6 +39,16 @@ export const accounts = pgTable("accounts", {
   position: integer("position").notNull().default(0),
   /** Tax treatment; null for kinds where it does not apply. */
   registration: text("registration"),
+  /**
+   * A defined benefit pension's own statement: the annual pension earned so
+   * far, and the service that earned it. Null everywhere else.
+   */
+  pensionAnnual: money("pension_annual"),
+  pensionService: numeric("pension_service", {
+    precision: 8,
+    scale: 2,
+    mode: "number",
+  }),
 });
 
 export const transactions = pgTable("transactions", {
