@@ -1280,6 +1280,58 @@ describe("time-weighted return", () => {
   });
 });
 
+describe("a trade dated after the valuation date", () => {
+  const flows = [
+    { date: "2025-01-15", kind: "buy" as const, amount: 10000, shares: 250 },
+    { date: "2026-01-20", kind: "buy" as const, amount: 8000, shares: 180 },
+  ];
+  const holding = {
+    id: "h",
+    ticker: "XEQT.TO",
+    name: "XEQT",
+    shares: 430,
+    avgCost: 41.86,
+    avgCostCAD: 41.86,
+    price: 45.92,
+    priceCAD: 45.92,
+    currency: "CAD",
+    accountId: "a1",
+    dividendsReceived: 0,
+    dividendsReceivedCAD: 0,
+    history: [45.92],
+    historyCAD: [45.92],
+    flows,
+  } as unknown as Holding;
+
+  /*
+   * The closing value used to be dated the fifteenth of the current month, so
+   * anything bought after it left the series ending on money going out and
+   * never coming back — which has no rate at all. XEQT was bought on the 17th
+   * and showed no return for the rest of the month.
+   */
+  test("still has a return on the position", () => {
+    const [row] = consolidateHoldings([holding], "2026-01-15");
+    assert.notEqual(row.mwrr, null, "the value is dated to the trade, not before it");
+  });
+
+  test("and on the portfolio holding it", () => {
+    assert.notEqual(portfolioMwrr([holding], 19745.6, "2026-01-15"), null);
+  });
+
+  test("the figure matches valuing it on the day of that trade", () => {
+    const clamped = portfolioMwrr([holding], 19745.6, "2026-01-15");
+    assert.equal(clamped, portfolioMwrr([holding], 19745.6, "2026-01-20"));
+  });
+
+  test("a later valuation date is still used as given", () => {
+    // Only the clamp is new: asking for a date after every flow works as it
+    // always did, and gives a different answer, since time has passed.
+    const later = portfolioMwrr([holding], 19745.6, "2026-06-30");
+    assert.notEqual(later, null);
+    assert.notEqual(later, portfolioMwrr([holding], 19745.6, "2026-01-20"));
+  });
+});
+
 describe("portfolioMwrr", () => {
   const holding = (flows: unknown[]): Holding => ({ ticker: "A", flows } as unknown as Holding);
 
