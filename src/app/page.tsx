@@ -72,7 +72,6 @@ export default function DashboardPage() {
   const holdings = useFinance((s) => s.holdings);
   const usdCadRate = useFinance((s) => s.usdCadRate);
   const [range, setRange] = useState<Range>("all");
-  const [portRange, setPortRange] = useState<Range>("all");
   const [addOpen, setAddOpen] = useState(false);
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [snapshots, setSnapshots] = useState<SnapshotHistory>({});
@@ -146,19 +145,21 @@ export default function DashboardPage() {
       through,
     ) as unknown as Record<string, unknown>[];
     /*
-     * The portfolio over the same record as net worth. It used to be capped
-     * at the eighteen months of prices the holdings carry; the recorded
-     * month-end values reach back to the first one, and the cost line with
-     * them, replayed from the trades month by month.
+     * Net worth and the portfolio on one set of months.
+     *
+     * They were two charts, and the second was mostly a redrawing of the
+     * first: the portfolio is four fifths of net worth, so the two lines had
+     * the same shape and the same peaks a card apart. Together they answer
+     * the question the pair was really posing — how much of this is the
+     * market, and how much is everything else — which is the gap between the
+     * lines. The cost basis runs under both, so the distance from it is the
+     * gain.
      */
-    /*
-     * ...but starting where the portfolio does. The record as a whole begins
-     * with the first account balance, which is over a year before the first
-     * holding, and those months are not a flat portfolio — they are months
-     * with no portfolio to draw.
-     */
-    const firstHeld = portAll.findIndex((p) => p.value > 0 || p.cost > 0);
-    const port = firstHeld > 0 ? portAll.slice(firstHeld) : portAll;
+    const port = portAll.map((p, i) => ({
+      ...nwAll[i],
+      value: p.value,
+      cost: p.cost,
+    }));
     const avg = monthlyAverages(transactions, 12);
     /*
      * What net worth is made of. The portfolio is the largest part of it and
@@ -182,17 +183,12 @@ export default function DashboardPage() {
       invested,
       market,
       dividends,
-      positions: rows.length,
     };
   }, [accounts, transactions, holdings, snapshots, usdCadRate]);
 
   const nw = useMemo(
-    () => (range === "all" ? data.nwAll : data.nwAll.slice(-Number(range))),
-    [data.nwAll, range],
-  );
-  const port = useMemo(
-    () => (portRange === "all" ? data.port : data.port.slice(-Number(portRange))),
-    [data.port, portRange],
+    () => (range === "all" ? data.port : data.port.slice(-Number(range))),
+    [data.port, range],
   );
 
   if (!ready) return <PageSkeleton />;
@@ -235,7 +231,7 @@ export default function DashboardPage() {
         <SectionHeading title="Net worth" note="what you own, as it stands today" />
 
         {/* What net worth is made of */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Net Worth"
             value={fmtCAD(nwLast.net)}
@@ -265,13 +261,6 @@ export default function DashboardPage() {
             icon={<TrendingUp size={16} />}
           />
           <StatCard
-            label="Invested"
-            value={fmtCAD(data.invested)}
-            deltaValue={`${data.positions} positions`}
-            deltaLabel="cost basis"
-            icon={<Coins size={16} />}
-          />
-          <StatCard
             label="Cash and accounts"
             value={fmtCAD(nwLast.assets)}
             deltaLabel="balances you can draw on"
@@ -283,47 +272,15 @@ export default function DashboardPage() {
           />
         </div>
 
-        {/* The whole record */}
-        <Card>
-          <CardHeader
-            title="Net worth over time"
-            subtitle={
-              nwLast.pension > 0
-                ? `Assets + portfolio + pension − liabilities · ${fmtCAD(nwLast.assets)} + ${fmtCAD(nwLast.portfolio)} + ${fmtCAD(nwLast.pension)} − ${fmtCAD(nwLast.liabilities)}`
-                : `Assets + portfolio − liabilities · ${fmtCAD(nwLast.assets)} + ${fmtCAD(nwLast.portfolio)} − ${fmtCAD(nwLast.liabilities)}`
-            }
-            action={
-              <Segmented<Range>
-                options={[
-                  { value: "12", label: "1Y" },
-                  { value: "60", label: "5Y" },
-                  { value: "all", label: "All" },
-                ]}
-                value={range}
-                onChange={setRange}
-              />
-            }
-          />
-          <div className="px-3 pb-4">
-            <SeriesChart
-              data={nw as unknown as Record<string, unknown>[]}
-              xKey="label"
-              series={[{ key: "net", name: "Net worth", color: "#8b5cf6" }]}
-              height={300}
-              yFmt={fmtCompact}
-            />
-          </div>
-        </Card>
-
-        {/* Portfolio + where the balances sit */}
+        {/* The whole record, in one chart */}
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
             <CardHeader
-              title="Investment portfolio"
+              title="Net worth and portfolio"
               subtitle={
-                holdings.length === 0
-                  ? "Add holdings to see growth"
-                  : `Market value vs cost basis · ${fmtCAD(portLast.value)} invested`
+                nwLast.pension > 0
+                  ? `${fmtCAD(nwLast.assets)} cash + ${fmtCAD(nwLast.portfolio)} portfolio + ${fmtCAD(nwLast.pension)} pension − ${fmtCAD(nwLast.liabilities)} debt`
+                  : `${fmtCAD(nwLast.assets)} cash + ${fmtCAD(nwLast.portfolio)} portfolio − ${fmtCAD(nwLast.liabilities)} debt`
               }
               action={
                 <div className="flex items-center gap-2">
@@ -333,8 +290,8 @@ export default function DashboardPage() {
                       { value: "60", label: "5Y" },
                       { value: "all", label: "All" },
                     ]}
-                    value={portRange}
-                    onChange={setPortRange}
+                    value={range}
+                    onChange={setRange}
                   />
                   <Link href="/investments">
                     <Button variant="ghost" size="sm">
@@ -345,11 +302,19 @@ export default function DashboardPage() {
               }
             />
             <div className="px-3 pb-4">
+              {/*
+                * Three lines that only mean something together: what you are
+                * worth, how much of it is the market, and what the market
+                * cost you. The gap between the first two is everything that
+                * is not the portfolio; the gap between the last two is the
+                * gain.
+                */}
               <SeriesChart
-                data={port as unknown as Record<string, unknown>[]}
+                data={nw as unknown as Record<string, unknown>[]}
                 xKey="label"
                 series={[
-                  { key: "value", name: "Market value", color: "#22d3ee" },
+                  { key: "net", name: "Net worth", color: "#8b5cf6" },
+                  { key: "value", name: "Portfolio", color: "#22d3ee" },
                   {
                     key: "cost",
                     name: "Cost basis",
@@ -358,7 +323,7 @@ export default function DashboardPage() {
                     dashed: true,
                   },
                 ]}
-                height={280}
+                height={320}
                 yFmt={fmtCompact}
               />
             </div>
