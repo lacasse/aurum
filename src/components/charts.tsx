@@ -358,15 +358,30 @@ const ASSET_HUES: Record<string, { h: number; s: number }> = {
 
 const FALLBACK_HUE = { h: 340, s: 60 };
 
-/** Shade `i` of `n` within a group, walking light to dark inside a safe band. */
+/**
+ * Shade `i` of `n` within a group.
+ *
+ * Two things keep neighbouring slices apart. The band is wide — a light end
+ * that still reads on the light theme's white card, a dark end that still
+ * separates from the dark one — and the rungs are handed out from alternating
+ * halves of it rather than in order, so consecutive slices on the arc are
+ * never consecutive steps of the ramp. With eight holdings in a class that is
+ * the difference between a 5-point gap between neighbours and a 19-point one.
+ *
+ * Saturation climbs as lightness falls, which stops the dark end going muddy.
+ */
 export function assetShade(assetClass: string, i: number, n: number): string {
   const { h, s } = ASSET_HUES[assetClass] ?? FALLBACK_HUE;
-  // The band is deliberately narrow at the top: a lighter shade than this
-  // washes out against the light theme's white card.
-  const top = 64;
-  const bottom = 38;
-  const l = n <= 1 ? 54 : top - ((top - bottom) * i) / (n - 1);
-  return `hsl(${h} ${s}% ${l}%)`;
+  if (n <= 1) return `hsl(${h} ${s}% 54%)`;
+
+  const top = 68;
+  const bottom = 26;
+  // 0, ⌈n/2⌉, 1, ⌈n/2⌉+1, … — the first half interleaved with the second.
+  const half = Math.ceil(n / 2);
+  const rung = i % 2 === 0 ? i / 2 : half + (i - 1) / 2;
+  const t = rung / (n - 1);
+  const l = top - (top - bottom) * t;
+  return `hsl(${h} ${Math.round(s + t * 12)}% ${Math.round(l)}%)`;
 }
 
 export type ExposureDatum = {
