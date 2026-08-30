@@ -198,6 +198,8 @@ export const holdingSchema = z
           kind: z.enum(["buy", "sell", "dividend"]),
           amount: z.coerce.number().finite(),
           shares: z.coerce.number().finite(),
+          // Set on a staking reward whose value on the day is still unknown.
+          awaitingPrice: z.boolean().optional(),
         }),
       )
       .catch([]),

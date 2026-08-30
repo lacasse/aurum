@@ -127,6 +127,22 @@ export interface CashFlow {
   kind: "buy" | "sell" | "dividend";
   amount: number; // CAD, unsigned
   shares: number;
+  /**
+   * Units that arrived as a staking reward whose value on the day is not yet
+   * known.
+   *
+   * A reward is two things at once: income equal to what the tokens were worth
+   * when they landed, and an acquisition of those tokens at that same value.
+   * The second half is what keeps the cost base right — the amount is taxed
+   * once as income, and because it is also the cost, it is not taxed again as
+   * a gain on the way out.
+   *
+   * Recording the units at nothing drops the income and turns the whole future
+   * disposal into a gain. So a reward with no price yet is written as the
+   * acquisition alone, flagged here, and listed for the figure to be filled in
+   * rather than left to look like a free lunch.
+   */
+  awaitingPrice?: boolean;
 }
 
 export interface Holding {
