@@ -1,3 +1,5 @@
+import { currentMonthKey } from "./format";
+
 export type TxnType = "income" | "expense" | "transfer";
 
 export type AccountKind =
@@ -44,6 +46,25 @@ export interface Account {
   history: MonthlyPoint[];
   /** Tax treatment. Undefined for kinds where it does not apply. */
   registration?: Registration;
+}
+
+/**
+ * An account with its current balance recorded against a month.
+ *
+ * Editing a balance is a statement about now, so it writes one month and
+ * leaves the rest of the record alone. The version this replaced rebuilt the
+ * series as the last eighteen months, backfilling anything missing with the
+ * earliest value on record — so a single edit threw away the six years the
+ * chequing account carries and invented five months that never happened.
+ */
+export function withBalanceRecorded(
+  acc: Account,
+  month = currentMonthKey(),
+): Account {
+  const history = acc.history.filter((p) => p.month !== month);
+  history.push({ month, value: acc.balance });
+  history.sort((a, b) => a.month.localeCompare(b.month));
+  return { ...acc, history };
 }
 
 /**

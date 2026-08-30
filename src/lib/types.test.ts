@@ -8,6 +8,7 @@ import {
   supportsRegistration,
   touchesAccount,
   transactionEndpoints,
+  withBalanceRecorded,
 } from "./types";
 import type { Transaction } from "./types";
 
@@ -140,5 +141,68 @@ describe("transaction sides", () => {
       "a2",
     );
     assert.equal(primaryAccountId(transfer), "a1");
+  });
+});
+
+describe("withBalanceRecorded", () => {
+  const acc = {
+    id: "c",
+    kind: "checking",
+    balance: 900,
+    history: [
+      { month: "2020-02", value: 100 },
+      { month: "2024-06", value: 400 },
+    ],
+  } as unknown as Parameters<typeof withBalanceRecorded>[0];
+
+  test("keeps every month already recorded", () => {
+    // Editing a balance used to rebuild the series as the last eighteen
+    // months, which threw away six years of chequing history in one save.
+    const out = withBalanceRecorded(acc, "2026-08");
+    assert.deepEqual(out.history, [
+      { month: "2020-02", value: 100 },
+      { month: "2024-06", value: 400 },
+      { month: "2026-08", value: 900 },
+    ]);
+  });
+
+  test("a second edit in the same month replaces it rather than repeating it", () => {
+    const once = withBalanceRecorded(acc, "2026-08");
+    const twice = withBalanceRecorded({ ...once, balance: 950 }, "2026-08");
+    assert.equal(twice.history.length, 3);
+    assert.deepEqual(twice.history[2], { month: "2026-08", value: 950 });
+  });
+
+  test("invents no months for the gap in between", () => {
+    const out = withBalanceRecorded(acc, "2026-08");
+    assert.equal(out.history.some((p) => p.month === "2021-01"), false);
+  });
+});
+
+describe("withBalanceRecorded · the month a transaction lands in", () => {
+  const acc = {
+    id: "c",
+    kind: "checking",
+    balance: 3628.38,
+    history: [
+      { month: "2026-06", value: 3000 },
+      { month: "2026-07", value: 3200 },
+    ],
+  } as unknown as Parameters<typeof withBalanceRecorded>[0];
+
+  test("a closed month keeps the balance it closed at", () => {
+    // Both the store and the server used to write the last element of the
+    // array, on the assumption that it was the current month. With July the
+    // last month on record, August's spending landed on July's close — a
+    // month already finished, and already drawn on the net worth chart.
+    const out = withBalanceRecorded(acc, "2026-08");
+    assert.equal(out.history.find((p) => p.month === "2026-07")?.value, 3200);
+    assert.equal(out.history.find((p) => p.month === "2026-08")?.value, 3628.38);
+  });
+
+  test("an account with no history at all starts one", () => {
+    const fresh = { ...acc, history: [] };
+    const out = withBalanceRecorded(fresh, "2026-08");
+    assert.deepEqual(out.history, [{ month: "2026-08", value: 3628.38 }]);
   });
 });

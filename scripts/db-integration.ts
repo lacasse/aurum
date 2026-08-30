@@ -40,6 +40,7 @@ async function main() {
     const { ensureDb } = await import("../src/db/init");
     const repo = await import("../src/db/repo");
     const { generateSampleData } = await import("../src/lib/sample");
+    const { currentMonthKey } = await import("../src/lib/format");
 
     console.log("migrations + seed");
     await ensureDb();
@@ -406,6 +407,51 @@ async function main() {
     expect(
       state.accounts.find((a) => a.id === "test-acc-1")?.registration === "RRSP",
       "registration can be changed",
+    );
+
+    /*
+     * A transaction records against the month it is entered in, and leaves a
+     * closed month alone. Both sides of this used to write the last element of
+     * the history array on the assumption that it was the current month: with
+     * July the last month on record, August's spending overwrote July's close.
+     */
+    await repo.insertAccount(
+      {
+        id: "test-acc-months",
+        name: "History Account",
+        institution: "Test Bank",
+        kind: "checking",
+        balance: 1000,
+        history: [
+          { month: "2020-02", value: 100 },
+          { month: "2026-07", value: 1000 },
+        ],
+      },
+      98,
+    );
+    await repo.insertTransaction({
+      id: "test-txn-months",
+      date: `${currentMonthKey()}-15`,
+      type: "expense",
+      amount: 250,
+      category: "Groceries",
+      sourceAccountId: "test-acc-months",
+      payee: "Market",
+    });
+    state = await repo.getState();
+    const withMonths = state.accounts.find((a) => a.id === "test-acc-months");
+    expect(withMonths?.balance === 750, "the balance moved");
+    expect(
+      withMonths?.history.find((p) => p.month === "2026-07")?.value === 1000,
+      "a closed month keeps the balance it closed at",
+    );
+    expect(
+      withMonths?.history.find((p) => p.month === currentMonthKey())?.value === 750,
+      "the current month is what got recorded",
+    );
+    expect(
+      withMonths?.history.find((p) => p.month === "2020-02")?.value === 100,
+      "the oldest month is still there — nothing was rebuilt",
     );
 
     // Crypto accounts hold positions like a brokerage does.

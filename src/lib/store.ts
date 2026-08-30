@@ -13,11 +13,11 @@ import {
   RecurringRule,
   Transaction,
   balanceDelta,
+  withBalanceRecorded,
 } from "./types";
 import { generateSampleData } from "./sample";
 import { HISTORY_MONTHS } from "./types";
 import { currentMonthKey } from "./format";
-import { withBalanceRecorded } from "./analytics";
 import { api } from "./api";
 
 export function uid(): string {
@@ -147,11 +147,13 @@ function applyTxn(accounts: Account[], txn: Transaction, sign: 1 | -1): Account[
     const balance = round2(
       acc.balance + balanceDelta(acc.kind, side, txn.amount) * sign,
     );
-    const history = acc.history.slice();
-    if (history.length > 0) {
-      history[history.length - 1] = { ...history[history.length - 1], value: balance };
-    }
-    return { ...acc, balance, history };
+    /*
+     * Against the current month, by name. Writing to the last element assumed
+     * it was this month, and it usually is not: with July the last month on
+     * record, a transaction entered in August rewrote July's closing balance
+     * — a month already finished, already drawn on the net worth chart.
+     */
+    return withBalanceRecorded({ ...acc, balance });
   });
 }
 
@@ -361,14 +363,7 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
           accounts: s.accounts.map((a) => {
             if (a.id !== accountId) return a;
             const balance = round2(a.balance + delta);
-            const history = a.history.slice();
-            if (history.length > 0) {
-              history[history.length - 1] = {
-                ...history[history.length - 1],
-                value: balance,
-              };
-            }
-            updated = { ...a, balance, history };
+            updated = withBalanceRecorded({ ...a, balance });
             return updated;
           }),
         }));

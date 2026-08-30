@@ -25,7 +25,6 @@ import {
   avgSpendByCategory,
   firstAccountMonth,
   netWorthOver,
-  withBalanceRecorded,
   netWorthSeries,
 } from "./analytics";
 import { currentMonthKey, lastCompleteMonthKey, lastMonthKeys } from "./format";
@@ -223,41 +222,6 @@ describe("netWorthSeries", () => {
     assert.equal(series[0].assets, 0);
     assert.equal(series[1].assets, 0);
     assert.equal(series[2].assets, 900);
-  });
-});
-
-describe("withBalanceRecorded", () => {
-  const acc = {
-    id: "c",
-    kind: "checking",
-    balance: 900,
-    history: [
-      { month: "2020-02", value: 100 },
-      { month: "2024-06", value: 400 },
-    ],
-  } as unknown as Parameters<typeof withBalanceRecorded>[0];
-
-  test("keeps every month already recorded", () => {
-    // Editing a balance used to rebuild the series as the last eighteen
-    // months, which threw away six years of chequing history in one save.
-    const out = withBalanceRecorded(acc, "2026-08");
-    assert.deepEqual(out.history, [
-      { month: "2020-02", value: 100 },
-      { month: "2024-06", value: 400 },
-      { month: "2026-08", value: 900 },
-    ]);
-  });
-
-  test("a second edit in the same month replaces it rather than repeating it", () => {
-    const once = withBalanceRecorded(acc, "2026-08");
-    const twice = withBalanceRecorded({ ...once, balance: 950 }, "2026-08");
-    assert.equal(twice.history.length, 3);
-    assert.deepEqual(twice.history[2], { month: "2026-08", value: 950 });
-  });
-
-  test("invents no months for the gap in between", () => {
-    const out = withBalanceRecorded(acc, "2026-08");
-    assert.equal(out.history.some((p) => p.month === "2021-01"), false);
   });
 });
 
