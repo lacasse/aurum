@@ -273,6 +273,18 @@ export default function InvestmentsPage() {
 
   useEffect(() => {
     mountedRef.current = true;
+    /*
+     * Nothing is priced until the server's holdings have landed. The store
+     * starts on the bundled sample portfolio, and this effect runs before the
+     * skeleton gives way to the page — so without the guard the first poll
+     * asked the provider to quote VTI, AAPL and the rest of the demo data,
+     * spending a strictly limited daily allowance on securities nobody owns.
+     */
+    if (!ready) {
+      return () => {
+        mountedRef.current = false;
+      };
+    }
     // Defer initial fetch to avoid setState synchronously in effect body
     const timer = setTimeout(refreshPrices, 0);
     const id = setInterval(refreshPrices, POLL_MS);
@@ -281,7 +293,7 @@ export default function InvestmentsPage() {
       clearTimeout(timer);
       clearInterval(id);
     };
-  }, [refreshPrices]);
+  }, [ready, refreshPrices]);
 
   /*
    * Closed positions are priced once, the first time their section is opened.
