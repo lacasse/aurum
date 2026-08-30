@@ -18,9 +18,9 @@ import {
   parseCsvFile,
   txnKey,
 } from "@/lib/csv";
-import { sidesFor, type MonthlySnapshot } from "@/lib/types";
+import { isPension, sidesFor, type MonthlySnapshot } from "@/lib/types";
 
-type Step = "income" | "import" | "trades" | "snapshot";
+type Step = "income" | "import" | "trades" | "pension" | "snapshot";
 
 const INCOME_BOXES = [
   { key: "netPay", label: "Net pay", placeholder: "0.00" },
@@ -365,7 +365,7 @@ function TradesStep({ onNext }: { onNext: () => void }) {
 
 /* ---------- Step 4: Portfolio Snapshot ---------- */
 
-function SnapshotStep({ onComplete }: { onComplete: () => void }) {
+function SnapshotStep({ number, onComplete }: { number: number; onComplete: () => void }) {
   const holdings = useFinance((s) => s.holdings);
   const loadSnapshots = useFinance((s) => s.loadSnapshots);
   const saveSnapshots = useFinance((s) => s.saveSnapshots);
@@ -436,7 +436,7 @@ function SnapshotStep({ onComplete }: { onComplete: () => void }) {
   return (
     <Card className="p-6">
       <h3 className="text-sm font-semibold">
-        Step 4 · Portfolio snapshot
+        Step {number} · Portfolio snapshot
       </h3>
       <p className="mt-1 text-xs text-ink-faint">
         Record your portfolio as of the 1st of {labelMonth(month)}. You can adjust
@@ -538,12 +538,93 @@ function SnapshotStep({ onComplete }: { onComplete: () => void }) {
   );
 }
 
+/* ---------- Step 4: Pension ---------- */
+
+/**
+ * The one figure the app cannot work out for itself.
+ *
+ * A defined benefit pension has no transactions to import and no price to
+ * fetch — its transfer value comes from the plan, and the plan tells you when
+ * you ask. So it is asked for here, at month end, alongside everything else
+ * that closes the month.
+ */
+function PensionStep({ number, onNext }: { number: number; onNext: () => void }) {
+  const accounts = useFinance((s) => s.accounts);
+  const updateAccount = useFinance((s) => s.updateAccount);
+  const pensions = accounts.filter((a) => isPension(a.kind));
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  const submit = () => {
+    for (const acc of pensions) {
+      const raw = values[acc.id];
+      if (raw === undefined || raw.trim() === "") continue;
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value < 0) continue;
+      updateAccount(acc.id, {
+        name: acc.name,
+        institution: acc.institution,
+        kind: acc.kind,
+        balance: Math.round(value * 100) / 100,
+        registration: acc.registration,
+      });
+    }
+    onNext();
+  };
+
+  return (
+    <Card className="p-6">
+      <h3 className="text-sm font-semibold">Step {number} · Update the pension</h3>
+      <p className="mt-1 text-xs text-ink-faint">
+        The transfer value your plan reports — the lump sum it would pay out.
+        Leave a box empty to keep the value already recorded.
+      </p>
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {pensions.map((acc) => {
+          const last = acc.history[acc.history.length - 1];
+          return (
+            <Field
+              key={acc.id}
+              label={acc.name}
+              hint={
+                last
+                  ? `${fmtCAD(last.value, 2)} recorded for ${labelMonth(last.month)}`
+                  : "Nothing recorded yet"
+              }
+            >
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder={String(acc.balance)}
+                value={values[acc.id] ?? ""}
+                onChange={(e) =>
+                  setValues((prev) => ({ ...prev, [acc.id]: e.target.value }))
+                }
+              />
+            </Field>
+          );
+        })}
+      </div>
+      <div className="mt-4 flex items-center justify-between">
+        <p className="text-[11px] text-ink-faint">
+          Recorded against {labelMonth(currentMonthKey())}; earlier months are
+          left as they are.
+        </p>
+        <Button onClick={submit}>
+          Next <ArrowRight size={14} />
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 /* ---------- Main Component ---------- */
 
 const STEPS: { key: Step; label: string }[] = [
   { key: "income", label: "Income" },
   { key: "import", label: "Import" },
   { key: "trades", label: "Trades" },
+  { key: "pension", label: "Pension" },
   { key: "snapshot", label: "Snapshot" },
 ];
 
@@ -567,6 +648,10 @@ export function MonthlyChecklistModal({
   onClose: () => void;
 }) {
   const [step, setStep] = useState<Step>("income");
+  // No pension, no step: the checklist should only ask what applies.
+  const hasPension = useFinance((s) => s.accounts.some((a) => isPension(a.kind)));
+  const steps = hasPension ? STEPS : STEPS.filter((s) => s.key !== "pension");
+  const afterTrades: Step = hasPension ? "pension" : "snapshot";
 
   return (
     <Modal
@@ -577,7 +662,7 @@ export function MonthlyChecklistModal({
     >
       <div className="px-5 pb-5 pt-3">
         <div className="mb-4 flex items-center justify-between">
-          <StepIndicator steps={STEPS} current={step} />
+          <StepIndicator steps={steps} current={step} />
           <p className="text-[11px] text-ink-faint">
             Complete these steps to keep your finances up to date.
           </p>
@@ -592,11 +677,12 @@ export function MonthlyChecklistModal({
             onSkip={() => setStep("trades")}
           />
         )}
-        {step === "trades" && (
-          <TradesStep onNext={() => setStep("snapshot")} />
+        {step === "trades" && <TradesStep onNext={() => setStep(afterTrades)} />}
+        {step === "pension" && (
+          <PensionStep number={4} onNext={() => setStep("snapshot")} />
         )}
         {step === "snapshot" && (
-          <SnapshotStep onComplete={onClose} />
+          <SnapshotStep number={steps.length} onComplete={onClose} />
         )}
       </div>
     </Modal>
