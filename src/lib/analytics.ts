@@ -16,6 +16,7 @@ import {
   currentMonthKey,
   labelMonth,
   lastMonthKeys,
+  lastCompleteMonthKey,
   monthKeyOf,
 } from "./format";
 import { DatedFlow, xirr } from "./xirr";
@@ -901,7 +902,7 @@ export const PASSIVE_INCOME_CATEGORIES = new Set(["Dividends", "Interest"]);
  */
 export const ILLIQUID_INCOME_CATEGORIES = new Set(["RSP / Pension", "Loan Proceeds"]);
 
-export interface MonthlyAverage {
+export interface AverageMonth {
   /** How many months were averaged; fewer than asked for when the record is short. */
   months: number;
   income: number;
@@ -909,8 +910,19 @@ export interface MonthlyAverage {
   passive: number;
   /** Liquid income less the spending already committed to. */
   uncommitted: number;
+}
+
+export interface MonthlyAverage extends AverageMonth {
   from: string;
   to: string;
+  /**
+   * The same averages over the twelve months before those, for comparison.
+   *
+   * Null when nothing was recorded then, which is the difference between "no
+   * change" and "no answer" — a record that starts inside the window would
+   * otherwise report a rise from nothing as infinite improvement.
+   */
+  previous: AverageMonth | null;
   /** Per-month figures, oldest first, for the sparklines. */
   series: {
     key: string;
@@ -931,9 +943,17 @@ export interface MonthlyAverage {
 export function monthlyAverages(
   transactions: Transaction[],
   months = 12,
+  end = lastCompleteMonthKey(),
 ): MonthlyAverage {
-  const current = currentMonthKey();
-  const keys = lastMonthKeys(months + 1).filter((k) => k !== current);
+  /*
+   * Two windows of the same length, back to back: the twelve months being
+   * reported and the twelve before them. Equal lengths is what makes them
+   * comparable — each contains one of every month, so a December of presents
+   * or a summer of travel falls on both sides and cancels.
+   */
+  const all = lastMonthKeys(months * 2, end);
+  const keys = all.slice(months);
+  const priorKeys = all.slice(0, months);
 
   const series = keys.map((key) => {
     let income = 0;
@@ -973,6 +993,8 @@ export function monthlyAverages(
   const mean = (pick: (m: (typeof series)[number]) => number) =>
     n === 0 ? 0 : roundMoney(active.reduce((sum, m) => sum + pick(m), 0) / n);
 
+  const prior = averageOver(transactions, priorKeys);
+
   return {
     months: n,
     income: mean((m) => m.income),
@@ -981,7 +1003,47 @@ export function monthlyAverages(
     uncommitted: mean((m) => m.uncommitted),
     from: active[0]?.key ?? "",
     to: active[active.length - 1]?.key ?? "",
+    previous: prior.months > 0 ? prior : null,
     series,
+  };
+}
+
+/** The same four averages over an arbitrary set of months. */
+function averageOver(transactions: Transaction[], keys: string[]): AverageMonth {
+  const wanted = new Set(keys);
+  const byMonth = new Map<
+    string,
+    { income: number; expenses: number; passive: number; uncommitted: number }
+  >();
+  for (const t of transactions) {
+    const key = monthKeyOf(t.date);
+    if (!wanted.has(key)) continue;
+    const slot =
+      byMonth.get(key) ??
+      { income: 0, expenses: 0, passive: 0, uncommitted: 0 };
+    const cents = toCents(t.amount);
+    if (t.type === "income") {
+      slot.income += cents;
+      if (PASSIVE_INCOME_CATEGORIES.has(t.category)) slot.passive += cents;
+      if (!ILLIQUID_INCOME_CATEGORIES.has(t.category)) slot.uncommitted += cents;
+    } else if (t.type === "expense") {
+      slot.expenses += cents;
+      if (COMMITTED_CATEGORIES.has(t.category)) slot.uncommitted -= cents;
+    }
+    byMonth.set(key, slot);
+  }
+  const active = [...byMonth.values()].filter(
+    (m) => m.income !== 0 || m.expenses !== 0,
+  );
+  const n = active.length;
+  const mean = (pick: (m: (typeof active)[number]) => number) =>
+    n === 0 ? 0 : roundMoney(fromCents(active.reduce((sum, m) => sum + pick(m), 0)) / n);
+  return {
+    months: n,
+    income: mean((m) => m.income),
+    expenses: mean((m) => m.expenses),
+    passive: mean((m) => m.passive),
+    uncommitted: mean((m) => m.uncommitted),
   };
 }
 

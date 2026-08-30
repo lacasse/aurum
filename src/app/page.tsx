@@ -49,9 +49,34 @@ import {
   lastCompleteMonthKey,
 } from "@/lib/format";
 import { ACCOUNT_KIND_LABELS, primaryAccountId } from "@/lib/types";
+import { roundMoney } from "@/lib/money";
 
 /** How much of the net worth history to draw: months, or the whole record. */
 type Range = "12" | "60" | "all";
+
+/**
+ * A year-over-year move for one of the average-month figures.
+ *
+ * Percent only when there is a positive figure to be a percent *of*: a change
+ * from minus two hundred to plus fifty is a real improvement and "−125%" says
+ * nothing true about it, so the money is the answer there. `good` is which
+ * direction is the welcome one — spending more is not an improvement.
+ */
+function yearOverYear(
+  now: number,
+  before: number | undefined,
+  good: "up" | "down",
+): { delta?: number; deltaValue: string; tone: "positive" | "negative" | "neutral" } {
+  if (before === undefined) return { deltaValue: "", tone: "neutral" };
+  const change = roundMoney(now - before);
+  const rose = change >= 0;
+  const tone = change === 0 ? "neutral" : (rose === (good === "up") ? "positive" : "negative");
+  return {
+    delta: before > 0 ? (change / before) * 100 : undefined,
+    deltaValue: fmtSignedCAD(change),
+    tone,
+  };
+}
 
 function SectionHeading({ title, note }: { title: string; note: string }) {
   return (
@@ -216,6 +241,14 @@ export default function DashboardPage() {
   const unrealized = data.market - data.invested + data.dividends;
   const unrealizedPct = data.invested > 0 ? (unrealized / data.invested) * 100 : 0;
 
+  const prev = data.avg.previous;
+  const yoy = {
+    income: yearOverYear(data.avg.income, prev?.income, "up"),
+    expenses: yearOverYear(data.avg.expenses, prev?.expenses, "down"),
+    uncommitted: yearOverYear(data.avg.uncommitted, prev?.uncommitted, "up"),
+    passive: yearOverYear(data.avg.passive, prev?.passive, "up"),
+  };
+
   const spark = data.nwAll.slice(-18);
   const totalSpend = data.spend.reduce((s, c) => s + c.value, 0);
   const monthName = labelMonth(data.through);
@@ -371,7 +404,7 @@ export default function DashboardPage() {
 
         <SectionHeading
           title="Cash flow"
-          note={`complete months only · through ${monthName}`}
+          note={`12-month averages · complete months only · through ${monthName}`}
         />
 
         {/* How the months average out */}
@@ -379,8 +412,10 @@ export default function DashboardPage() {
           <StatCard
             label="Average income"
             value={fmtCAD(data.avg.income)}
-            deltaValue={`last ${data.avg.months} mo`}
-            deltaLabel="per month"
+            delta={yoy.income.delta}
+            deltaValue={yoy.income.deltaValue}
+            deltaLabel="vs the year before"
+            tone={yoy.income.tone}
             icon={<ArrowDownRight size={16} className="text-positive" />}
             spark={data.avg.series.map((p) => ({ v: p.income }))}
             sparkKey="v"
@@ -389,8 +424,10 @@ export default function DashboardPage() {
           <StatCard
             label="Average expenses"
             value={fmtCAD(data.avg.expenses)}
-            deltaValue={`last ${data.avg.months} mo`}
-            deltaLabel="per month"
+            delta={yoy.expenses.delta}
+            deltaValue={yoy.expenses.deltaValue}
+            deltaLabel="vs the year before"
+            tone={yoy.expenses.tone}
             icon={<ArrowUpRight size={16} className="text-negative" />}
             spark={data.avg.series.map((p) => ({ v: p.expenses }))}
             sparkKey="v"
@@ -399,9 +436,10 @@ export default function DashboardPage() {
           <StatCard
             label="Average uncommitted"
             value={fmtCAD(data.avg.uncommitted)}
-            deltaValue={`last ${data.avg.months} mo`}
-            deltaLabel="after committed costs"
-            tone={data.avg.uncommitted >= 0 ? "positive" : "negative"}
+            delta={yoy.uncommitted.delta}
+            deltaValue={yoy.uncommitted.deltaValue}
+            deltaLabel="vs the year before"
+            tone={yoy.uncommitted.tone}
             icon={<PiggyBank size={16} />}
             spark={data.avg.series.map((p) => ({ v: p.uncommitted }))}
             sparkKey="v"
@@ -410,8 +448,10 @@ export default function DashboardPage() {
           <StatCard
             label="Average passive income"
             value={fmtCAD(data.avg.passive)}
-            deltaValue={`last ${data.avg.months} mo`}
-            deltaLabel="dividends and interest"
+            delta={yoy.passive.delta}
+            deltaValue={yoy.passive.deltaValue}
+            deltaLabel="vs the year before"
+            tone={yoy.passive.tone}
             icon={<Coins size={16} />}
             spark={data.avg.series.map((p) => ({ v: p.passive }))}
             sparkKey="v"
