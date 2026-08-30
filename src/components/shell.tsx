@@ -15,7 +15,6 @@ import {
   Trash2,
   TrendingUp,
   Upload,
-  UploadCloud,
   Wallet,
   X,
   LogOut,
@@ -31,8 +30,7 @@ const NAV = [
   { href: "/investments", label: "Investments", icon: TrendingUp },
   { href: "/budgets", label: "Budgets", icon: Target },
   { href: "/accounts", label: "Accounts", icon: Landmark },
-  { href: "/import", label: "Import CSV", icon: Upload },
-  { href: "/import-trades", label: "Import trades", icon: UploadCloud },
+  { href: "/import", label: "Import", icon: Upload },
 ] as const;
 
 function ThemeToggle() {
