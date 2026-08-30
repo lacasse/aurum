@@ -40,7 +40,14 @@ import {
   holdingExposure,
   type SnapshotHistory,
 } from "@/lib/analytics";
-import { fmtCompact, fmtPct, fmtSignedCAD, fmtCAD, labelMonth } from "@/lib/format";
+import {
+  fmtCompact,
+  fmtPct,
+  fmtSignedCAD,
+  fmtCAD,
+  labelMonth,
+  currentMonthKey,
+} from "@/lib/format";
 import type { Holding } from "@/lib/types";
 
 const POLL_MS = 60 * 60_000;
@@ -435,8 +442,21 @@ export default function InvestmentsPage() {
   const returns = useMemo(() => {
     const simple = simpleReturn(holdings, data.totalValue);
     const mwrr = portfolioMwrr(holdings, data.totalValue);
-    const span = fullSeries.length - 1;
-    const chained = chainedReturns(fullSeries, flowsByMonth);
+    /*
+     * The month in progress is left out of the time-weighted figure. Its value
+     * is today's, not a month-end's, so treating it as a completed monthly
+     * return states a fraction of a month as a whole one — three weeks of a
+     * good August took the all-time figure from 33% to 64%. It also put the
+     * card at odds with the chart below, which stops at the last month the
+     * benchmark has a close for. Both now measure completed months.
+     */
+    const complete =
+      fullSeries.length > 1 &&
+      fullSeries[fullSeries.length - 1].key === currentMonthKey()
+        ? fullSeries.slice(0, -1)
+        : fullSeries;
+    const span = complete.length - 1;
+    const chained = chainedReturns(complete, flowsByMonth);
     const twrTotal = chained[chained.length - 1] ?? null;
     const twrAnnual = twrTotal === null ? null : annualized(twrTotal, span);
     return {
@@ -445,6 +465,7 @@ export default function InvestmentsPage() {
       twrTotal,
       twrAnnual,
       months: span,
+      through: complete[complete.length - 1]?.label ?? "",
       from: fullSeries[0]?.label ?? "",
       gap: mwrr !== null && twrAnnual !== null ? mwrr - twrAnnual : null,
     };
@@ -496,7 +517,9 @@ export default function InvestmentsPage() {
       portfolioTwr: finalRow.portfolio,
       benchmarkTwr: finalRow.benchmark,
       alpha: finalRow.portfolio - finalRow.benchmark,
-      months: windowedMonths.length,
+      // Intervals, not points: n months of prices give n-1 monthly returns,
+      // and this is the same count the returns card above reports.
+      months: windowedMonths.length - 1,
       name: benchmark.name,
       note: benchmark.note,
     };
@@ -714,7 +737,9 @@ export default function InvestmentsPage() {
                 How the holdings performed, with deposits and withdrawals removed.
               </p>
               <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
-                {returns.twrTotal === null ? "" : `${fmtPct(returns.twrTotal)} in total over ${returns.months} months. `}
+                {returns.twrTotal === null
+                  ? ""
+                  : `${fmtPct(returns.twrTotal)} in total over ${returns.months} months, through ${returns.through}. `}
                 Because it ignores when money moved, it judges what you bought rather than
                 when you bought it — which is why it is the one set against XEQT below.
               </p>
