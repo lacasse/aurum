@@ -1,6 +1,7 @@
 import Papa from "papaparse";
 import { ImportedRow, suggestCategory, txnKey } from "./csv";
 import { TradeRow, tradeKey } from "./trades";
+import { CorporateAction } from "./corporate-actions";
 import { Currency, Registration } from "./types";
 
 /**
@@ -20,6 +21,8 @@ export interface ActivityParseResult {
   fileName: string;
   cash: ImportedRow[];
   trades: TradeRow[];
+  /** Mergers and demergers, which move cost basis rather than money. */
+  actions: CorporateAction[];
   /** Rows deliberately dropped, with the reason, so the total still adds up. */
   skipped: { reason: string; count: number }[];
   /** Rows that need a person: corporate actions, share swaps. */
@@ -95,6 +98,7 @@ export function parseActivitiesCsv(
 
   const cash: ImportedRow[] = [];
   const trades: TradeRow[] = [];
+  const actions: CorporateAction[] = [];
   const skipped = new Map<string, number>();
   const needsAttention: string[] = [];
   const seenTxn = new Set(existingTxnKeys);
@@ -250,37 +254,23 @@ export function parseActivitiesCsv(
         return;
       }
       /*
-       * Two rewrites before the row is recorded, both of them the file
-       * describing one thing in two names.
+       * A journalled ticker is the same security under its other listing — the
+       * two halves of Norbert's Gambit — so it is recorded under the one the
+       * position ends up in.
        *
-       * A journalled ticker is the same security under its other listing, so
-       * it is recorded under the one the position ends up in. And shares that
-       * arrived out of a demerger were never bought: selling them is the
-       * parent holding paying out, so the proceeds are recorded as its
-       * dividend rather than as a sale of something with no cost behind it.
+       * Shares from a demerger are left alone here. They are a real position
+       * with a real cost basis, carved out of the parent's by the corporate
+       * action below; selling them is an ordinary sale against that basis.
        */
-      let ticker = alias.get(symbol) ?? symbol;
-      let effectiveType = tradeType;
-      let effectiveQty = qty;
-      let effectivePrice = price;
-      const parent = spinoffParent.get(ticker);
-      if (parent && tradeType === "sell") {
-        ticker = parent;
-        effectiveType = "dividend";
-        effectiveQty = 0;
-        effectivePrice = 0;
-      } else if (parent) {
-        drop("shares from a demerger, counted when they are sold");
-        return;
-      }
+      const ticker = alias.get(symbol) ?? symbol;
       const row: TradeRow = {
         id: rowId("trd"),
         date,
-        type: effectiveType,
+        type: tradeType,
         typeRaw: `${type} ${sub}`.trim(),
         ticker,
-        quantity: Math.abs(effectiveQty),
-        pricePerUnit: Math.abs(effectivePrice),
+        quantity: Math.abs(qty),
+        pricePerUnit: Math.abs(price),
         transactedAmount: Math.abs(cashAmount),
         registration,
         registrationRaw: accountType,
@@ -345,16 +335,52 @@ export function parseActivitiesCsv(
         else if (amount < 0) addCash("expense", "Journalling fee", "Fees", desc);
         else drop("journalled shares (Norbert's Gambit)");
         break;
-      case "CorporateAction":
-        if (sub === "DEMERGER" && (spinoffParent.has(symbol) || quantity === 0)) {
-          // Handled where the shares are sold, as a payout from the parent.
-          drop("demerger share adjustments");
+      case "CorporateAction": {
+        const parentOf = spinoffParent.get(symbol);
+        if (parentOf && quantity > 0) {
+          /*
+           * The shares out of a demerger, and the holding they came from. What
+           * the file cannot say is how the cost basis divides — that comes
+           * from the company's own allocation notice — so it is asked for in
+           * review rather than assumed here.
+           */
+          actions.push({
+            id: rowId("act-corp"),
+            kind: "demerger",
+            date,
+            from: parentOf,
+            to: symbol,
+            shares: quantity,
+            registration,
+            registrationRaw: accountType,
+            allocationPct: 0,
+            include: true,
+            sourceFile: fileName,
+          });
+        } else if (parentOf || quantity === 0) {
+          // The parent's own row: it names the demerger without changing.
+          drop("demerger notices");
+        } else if (sub === "MERGER" || sub === "AMALGAMATION") {
+          actions.push({
+            id: rowId("act-corp"),
+            kind: "merger",
+            date,
+            from: (desc.match(/^([A-Z0-9.\-]+)/)?.[1] ?? symbol).toUpperCase(),
+            to: symbol,
+            shares: quantity,
+            registration,
+            registrationRaw: accountType,
+            allocationPct: 100,
+            include: true,
+            sourceFile: fileName,
+          });
         } else {
           needsAttention.push(
             `${date} ${symbol || "—"}: ${type}${desc ? ` — ${desc}` : ""}`,
           );
         }
         break;
+      }
       case "MoneyMovement": {
         const d = desc.toLowerCase();
         if (d.includes("credit card payment")) {
@@ -397,6 +423,7 @@ export function parseActivitiesCsv(
     fileName,
     cash,
     trades,
+    actions,
     skipped: [...skipped.entries()].map(([reason, count]) => ({ reason, count })),
     needsAttention,
   };
