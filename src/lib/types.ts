@@ -88,7 +88,6 @@ export interface Holding {
   ticker: string;
   name: string;
   assetClass: AssetClass;
-  sector: string;
   shares: number;
   avgCost: number; // in listing currency
   price: number; // current price in listing currency

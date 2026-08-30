@@ -76,7 +76,6 @@ export const holdings = pgTable("holdings", {
   ticker: text("ticker").notNull(),
   name: text("name").notNull(),
   assetClass: text("asset_class").notNull(),
-  sector: text("sector").notNull(),
   shares: quantity("shares").notNull(),
   avgCost: unitPrice("avg_cost").notNull(),
   price: unitPrice("price").notNull(),

@@ -338,6 +338,158 @@ export function DonutChart({
   );
 }
 
+/* ---------------- Holdings exposure ---------------- */
+
+/**
+ * One hue per asset class. Every holding of that class is drawn in a different
+ * lightness of the same hue, so the arc reads as groups without needing a
+ * legend to tell you which slices belong together.
+ *
+ * The hues are picked at a saturation and lightness that hold up on both
+ * themes: mid-range lightness is legible against the light card and against
+ * the dark one, which a near-white or near-black shade would not be.
+ */
+const ASSET_HUES: Record<string, { h: number; s: number }> = {
+  "US Equity": { h: 262, s: 70 }, // violet
+  "Intl Equity": { h: 187, s: 65 }, // teal
+  Bonds: { h: 214, s: 58 }, // blue
+  Crypto: { h: 33, s: 80 }, // amber
+};
+
+const FALLBACK_HUE = { h: 340, s: 60 };
+
+/** Shade `i` of `n` within a group, walking light to dark inside a safe band. */
+export function assetShade(assetClass: string, i: number, n: number): string {
+  const { h, s } = ASSET_HUES[assetClass] ?? FALLBACK_HUE;
+  // The band is deliberately narrow at the top: a lighter shade than this
+  // washes out against the light theme's white card.
+  const top = 64;
+  const bottom = 38;
+  const l = n <= 1 ? 54 : top - ((top - bottom) * i) / (n - 1);
+  return `hsl(${h} ${s}% ${l}%)`;
+}
+
+export type ExposureDatum = {
+  ticker: string;
+  name: string;
+  assetClass: string;
+  value: number;
+};
+
+export function ExposurePie({
+  data,
+  height = 300,
+  fmt,
+}: {
+  data: ExposureDatum[];
+  height?: number;
+  fmt?: (n: number) => string;
+}) {
+  const total = data.reduce((sum, d) => sum + d.value, 0);
+
+  // The slices arrive grouped, so counting each class up front is enough to
+  // know how many shades it needs and where each holding sits in the ramp.
+  const counts = new Map<string, number>();
+  for (const d of data) counts.set(d.assetClass, (counts.get(d.assetClass) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  const colored = data.map((d) => {
+    const i = seen.get(d.assetClass) ?? 0;
+    seen.set(d.assetClass, i + 1);
+    return { ...d, color: assetShade(d.assetClass, i, counts.get(d.assetClass) ?? 1) };
+  });
+
+  const groups = [...counts.keys()].map((assetClass) => ({
+    assetClass,
+    rows: colored.filter((d) => d.assetClass === assetClass),
+  }));
+
+  const pct = (v: number) => (total > 0 ? `${((v / total) * 100).toFixed(1)}%` : "—");
+
+  return (
+    <div>
+      <ResponsiveContainer width="100%" height={height}>
+        <PieChart>
+          <Pie
+            data={colored}
+            dataKey="value"
+            nameKey="ticker"
+            innerRadius="48%"
+            outerRadius="86%"
+            paddingAngle={1}
+            stroke="var(--surface)"
+            strokeWidth={1}
+          >
+            {colored.map((d) => (
+              <Cell key={`${d.assetClass}-${d.ticker}`} fill={d.color} />
+            ))}
+          </Pie>
+          <Tooltip
+            content={<ChartTooltip fmt={(n) => `${fmt ? fmt(n) : n} · ${pct(n)}`} />}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+
+      {/*
+        One row per asset class rather than one line per holding: a flat list of
+        every ticker is as long as the table further down the page and says the
+        same thing. The bar carries the split within the class in the same
+        shades and the same order as the arc, so a segment can be found in the
+        pie by its width and its shade without a line of its own.
+      */}
+      <div className="mt-3 space-y-3 px-1">
+        {groups.map((g) => {
+          const groupValue = g.rows.reduce((sum, r) => sum + r.value, 0);
+          return (
+            <div key={g.assetClass}>
+              <div className="flex items-baseline gap-2 text-xs">
+                <span className="font-medium text-ink">{g.assetClass}</span>
+                <span className="text-ink-faint">
+                  {g.rows.length} position{g.rows.length === 1 ? "" : "s"}
+                </span>
+                <span className="ml-auto tabular-nums text-ink-dim">
+                  {fmt ? fmt(groupValue) : groupValue}
+                </span>
+                <span className="w-12 text-right font-medium tabular-nums text-ink">
+                  {pct(groupValue)}
+                </span>
+              </div>
+              <div className="mt-1 flex h-2 gap-px overflow-hidden rounded-full">
+                {g.rows.map((r) => (
+                  <span
+                    key={r.ticker}
+                    className="h-full"
+                    style={{
+                      background: r.color,
+                      width: groupValue > 0 ? `${(r.value / groupValue) * 100}%` : "0%",
+                    }}
+                    title={`${r.name} — ${fmt ? fmt(r.value) : r.value}`}
+                  />
+                ))}
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+                {g.rows.map((r) => (
+                  <span
+                    key={r.ticker}
+                    className="inline-flex items-center gap-1.5 text-[11px] text-ink-dim"
+                    title={r.name}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: r.color }}
+                    />
+                    {r.ticker}
+                    <span className="tabular-nums text-ink-faint">{pct(r.value)}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Time-weighted return comparison ---------------- */
 
 export function TwrChart({
@@ -519,37 +671,6 @@ export function RadialGauge({
 }
 
 /* ---------------- Sector radar ---------------- */
-
-export function SectorRadar({
-  data,
-  height = 260,
-  fmt,
-}: {
-  data: { sector: string; value: number }[];
-  height?: number;
-  fmt?: (n: number) => string;
-}) {
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <RadarChart data={data} cx="50%" cy="50%" outerRadius="72%">
-        <PolarGrid stroke="var(--line)" />
-        <PolarAngleAxis
-          dataKey="sector"
-          tick={{ fill: "var(--ink-faint)", fontSize: 11 }}
-        />
-        <PolarRadiusAxis tick={false} axisLine={false} />
-        <Radar
-          name="Exposure"
-          dataKey="value"
-          stroke="#22d3ee"
-          fill="#22d3ee"
-          fillOpacity={0.25}
-        />
-        <Tooltip content={<ChartTooltip fmt={fmt} />} />
-      </RadarChart>
-    </ResponsiveContainer>
-  );
-}
 
 export function ChartLegend({
   items,

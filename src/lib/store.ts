@@ -3,7 +3,9 @@
 import { create } from "zustand";
 import {
   Account,
+  AssetClass,
   Budget,
+  Currency,
   CashFlow,
   FinanceData,
   Holding,
@@ -82,6 +84,23 @@ interface FinanceStore extends FinanceData {
   adjustAccountCash: (accountId: string, delta: number) => void;
   addHolding: (input: HoldingInput) => void;
   updateHolding: (id: string, input: HoldingInput) => void;
+  /**
+   * Change what a security *is* — ticker, name, asset class — everywhere it is
+   * held. These three are properties of the security, not of one account's
+   * position in it, so editing them in one account and not the others would
+   * split one holding into two that no longer pool.
+   */
+  updateSecurity: (
+    ticker: string,
+    input: {
+      ticker: string;
+      name: string;
+      assetClass: AssetClass;
+      /** Optional manual price, in `currency`; the next feed refresh replaces it. */
+      price?: number;
+      currency: Currency;
+    },
+  ) => void;
   deleteHolding: (id: string) => void;
   setBudget: (category: string, limit: number) => void;
   deleteBudget: (category: string) => void;
@@ -402,6 +421,45 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
           }),
         }));
         if (updated) api.updateHolding(updated).catch(report);
+      },
+
+      updateSecurity: (ticker, input) => {
+        const from = ticker.toUpperCase();
+        const to = {
+          ticker: input.ticker.trim().toUpperCase(),
+          name: input.name.trim(),
+          assetClass: input.assetClass,
+        };
+        const rate = get().usdCadRate;
+        const price = input.price;
+        const priceCAD =
+          price == null
+            ? undefined
+            : input.currency === "USD"
+              ? Math.round(price * rate * 100) / 100
+              : price;
+        set((s) => ({
+          holdings: s.holdings.map((h) => {
+            if (h.ticker.toUpperCase() !== from) return h;
+            const renamed = { ...h, ...to };
+            // A price typed in one currency says nothing about a lot quoted in
+            // another, so those keep the price they had.
+            if (price == null || priceCAD == null || h.currency !== input.currency) {
+              return renamed;
+            }
+            const history = h.history.slice();
+            if (history.length > 0) history[history.length - 1] = price;
+            const historyCAD = (h.historyCAD ?? h.history).slice();
+            if (historyCAD.length > 0) historyCAD[historyCAD.length - 1] = priceCAD;
+            return { ...renamed, price, priceCAD, history, historyCAD };
+          }),
+        }));
+        // One request for the whole security rather than one per account: the
+        // rows have to agree, and a half-applied rename would leave the same
+        // position listed under two tickers.
+        api
+          .updateSecurity(from, { ...to, price, priceCAD, currency: input.currency })
+          .catch(report);
       },
 
       deleteHolding: (id) => {

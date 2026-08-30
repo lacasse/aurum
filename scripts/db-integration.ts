@@ -436,7 +436,6 @@ async function main() {
         ticker: "TEST",
         name: "Test ETF",
         assetClass: "US Equity",
-        sector: "Tech",
         shares: 2,
         avgCost: 100,
         price: 110,
@@ -464,6 +463,57 @@ async function main() {
       expect(stored?.flows.length === 2, `flows round-trip (got ${stored?.flows.length})`);
       expect(stored?.flows[0].kind === "buy" && stored?.flows[0].amount === 200, "flow detail kept");
     }
+    {
+      // The same security in a second account: a rename has to reach both, or
+      // the holdings page stops pooling them into one row.
+      await repo.insertHolding(
+        {
+          id: "test-hold-2",
+          ticker: "test",
+          name: "Test ETF",
+          assetClass: "US Equity",
+          shares: 1,
+          avgCost: 100,
+          price: 110,
+          history: [110],
+          dividendsReceived: 0,
+          accountId: "acc-tfsa",
+          currency: "CAD",
+          priceCAD: 110,
+          avgCostCAD: 100,
+          dividendsReceivedCAD: 0,
+          historyCAD: [110],
+          flows: [],
+        },
+        100,
+      );
+      const changed = await repo.updateSecurity("TEST", {
+        ticker: "TSET",
+        name: "Renamed ETF",
+        assetClass: "Bonds",
+        price: 125,
+        priceCAD: 125,
+        currency: "CAD",
+      });
+      expect(changed === 2, `rename touches every account (got ${changed})`);
+      state = await repo.getState();
+      const renamed = state.holdings.filter((h) => h.ticker === "TSET");
+      expect(renamed.length === 2, "both lots carry the new ticker");
+      expect(
+        renamed.every((h) => h.name === "Renamed ETF" && h.assetClass === "Bonds"),
+        "name and asset class propagate too",
+      );
+      expect(
+        renamed.every((h) => h.price === 125 && h.priceCAD === 125),
+        "a manual price reaches every account holding the security",
+      );
+      expect(
+        renamed.every((h) => h.history[h.history.length - 1] === 125),
+        "the price history ends on the manual price, so the chart agrees",
+      );
+      await repo.deleteHoldingRow("test-hold-2");
+    }
+
     await repo.deleteHoldingRow("test-hold-1");
     state = await repo.getState();
     expect(!state.holdings.some((h) => h.id === "test-hold-1"), "holding deleted");

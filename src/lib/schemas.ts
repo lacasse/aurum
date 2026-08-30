@@ -164,7 +164,6 @@ export const holdingSchema = z
     ticker: requiredString,
     name: z.coerce.string().optional().catch(undefined),
     assetClass: enumWithDefault<AssetClass>(ASSET_CLASSES, "US Equity"),
-    sector: z.coerce.string().optional().catch(undefined),
     /*
      * Zero is valid: a position sold down to nothing keeps its row so the cost
      * basis and dividends behind the realized gain survive. Rejecting it here
@@ -196,13 +195,12 @@ export const holdingSchema = z
       .catch([]),
   })
   // Cross-field defaults: the CAD mirror of each figure falls back to the
-  // listing-currency figure, and name/sector fall back to ticker/assetClass.
+  // listing-currency figure, and the name falls back to the ticker.
   .transform((h) => ({
     id: h.id,
     ticker: h.ticker.toUpperCase(),
     name: (h.name ?? h.ticker).trim(),
     assetClass: h.assetClass,
-    sector: h.sector ?? h.assetClass,
     shares: h.shares,
     avgCost: h.avgCost,
     price: h.price,
@@ -298,6 +296,27 @@ export const recurringRuleSchema = z
       issue("the end date cannot precede the start date", "endDate");
     }
   });
+
+/**
+ * A change to what a security is, applied to every account holding it. `from`
+ * is the ticker being edited, which is not necessarily the new one — renaming
+ * a symbol is the whole point.
+ */
+export const securityUpdateSchema = z.object({
+  from: requiredString.transform((t) => t.toUpperCase()),
+  ticker: requiredString.transform((t) => t.trim().toUpperCase()),
+  name: requiredString.transform((n) => n.trim()),
+  assetClass: enumWithDefault<AssetClass>(ASSET_CLASSES, "US Equity"),
+  /*
+   * An optional manual price, in the listing currency, with its CAD conversion
+   * and the currency it was quoted in. The currency is carried so the server
+   * only writes the figure to lots quoted the same way: "30.47" means one thing
+   * in a CAD listing and another in a USD one.
+   */
+  price: positiveNumber.optional(),
+  priceCAD: positiveNumber.optional(),
+  currency: enumWithDefault<Currency>(CURRENCIES, "CAD"),
+});
 
 export const budgetSchema = z.object({
   category: requiredString,
