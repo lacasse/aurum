@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/*
+ * Tailwind v4's dark: variant follows prefers-color-scheme by default, but the
+ * theme here is a class on <html> that the toggle sets. Without this the two
+ * disagree: on a machine set to dark, dark: utilities applied even with the
+ * app in light mode.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #f6f6f7;
   --surface: #ffffff;
