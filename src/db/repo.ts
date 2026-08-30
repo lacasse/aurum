@@ -16,12 +16,12 @@ import {
   AccountKind,
   FinanceData,
   Holding,
-  MonthlyPoint,
   MonthlySnapshot,
   RecurringRule,
   Transaction,
   TxnType,
   balanceDelta,
+  withBalanceRecorded,
 } from "@/lib/types";
 import { advanceRule, dueOccurrences } from "@/lib/recurrence";
 import { todayISO } from "@/lib/format";
@@ -527,10 +527,13 @@ async function applyToAccount(
   if (!acc) return;
   const delta = balanceDelta(acc.kind as AccountKind, side, amount) * sign;
   const balance = addMoney(acc.balance, delta);
-  const history: MonthlyPoint[] = acc.history.slice();
-  if (history.length > 0) {
-    history[history.length - 1] = { ...history[history.length - 1], value: balance };
-  }
+  /*
+   * The same rule as the client's optimistic update, from the same function:
+   * record against the current month by name. Writing to the last element of
+   * the array assumed it was this month, which it is not once a month has
+   * closed — August's spending was landing on July's recorded balance.
+   */
+  const { history } = withBalanceRecorded({ ...toAccount(acc), balance });
   await tx.update(accounts).set({ balance, history }).where(eq(accounts.id, acc.id));
 }
 
