@@ -8,6 +8,7 @@ import {
   ArrowUpRight,
   Banknote,
   Coins,
+  ShieldCheck,
   LineChart,
   PiggyBank,
   TrendingUp,
@@ -217,7 +218,7 @@ export default function DashboardPage() {
         <SectionHeading title="Net worth" note="what you own, as it stands today" />
 
         {/* What net worth is made of */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <StatCard
             label="Net Worth"
             value={fmtCAD(nwLast.net)}
@@ -256,20 +257,35 @@ export default function DashboardPage() {
           <StatCard
             label="Cash and accounts"
             value={fmtCAD(nwLast.assets)}
-            deltaLabel="everything outside the portfolio"
+            deltaLabel="balances you can draw on"
             tone={nwLast.assets >= 0 ? "neutral" : "negative"}
             icon={<Banknote size={16} />}
             spark={spark.map((p) => ({ v: p.assets }))}
             sparkKey="v"
             sparkColor="#f59e0b"
           />
+          {nwLast.pension > 0 ? (
+            <StatCard
+              label="Pension"
+              value={fmtCAD(nwLast.pension)}
+              deltaLabel="transfer value, not spendable"
+              icon={<ShieldCheck size={16} />}
+              spark={spark.map((p) => ({ v: p.pension }))}
+              sparkKey="v"
+              sparkColor="#fbbf24"
+            />
+          ) : null}
         </div>
 
         {/* The whole record */}
         <Card>
           <CardHeader
             title="Net worth over time"
-            subtitle={`Assets + portfolio − liabilities · ${fmtCAD(nwLast.assets)} + ${fmtCAD(nwLast.portfolio)} − ${fmtCAD(nwLast.liabilities)}`}
+            subtitle={
+              nwLast.pension > 0
+                ? `Assets + portfolio + pension − liabilities · ${fmtCAD(nwLast.assets)} + ${fmtCAD(nwLast.portfolio)} + ${fmtCAD(nwLast.pension)} − ${fmtCAD(nwLast.liabilities)}`
+                : `Assets + portfolio − liabilities · ${fmtCAD(nwLast.assets)} + ${fmtCAD(nwLast.portfolio)} − ${fmtCAD(nwLast.liabilities)}`
+            }
             action={
               <Segmented<Range>
                 options={[
