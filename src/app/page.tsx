@@ -15,13 +15,8 @@ import {
 } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
-import { Badge, Button, Card, CardHeader, Segmented, cn } from "@/components/ui";
-import {
-  DonutChart,
-  GroupedBars,
-  SeriesChart,
-  categoryColors,
-} from "@/components/charts";
+import { Button, Card, CardHeader, Segmented } from "@/components/ui";
+import { DonutChart, SeriesChart, categoryColors } from "@/components/charts";
 import { TransactionForm } from "@/components/forms";
 import { MonthlyChecklistButton, MonthlyChecklistModal } from "@/components/monthly-checklist";
 import { useFinance } from "@/lib/store";
@@ -44,11 +39,10 @@ import {
   fmtPct,
   fmtSignedCAD,
   fmtCAD,
-  labelDate,
   labelMonth,
   lastCompleteMonthKey,
 } from "@/lib/format";
-import { ACCOUNT_KIND_LABELS, primaryAccountId } from "@/lib/types";
+import { ACCOUNT_KIND_LABELS } from "@/lib/types";
 import { roundMoney } from "@/lib/money";
 
 /** How much of the net worth history to draw: months, or the whole record. */
@@ -245,14 +239,13 @@ export default function DashboardPage() {
   const yoy = {
     income: yearOverYear(data.avg.income, prev?.income, "up"),
     expenses: yearOverYear(data.avg.expenses, prev?.expenses, "down"),
-    freeCashFlow: yearOverYear(data.avg.freeCashFlow, prev?.freeCashFlow, "up"),
+    uncommittedLiquid: yearOverYear(data.avg.uncommittedLiquid, prev?.uncommittedLiquid, "up"),
     passive: yearOverYear(data.avg.passive, prev?.passive, "up"),
   };
 
   const spark = data.nwAll.slice(-18);
   const totalSpend = data.spend.reduce((s, c) => s + c.value, 0);
   const monthName = labelMonth(data.through);
-  const recent = transactions.slice(0, 8);
 
   return (
     <Shell
@@ -410,7 +403,7 @@ export default function DashboardPage() {
         {/* How the months average out */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
-            label="Average income"
+            label="Monthly income"
             value={fmtCAD(data.avg.income)}
             delta={yoy.income.delta}
             deltaValue={yoy.income.deltaValue}
@@ -422,7 +415,7 @@ export default function DashboardPage() {
             sparkColor="#34d399"
           />
           <StatCard
-            label="Average expenses"
+            label="Monthly expenses"
             value={fmtCAD(data.avg.expenses)}
             delta={yoy.expenses.delta}
             deltaValue={yoy.expenses.deltaValue}
@@ -434,19 +427,19 @@ export default function DashboardPage() {
             sparkColor="#fb7185"
           />
           <StatCard
-            label="Average free cash flow"
-            value={fmtCAD(data.avg.freeCashFlow)}
-            delta={yoy.freeCashFlow.delta}
-            deltaValue={yoy.freeCashFlow.deltaValue}
+            label="Monthly uncommitted liquid cash flow"
+            value={fmtCAD(data.avg.uncommittedLiquid)}
+            delta={yoy.uncommittedLiquid.delta}
+            deltaValue={yoy.uncommittedLiquid.deltaValue}
             deltaLabel="vs the year before"
-            tone={yoy.freeCashFlow.tone}
+            tone={yoy.uncommittedLiquid.tone}
             icon={<PiggyBank size={16} />}
-            spark={data.avg.series.map((p) => ({ v: p.freeCashFlow }))}
+            spark={data.avg.series.map((p) => ({ v: p.uncommittedLiquid }))}
             sparkKey="v"
             sparkColor="#22d3ee"
           />
           <StatCard
-            label="Average passive income"
+            label="Monthly passive income"
             value={fmtCAD(data.avg.passive)}
             delta={yoy.passive.delta}
             deltaValue={yoy.passive.deltaValue}
@@ -467,12 +460,12 @@ export default function DashboardPage() {
               subtitle={`Monthly cash flow · 12 months through ${monthName}`}
             />
             <div className="px-3 pb-4">
-              <GroupedBars
+              <SeriesChart
                 data={data.cf as unknown as Record<string, unknown>[]}
                 xKey="label"
-                bars={[
-                  { key: "income", name: "Income", color: "#34d399" },
-                  { key: "expenses", name: "Expenses", color: "#fb7185" },
+                series={[
+                  { key: "income", name: "Income", color: "#34d399", kind: "line" },
+                  { key: "expenses", name: "Expenses", color: "#fb7185", kind: "line" },
                 ]}
                 height={280}
                 yFmt={fmtCompact}
@@ -523,53 +516,6 @@ export default function DashboardPage() {
               height={280}
               yFmt={fmtCompact}
             />
-          </div>
-        </Card>
-
-        {/* Recent transactions */}
-        <Card>
-          <CardHeader
-            title="Recent transactions"
-            subtitle="Latest activity across all accounts"
-            action={
-              <Link href="/transactions">
-                <Button variant="ghost" size="sm">
-                  View all <ArrowRight size={13} />
-                </Button>
-              </Link>
-            }
-          />
-          <div className="overflow-x-auto px-2 pb-3">
-            <table className="w-full text-sm">
-              <tbody>
-                {recent.map((t) => {
-                  const acc = accounts.find((a) => a.id === primaryAccountId(t));
-                  return (
-                    <tr key={t.id} className="border-t border-line/60">
-                      <td className="px-3 py-2.5 text-ink-dim tabular-nums">
-                        {labelDate(t.date)}
-                      </td>
-                      <td className="px-3 py-2.5 font-medium">{t.payee}</td>
-                      <td className="hidden px-3 py-2.5 sm:table-cell">
-                        <Badge>{t.category}</Badge>
-                      </td>
-                      <td className="hidden px-3 py-2.5 text-ink-faint md:table-cell">
-                        {acc?.name ?? "—"}
-                      </td>
-                      <td
-                        className={cn(
-                          "px-3 py-2.5 text-right font-semibold tabular-nums",
-                          t.type === "income" ? "text-positive" : "text-ink",
-                        )}
-                      >
-                        {t.type === "income" ? "+" : "−"}
-                        {fmtCAD(t.amount, 2)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
           </div>
         </Card>
 
