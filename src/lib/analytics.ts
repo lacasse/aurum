@@ -872,13 +872,24 @@ export function monthTotals(
 export const PASSIVE_INCOME_CATEGORIES = new Set(["Dividends", "Interest"]);
 
 /**
- * Income that cannot be spent as it arrives.
+ * Income that does not arrive as money you can spend.
  *
- * A pension contribution is income in every sense except the one that matters
- * to a cash-flow figure — it lands in an account that cannot be drawn on — and
- * a loan drawn down is somebody else's money passing through.
+ * Each for its own reason. A pension contribution never reaches an account
+ * that can be drawn on. A dividend lands in the brokerage it was earned in,
+ * not in chequing — it is return on the portfolio rather than money to live
+ * on, and counting it would say the month had more in it than the month had.
+ * A loan drawn down does arrive, but it is somebody else's money passing
+ * through, and treating borrowing as cash flow flatters every figure it
+ * touches.
+ *
+ * Interest is not here, and neither is cashback: both land in the account and
+ * are recorded together under Interest.
  */
-export const ILLIQUID_INCOME_CATEGORIES = new Set(["RSP / Pension", "Loan Proceeds"]);
+export const NON_SPENDABLE_INCOME = new Set([
+  "RSP / Pension",
+  "Loan Proceeds",
+  "Dividends",
+]);
 
 export interface AverageMonth {
   /** How many months were averaged; fewer than asked for when the record is short. */
@@ -887,15 +898,18 @@ export interface AverageMonth {
   expenses: number;
   passive: number;
   /**
-   * What was left over: spendable income, less everything that was spent.
+   * Uncommitted liquid cash flow: what landed and stayed.
    *
-   * The money that actually landed and stayed — free to invest, to save, or
-   * to do nothing with. This used to subtract only the *committed* costs, so
-   * a month's dining, travel and shopping were counted as still available
-   * when they had already been spent; on this record that overstated it by
-   * about $1,550 a month.
+   * Everything that arrived in an account you can spend from — pay, interest
+   * and cashback, and anything else that turned up — less everything that was
+   * spent. What is left is uncommitted: free to invest, to save, or to do
+   * nothing with.
+   *
+   * It once subtracted only the *committed* costs, so a month's dining,
+   * travel and shopping were reported as still available when they had
+   * already been spent — about $1,550 a month too much on this record.
    */
-  freeCashFlow: number;
+  uncommittedLiquid: number;
 }
 
 export interface MonthlyAverage extends AverageMonth {
@@ -915,7 +929,7 @@ export interface MonthlyAverage extends AverageMonth {
     income: number;
     expenses: number;
     passive: number;
-    freeCashFlow: number;
+    uncommittedLiquid: number;
   }[];
 }
 
@@ -952,7 +966,7 @@ export function monthlyAverages(
       if (t.type === "income") {
         income += cents;
         if (PASSIVE_INCOME_CATEGORIES.has(t.category)) passive += cents;
-        if (!ILLIQUID_INCOME_CATEGORIES.has(t.category)) liquidIncome += cents;
+        if (!NON_SPENDABLE_INCOME.has(t.category)) liquidIncome += cents;
       } else if (t.type === "expense") {
         expenses += cents;
       }
@@ -964,7 +978,7 @@ export function monthlyAverages(
       passive: fromCents(passive),
       // Transfers are neither, which is what makes this the right figure for
       // "available to invest": moving money into a brokerage does not spend it.
-      freeCashFlow: fromCents(liquidIncome - expenses),
+      uncommittedLiquid: fromCents(liquidIncome - expenses),
     };
   });
 
@@ -986,7 +1000,7 @@ export function monthlyAverages(
     income: mean((m) => m.income),
     expenses: mean((m) => m.expenses),
     passive: mean((m) => m.passive),
-    freeCashFlow: mean((m) => m.freeCashFlow),
+    uncommittedLiquid: mean((m) => m.uncommittedLiquid),
     from: active[0]?.key ?? "",
     to: active[active.length - 1]?.key ?? "",
     previous: prior.months > 0 ? prior : null,
@@ -999,22 +1013,22 @@ function averageOver(transactions: Transaction[], keys: string[]): AverageMonth 
   const wanted = new Set(keys);
   const byMonth = new Map<
     string,
-    { income: number; expenses: number; passive: number; freeCashFlow: number }
+    { income: number; expenses: number; passive: number; uncommittedLiquid: number }
   >();
   for (const t of transactions) {
     const key = monthKeyOf(t.date);
     if (!wanted.has(key)) continue;
     const slot =
       byMonth.get(key) ??
-      { income: 0, expenses: 0, passive: 0, freeCashFlow: 0 };
+      { income: 0, expenses: 0, passive: 0, uncommittedLiquid: 0 };
     const cents = toCents(t.amount);
     if (t.type === "income") {
       slot.income += cents;
       if (PASSIVE_INCOME_CATEGORIES.has(t.category)) slot.passive += cents;
-      if (!ILLIQUID_INCOME_CATEGORIES.has(t.category)) slot.freeCashFlow += cents;
+      if (!NON_SPENDABLE_INCOME.has(t.category)) slot.uncommittedLiquid += cents;
     } else if (t.type === "expense") {
       slot.expenses += cents;
-      slot.freeCashFlow -= cents;
+      slot.uncommittedLiquid -= cents;
     }
     byMonth.set(key, slot);
   }
@@ -1029,7 +1043,7 @@ function averageOver(transactions: Transaction[], keys: string[]): AverageMonth 
     income: mean((m) => m.income),
     expenses: mean((m) => m.expenses),
     passive: mean((m) => m.passive),
-    freeCashFlow: mean((m) => m.freeCashFlow),
+    uncommittedLiquid: mean((m) => m.uncommittedLiquid),
   };
 }
 

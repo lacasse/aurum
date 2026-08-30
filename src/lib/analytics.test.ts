@@ -560,7 +560,24 @@ describe("monthlyAverages", () => {
     );
     assert.equal(avg.income, 5500);
     assert.equal(avg.expenses, 2200);
-    assert.equal(avg.freeCashFlow, 5000 - 1500 - 400 - 300);
+    assert.equal(avg.uncommittedLiquid, 5000 - 1500 - 400 - 300);
+  });
+
+  test("a dividend is return on the portfolio, not money to live on", () => {
+    // It lands in the brokerage that earned it. Counting it would say the
+    // month had more spendable money in it than the month had.
+    const avg = monthlyAverages(
+      [
+        txn({ amount: 4000, type: "income", category: "Salary", date: `${m3}-01` }),
+        txn({ amount: 90, type: "income", category: "Dividends", date: `${m3}-02` }),
+        txn({ amount: 40, type: "income", category: "Interest", date: `${m3}-03` }),
+      ],
+      12,
+    );
+    assert.equal(avg.income, 4130, "it is still income");
+    assert.equal(avg.passive, 130, "and still passive income");
+    // Interest — which is where cashback is recorded — does land, and counts.
+    assert.equal(avg.uncommittedLiquid, 4040);
   });
 
   test("a transfer is not spending, so it leaves free cash flow alone", () => {
@@ -578,7 +595,7 @@ describe("monthlyAverages", () => {
       ],
       12,
     );
-    assert.equal(avg.freeCashFlow, 5000);
+    assert.equal(avg.uncommittedLiquid, 5000);
   });
 
   test("months with only expenses still count", () => {
@@ -637,8 +654,9 @@ describe("monthlyAverages · the year before", () => {
     assert.equal(previous?.income, 3200, "dividends are income");
     assert.equal(previous?.expenses, 1400);
     assert.equal(previous?.passive, 200);
-    // Everything that landed, less everything spent — shopping included.
-    assert.equal(previous?.freeCashFlow, 3200 - 1000 - 400);
+    // Everything that landed, less everything spent — shopping included, and
+    // the dividend left out because it landed in the brokerage.
+    assert.equal(previous?.uncommittedLiquid, 3000 - 1000 - 400);
   });
 
   test("months that did not happen are not averaged into the previous window", () => {
