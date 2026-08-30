@@ -109,15 +109,82 @@ export function parseActivitiesCsv(
    * coincidence, and the cost of it is one row to re-add by hand.
    */
   const transferSides = new Set<string>();
+  /*
+   * A ticker that became another ticker.
+   *
+   * Norbert's Gambit buys the US-dollar listing of a currency ETF and sells the
+   * Canadian one, and the broker journals the shares across in between. The two
+   * listings are one security, so without this the file reads as a sale of
+   * shares that were never bought.
+   */
+  const alias = new Map<string, string>();
+  /*
+   * A security that arrived out of a demerger, and the holding it came from.
+   *
+   * The parent appears on the same day with a quantity of zero — it did not
+   * change, it just spun something off — so the row carrying shares is the new
+   * security and the row carrying none names where it came from.
+   */
+  const spinoffParent = new Map<string, string>();
+  /** Outgoing e-transfers of the same amount, month after month. */
+  const transferMonths = new Map<string, Set<string>>();
+
+  const swapsByDate = new Map<string, { ticker: string; quantity: number }[]>();
+  const demergersByDate = new Map<string, { ticker: string; quantity: number }[]>();
   for (const r of records) {
+    const date = (r.effective_date ?? "").trim();
     const sub = (r.activity_sub_type ?? "").trim();
     const desc = (r.description ?? "").trim();
+    const type = (r.activity_type ?? "").trim();
+    const ticker = (r.symbol ?? "").trim().toUpperCase();
+    const quantity = Number(r.quantity);
     const amount = Number(r.net_cash_amount);
-    if (!Number.isFinite(amount) || amount === 0) continue;
-    if (registrationOf(r.account_type ?? "") && isInternalTransfer(sub, desc)) {
-      transferSides.add(`${(r.effective_date ?? "").trim()}|${Math.abs(amount).toFixed(2)}`);
+
+    if (Number.isFinite(amount) && amount !== 0) {
+      if (registrationOf(r.account_type ?? "") && isInternalTransfer(sub, desc)) {
+        transferSides.add(`${date}|${Math.abs(amount).toFixed(2)}`);
+      }
+      if (sub === "E_TRFOUT") {
+        const key = Math.abs(amount).toFixed(2);
+        const months = transferMonths.get(key) ?? new Set<string>();
+        months.add(date.slice(0, 7));
+        transferMonths.set(key, months);
+      }
+    }
+    if (type === "ListingSwap" && ticker && Number.isFinite(quantity) && quantity !== 0) {
+      swapsByDate.set(date, [...(swapsByDate.get(date) ?? []), { ticker, quantity }]);
+    }
+    if (type === "CorporateAction" && sub === "DEMERGER" && ticker) {
+      demergersByDate.set(date, [
+        ...(demergersByDate.get(date) ?? []),
+        { ticker, quantity: Number.isFinite(quantity) ? quantity : 0 },
+      ]);
     }
   }
+  for (const rows of swapsByDate.values()) {
+    const out = rows.find((r) => r.quantity < 0);
+    const into = rows.find((r) => r.quantity > 0);
+    if (out && into && Math.abs(out.quantity) === into.quantity) {
+      alias.set(out.ticker, into.ticker);
+    }
+  }
+  for (const rows of demergersByDate.values()) {
+    const parent = rows.find((r) => r.quantity === 0);
+    const child = rows.find((r) => r.quantity > 0);
+    if (parent && child) spinoffParent.set(child.ticker, parent.ticker);
+  }
+
+  /*
+   * The same amount leaving by e-transfer in three separate months is rent, or
+   * something enough like it that the guess is worth making. The payee carries
+   * the amount so that correcting it teaches this one transfer rather than
+   * every e-transfer, and the correction is remembered by merchant.
+   */
+  const recurringOut = new Set(
+    [...transferMonths.entries()]
+      .filter(([, months]) => months.size >= 3)
+      .map(([amount]) => amount),
+  );
 
   for (const r of records) {
     const date = (r.effective_date ?? "").trim();
@@ -181,14 +248,38 @@ export function parseActivitiesCsv(
         drop("security rows with no symbol");
         return;
       }
+      /*
+       * Two rewrites before the row is recorded, both of them the file
+       * describing one thing in two names.
+       *
+       * A journalled ticker is the same security under its other listing, so
+       * it is recorded under the one the position ends up in. And shares that
+       * arrived out of a demerger were never bought: selling them is the
+       * parent holding paying out, so the proceeds are recorded as its
+       * dividend rather than as a sale of something with no cost behind it.
+       */
+      let ticker = alias.get(symbol) ?? symbol;
+      let effectiveType = tradeType;
+      let effectiveQty = qty;
+      let effectivePrice = price;
+      const parent = spinoffParent.get(ticker);
+      if (parent && tradeType === "sell") {
+        ticker = parent;
+        effectiveType = "dividend";
+        effectiveQty = 0;
+        effectivePrice = 0;
+      } else if (parent) {
+        drop("shares from a demerger, counted when they are sold");
+        return;
+      }
       const row: TradeRow = {
         id: rowId("trd"),
         date,
-        type: tradeType,
+        type: effectiveType,
         typeRaw: `${type} ${sub}`.trim(),
-        ticker: symbol,
-        quantity: Math.abs(qty),
-        pricePerUnit: Math.abs(price),
+        ticker,
+        quantity: Math.abs(effectiveQty),
+        pricePerUnit: Math.abs(effectivePrice),
         transactedAmount: Math.abs(cashAmount),
         registration,
         registrationRaw: accountType,
@@ -243,9 +334,25 @@ export function parseActivitiesCsv(
       case "FxExchange":
         drop("currency conversions");
         break;
-      case "CorporateAction":
       case "ListingSwap":
-        needsAttention.push(`${date} ${symbol || "—"}: ${type}${desc ? ` — ${desc}` : ""}`);
+        /*
+         * Two rows move the shares between listings and a third carries the
+         * broker's fee. The move is bookkeeping — the position is unchanged —
+         * so only the fee is money.
+         */
+        if (symbol) drop("journalled shares (Norbert's Gambit)");
+        else if (amount < 0) addCash("expense", "Journalling fee", "Fees", desc);
+        else drop("journalled shares (Norbert's Gambit)");
+        break;
+      case "CorporateAction":
+        if (sub === "DEMERGER" && (spinoffParent.has(symbol) || quantity === 0)) {
+          // Handled where the shares are sold, as a payout from the parent.
+          drop("demerger share adjustments");
+        } else {
+          needsAttention.push(
+            `${date} ${symbol || "—"}: ${type}${desc ? ` — ${desc}` : ""}`,
+          );
+        }
         break;
       case "MoneyMovement": {
         const d = desc.toLowerCase();
@@ -266,8 +373,18 @@ export function parseActivitiesCsv(
           drop("transfers between your own accounts");
           break;
         }
-        if (amount > 0) addCash("income", payeeFor(sub, desc), incomeHintFor(sub), desc);
-        else addCash("expense", payeeFor(sub, desc), "", desc);
+        if (amount > 0) {
+          addCash("income", payeeFor(sub, desc), incomeHintFor(sub), desc);
+        } else if (sub === "E_TRFOUT" && recurringOut.has(Math.abs(amount).toFixed(2))) {
+          addCash(
+            "expense",
+            `${payeeFor(sub, desc)} · $${Math.abs(amount).toFixed(2)}`,
+            "Housing",
+            desc,
+          );
+        } else {
+          addCash("expense", payeeFor(sub, desc), "", desc);
+        }
         break;
       }
       default:
