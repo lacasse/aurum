@@ -934,7 +934,7 @@ export default function InvestmentsPage() {
                               /* Not amber: that is what STALE uses, and a
                                  listing currency is a fact about the security,
                                  not a warning about its price. */
-                              <span className="shrink-0 rounded bg-sky-500/15 px-1 py-px text-[8px] font-medium text-sky-400">
+                              <span className="shrink-0 rounded bg-info/15 px-1 py-px text-[8px] font-medium text-info">
                                 USD
                               </span>
                             )}
