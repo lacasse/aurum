@@ -306,6 +306,13 @@ export function AccountForm({
   );
 }
 
+/** A number if one was typed, and nothing at all if the box was left empty. */
+function numberOrUndefined(raw: string): number | undefined {
+  if (raw.trim() === "") return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
 function AccountFormInner({
   initial,
   onClose,
@@ -325,6 +332,12 @@ function AccountFormInner({
   const [balance, setBalance] = useState(initial ? String(initial.balance) : "");
   const [balanceUSD, setBalanceUSD] = useState(
     initial?.balanceUSD ? String(initial.balanceUSD) : "",
+  );
+  const [pensionAnnual, setPensionAnnual] = useState(
+    initial?.pensionAnnual ? String(initial.pensionAnnual) : "",
+  );
+  const [pensionService, setPensionService] = useState(
+    initial?.pensionService ? String(initial.pensionService) : "",
   );
   const [error, setError] = useState("");
 
@@ -346,6 +359,9 @@ function AccountFormInner({
       // Debts and property are never sheltered, so the field is not stored
       // for them at all rather than being stored as a meaningless default.
       registration: supportsRegistration(kind) ? registration : undefined,
+      // Only a pension has these, and only once the statement has been read.
+      pensionAnnual: isPension(kind) ? numberOrUndefined(pensionAnnual) : undefined,
+      pensionService: isPension(kind) ? numberOrUndefined(pensionService) : undefined,
     };
     if (initial) updateAccount(initial.id, payload);
     else addAccount(payload);
@@ -418,6 +434,33 @@ function AccountFormInner({
             placeholder="0.00"
           />
         </Field>
+        {isPension(kind) ? (
+          <>
+            <Field
+              label="Annual pension earned"
+              hint="From your statement — the yearly income earned so far"
+            >
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={pensionAnnual}
+                onChange={(e) => setPensionAnnual(e.target.value)}
+                placeholder="Optional"
+              />
+            </Field>
+            <Field label="Pensionable service" hint="Years credited, from your statement">
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={pensionService}
+                onChange={(e) => setPensionService(e.target.value)}
+                placeholder="Optional"
+              />
+            </Field>
+          </>
+        ) : null}
         {isInvestmentAccount(kind) ? (
           <Field
             label="Cash balance (USD)"

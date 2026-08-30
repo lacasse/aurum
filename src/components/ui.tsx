@@ -21,12 +21,16 @@ export function cn(...inputs: ClassValue[]) {
 export function Card({
   className,
   children,
+  id,
 }: {
   className?: string;
   children: ReactNode;
+  /** For linking straight to a card, as the guide's sections do. */
+  id?: string;
 }) {
   return (
     <div
+      id={id}
       className={cn(
         "rounded-2xl border border-line bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.06)]",
         className,

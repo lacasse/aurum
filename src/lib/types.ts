@@ -29,6 +29,16 @@ export type Registration =
 export interface MonthlyPoint {
   month: string; // YYYY-MM
   value: number;
+  /**
+   * True when nobody entered this figure — the app worked it out.
+   *
+   * Only a defined benefit pension has one so far: its value cannot be
+   * derived, so a month the user skips is filled with the contributions made
+   * since the last real figure. Marked rather than silently mixed in, because
+   * a guess and a statement from the plan are not the same kind of number,
+   * and the next real figure replaces it.
+   */
+  estimated?: boolean;
 }
 
 export interface Account {
@@ -46,6 +56,14 @@ export interface Account {
   history: MonthlyPoint[];
   /** Tax treatment. Undefined for kinds where it does not apply. */
   registration?: Registration;
+  /**
+   * What a defined benefit plan's statement says, for the pension you keep
+   * rather than the lump sum you could leave with: the annual pension earned
+   * so far, and the years of service that earned it. Both optional, both
+   * entered by hand, both meaningless on any other kind of account.
+   */
+  pensionAnnual?: number;
+  pensionService?: number;
 }
 
 /**

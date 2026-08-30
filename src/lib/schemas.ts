@@ -89,6 +89,9 @@ export const monthKeySchema = z.string().regex(MONTH, "month must be YYYY-MM");
 export const monthlyPointSchema = z.object({
   month: z.string().regex(MONTH),
   value: z.coerce.number().finite(),
+  // Whether the app worked the figure out rather than being told it. Absent
+  // on every point that was entered, which is nearly all of them.
+  estimated: z.boolean().optional(),
 });
 
 /* ------------------------------------------------------------------ */
@@ -113,6 +116,10 @@ export const accountSchema = z.object({
     .enum(REGISTRATIONS as unknown as [Registration, ...Registration[]])
     .optional()
     .catch(undefined),
+  // Only a defined benefit pension has these, and only once its statement
+  // has been read: absent is the normal case, not a missing value.
+  pensionAnnual: z.coerce.number().finite().nonnegative().optional().catch(undefined),
+  pensionService: z.coerce.number().finite().nonnegative().optional().catch(undefined),
 });
 
 /**

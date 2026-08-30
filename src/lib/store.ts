@@ -56,6 +56,8 @@ export type AccountInput = {
   balance: number;
   balanceUSD?: number;
   registration?: Account["registration"];
+  pensionAnnual?: number;
+  pensionService?: number;
 };
 
 interface FinanceStore extends FinanceData {
@@ -73,6 +75,8 @@ interface FinanceStore extends FinanceData {
   deleteTransaction: (id: string) => void;
   addAccount: (input: AccountInput) => void;
   updateAccount: (id: string, input: AccountInput) => void;
+  /** Fill in a month nobody entered, marked as the app's own working. */
+  recordEstimatedBalance: (id: string, value: number) => void;
   deleteAccount: (id: string) => void;
   /**
    * Move an investment account's uninvested cash.
@@ -327,6 +331,8 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
           balance: input.balance,
           history: [{ month: currentMonthKey(), value: input.balance }],
           registration: input.registration,
+          pensionAnnual: input.pensionAnnual,
+          pensionService: input.pensionService,
         };
         set((s) => ({ accounts: [...s.accounts, account] }));
         api.createAccount(account).catch(report);
@@ -344,7 +350,31 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
               kind: input.kind,
               balance: input.balance,
               registration: input.registration,
+              pensionAnnual: input.pensionAnnual,
+              pensionService: input.pensionService,
             });
+            return updated;
+          }),
+        }));
+        if (updated) api.updateAccount(updated).catch(report);
+      },
+
+      /*
+       * Record a month the user chose not to fill in.
+       *
+       * Written like any other month so every chart simply works, and flagged
+       * so nothing later mistakes it for a figure the plan reported.
+       */
+      recordEstimatedBalance: (id, value) => {
+        let updated: Account | undefined;
+        const month = currentMonthKey();
+        set((s) => ({
+          accounts: s.accounts.map((a) => {
+            if (a.id !== id) return a;
+            const history = a.history.filter((p) => p.month !== month);
+            history.push({ month, value, estimated: true });
+            history.sort((x, y) => x.month.localeCompare(y.month));
+            updated = { ...a, balance: value, history };
             return updated;
           }),
         }));

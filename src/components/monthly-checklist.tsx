@@ -19,6 +19,7 @@ import {
   txnKey,
 } from "@/lib/csv";
 import { isPension, sidesFor, type MonthlySnapshot } from "@/lib/types";
+import { contributionsByMonth, estimateValue } from "@/lib/pension";
 
 type Step = "income" | "import" | "trades" | "pension" | "snapshot";
 
@@ -550,9 +551,26 @@ function SnapshotStep({ number, onComplete }: { number: number; onComplete: () =
  */
 function PensionStep({ number, onNext }: { number: number; onNext: () => void }) {
   const accounts = useFinance((s) => s.accounts);
+  const transactions = useFinance((s) => s.transactions);
   const updateAccount = useFinance((s) => s.updateAccount);
+  const recordEstimatedBalance = useFinance((s) => s.recordEstimatedBalance);
   const pensions = accounts.filter((a) => isPension(a.kind));
   const [values, setValues] = useState<Record<string, string>>({});
+
+  const byMonth = useMemo(() => contributionsByMonth(transactions), [transactions]);
+
+  /*
+   * Skipping is a legitimate answer: the figure comes from the plan, and the
+   * plan is not always to hand at month end. So the month is filled with the
+   * contributions made since the last real figure — money that certainly went
+   * in — and flagged as the app's own working until a real one replaces it.
+   */
+  const skip = () => {
+    for (const acc of pensions) {
+      recordEstimatedBalance(acc.id, estimateValue(acc, byMonth));
+    }
+    onNext();
+  };
 
   const submit = () => {
     for (const acc of pensions) {
@@ -571,6 +589,11 @@ function PensionStep({ number, onNext }: { number: number; onNext: () => void })
     onNext();
   };
 
+  const estimated = pensions.reduce(
+    (sum, acc) => sum + estimateValue(acc, byMonth),
+    0,
+  );
+
   return (
     <Card className="p-6">
       <h3 className="text-sm font-semibold">Step {number} · Update the pension</h3>
@@ -587,7 +610,9 @@ function PensionStep({ number, onNext }: { number: number; onNext: () => void })
               label={acc.name}
               hint={
                 last
-                  ? `${fmtCAD(last.value, 2)} recorded for ${labelMonth(last.month)}`
+                  ? `${fmtCAD(last.value, 2)} for ${labelMonth(last.month)}${
+                      last.estimated ? " (estimated)" : " (from your plan)"
+                    }`
                   : "Nothing recorded yet"
               }
             >
@@ -605,15 +630,25 @@ function PensionStep({ number, onNext }: { number: number; onNext: () => void })
           );
         })}
       </div>
-      <div className="mt-4 flex items-center justify-between">
+      <div className="mt-4 flex items-center justify-between gap-3">
         <p className="text-[11px] text-ink-faint">
           Recorded against {labelMonth(currentMonthKey())}; earlier months are
           left as they are.
         </p>
-        <Button onClick={submit}>
-          Next <ArrowRight size={14} />
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="ghost" onClick={skip}>
+            Skip — estimate it
+          </Button>
+          <Button onClick={submit}>
+            Next <ArrowRight size={14} />
+          </Button>
+        </div>
       </div>
+      <p className="mt-2 text-[11px] text-ink-faint">
+        Skipping carries the last figure forward plus the contributions made
+        since — {fmtCAD(estimated, 2)} for {labelMonth(currentMonthKey())} —
+        and marks it as an estimate until you enter the real one.
+      </p>
     </Card>
   );
 }
