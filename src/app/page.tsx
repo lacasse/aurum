@@ -31,7 +31,6 @@ import {
   avgSpendByCategory,
   cashflowSeries,
   consolidateHoldings,
-  firstAccountMonth,
   firstFlowMonth,
   monthlyAverages,
   monthsSince,
@@ -103,11 +102,19 @@ export default function DashboardPage() {
     const through = lastCompleteMonthKey();
 
     /*
-     * How far back the record goes: the earliest of the first recorded account
-     * balance, the first month-end portfolio value, and the first trade.
+     * How far back this chart can honestly go: the first month there is any
+     * portfolio data for.
+     *
+     * It used to start at the first recorded account balance, which is over a
+     * year earlier, and drew the portfolio as $0 across all of those months —
+     * stating as fact something that was merely unrecorded. Net worth went
+     * with it, showing tens of thousands *below* zero for months when the
+     * portfolio was the largest thing owned. A month with no portfolio figure
+     * is not a month with no portfolio, so the line begins where the record
+     * does. The cash and debt before then are still drawn in full on the
+     * accounts page, where no portfolio is claimed.
      */
     const starts = [
-      firstAccountMonth(accounts),
       Object.keys(snapshots).sort()[0] ?? null,
       firstFlowMonth(holdings),
     ].filter((m): m is string => m !== null);

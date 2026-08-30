@@ -127,7 +127,20 @@ export default function AccountsPage() {
     const pensions = accounts
       .filter((a) => isPension(a.kind))
       .map((a) => ({ account: a, summary: summarizePension(a, transactions) }));
-    return { series, assets, liabilities, pension, pensions };
+    /*
+     * Net worth is only net worth once the portfolio is in it. Before the
+     * first recorded portfolio value the series carries cash and debt alone,
+     * which on this record reads as months of being tens of thousands in the
+     * red — so the sparkline starts where the portfolio does.
+     */
+    const portfolioFrom =
+      [Object.keys(snapshots).sort()[0] ?? null, firstFlowMonth(holdings)]
+        .filter((m): m is string => m !== null)
+        .sort()[0] ?? null;
+    const netSpark = portfolioFrom
+      ? series.filter((p) => p.key >= portfolioFrom)
+      : series;
+    return { series, netSpark, assets, liabilities, pension, pensions };
   }, [accounts, holdings, transactions, snapshots, usdCadRate]);
 
   if (!ready) return <PageSkeleton />;
@@ -206,7 +219,7 @@ export default function AccountsPage() {
                 : `incl. ${fmtCAD(portfolio)} portfolio`
             }
             icon={<PiggyBank size={16} />}
-            spark={data.series.map((p) => ({ v: p.net }))}
+            spark={data.netSpark.map((p) => ({ v: p.net }))}
             sparkKey="v"
             sparkColor="#34d399"
           />
