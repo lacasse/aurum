@@ -137,14 +137,16 @@ const EXPENSE_RULES: [string, string[]][] = [
   ["Housing", ["rent", "mortgage", "landlord", "hoa", "property mgmt", "property management", "apartments", "leasing office"]],
   ["Insurance", ["insurance", "geico", "progressive", "allstate", "state farm", "lemonade", "esurance"]],
   ["Utilities", ["electric", "power co", "water bill", "sewer", "utility", "utilities", "internet", "comcast", "xfinity", "spectrum", "verizon", "at&t", "t-mobile", "tmobile", "fiber", "broadband", "cable tv", "con edison", "coned", "pg&e", "national grid", "waste management", "recycling"]],
-  ["Subscriptions", ["netflix", "spotify", "hulu", "disney+", "disney plus", "hbo", "max.com", "peacock", "paramount+", "apple.com/bill", "icloud", "prime video", "youtube premium", "audible", "dropbox", "adobe", "notion", "figma", "1password", "patreon", "substack", "subscription", "apple one", "nytimes", "wsj.com"]],
+  ["Subscriptions", ["netflix", "spotify", "hulu", "disney+", "disney plus", "hbo", "max.com", "peacock", "paramount+", "apple.com/bill", "icloud", "prime video", "youtube premium", "audible", "dropbox", "adobe", "notion", "figma", "1password", "patreon", "substack", "subscription", "apple one", "nytimes", "wsj.com", "anthropic", "openai", "claude", "onlyfans", "crave", "freedom mobile", "rogers", "bell canada", "telus", "koodo", "fido"]],
   ["Health", ["pharmacy", "cvs", "walgreens", "rite aid", "dentist", "dental", "doctor", "clinic", "hospital", "medical", "optometry", "vision", "lenscrafters", "gym", "fitness", "equinox", "planet fitness", "yoga", "pilates", "peloton", "therapy", "therapist", "labcorp", "quest diagnostics", "urgent care"]],
-  ["Groceries", ["whole foods", "trader joe", "safeway", "costco", "kroger", "aldi", "wegmans", "publix", "sprouts", "heb ", "grocery", "supermarket", "fresh market", "food lion", "stop & shop", "giant eagle", "winco", "meijer", "grocery store", "supermarkets"]],
-  ["Dining", ["restaurant", "cafe", "coffee", "starbucks", "dunkin", "peet", "chipotle", "sweetgreen", "pizzeria", "pizza", "sushi", "ramen", "grill", "diner", "mcdonald", "burger", "shake shack", "five guys", "taco", "doordash", "uber eats", "ubereats", "grubhub", "seamless", "postmates", "bakery", "bistro", "deli", "poke", "curry", "noodle", "steakhouse", "wendy", "panera", "chick-fil-a", "kfc", "jersey mike", "delis", "quick food", "eating place", "food & drink"]],
-  ["Transport", ["shell", "chevron", "exxon", "mobil ", "gas station", "fuel", "uber ", "lyft", "taxi", "metro", "transit", "parking", "toll", "zipcar", "car wash", "jiffy lube", "autozone", "pep boys", "valvoline", "service station", "petroleum"]],
+  ["Groceries", ["whole foods", "trader joe", "safeway", "costco", "kroger", "aldi", "wegmans", "publix", "sprouts", "heb ", "grocery", "supermarket", "fresh market", "food lion", "stop & shop", "giant eagle", "winco", "meijer", "grocery store", "supermarkets", "loblaw", "no frills", "food basics", "sobeys", "farm boy", "independent grocer", "yig", "giant tiger", "fortinos", "provigo", "maxi ", "iga ", "walmart supercenter", "real canadian"]],
+  ["Dining", ["restaurant", "cafe", "coffee", "starbucks", "dunkin", "peet", "chipotle", "sweetgreen", "pizzeria", "pizza", "sushi", "ramen", "grill", "diner", "mcdonald", "burger", "shake shack", "five guys", "taco", "doordash", "uber eats", "ubereats", "grubhub", "seamless", "postmates", "bakery", "bistro", "deli", "poke", "curry", "noodle", "steakhouse", "wendy", "panera", "chick-fil-a", "kfc", "jersey mike", "delis", "quick food", "eating place", "food & drink", "tim horton", "a&w", "harvey", "swiss chalet", "st-hubert", "boston pizza", "osmow", "shawarma", "banh mi", "chatime", "happy goat", "second cup", "lcbo", "beer store", "saq ", "brewery", "winery", "vineyard", "pub "]],
+  ["Transport", ["shell", "chevron", "exxon", "mobil ", "gas station", "fuel", "uber ", "lyft", "taxi", "metro", "transit", "parking", "toll", "zipcar", "car wash", "jiffy lube", "autozone", "pep boys", "valvoline", "service station", "petroleum", "petro-canada", "petro canada", "esso", "husky", "ultramar", "circle k", "presto", "oc transpo", "compass account", "translink", "via rail", "easypark", "impark", "indigo park", "green p"]],
   ["Travel", ["delta air", "united air", "american air", "southwest", "jetblue", "alaska air", "spirit air", "frontier", "airbnb", "vrbo", "hotel", "marriott", "hilton", "hyatt", "holiday inn", "best western", "expedia", "booking.com", "priceline", "kayak", "airline", "airways", "flight", "airport", "cruise", "motel", "inn & suites"]],
   ["Entertainment", ["steam", "playstation", "xbox", "nintendo", "epic games", "battle.net", "cinema", "amc ", "regal", "movie", "theater", "concert", "ticketmaster", "live nation", "livenation", "stubhub", "seatgeek", "museum", "bowling", "arcade", "golf", "ski ", "eventbrite", "bandcamp"]],
   ["Shopping", ["amazon", "amzn", "target", "walmart", "best buy", "bestbuy", "ikea", "wayfair", "etsy", "ebay", "nordstrom", "macy", "kohl", "uniqlo", "h&m", "zara", "gap", "old navy", "banana republic", "nike", "adidas", "sephora", "ulta", "home depot", "lowes", "lowe's", "ace hardware", "apple store", "dell", "lenovo", "newegg", "b&h photo", "bhphoto", "shopify", "aliexpress", "temu", "shein", "marshalls", "tj maxx", "homegoods", "department store", "clothing", "apparel", "retail stores"]],
+  ["Household", ["canadian tire", "home hardware", "rona ", "ritchie feed", "dollarama", "home depot", "cleaning", "hardware"]],
+  ["Dog", ["pet valu", "petsmart", "petco", "pet food", "veterinar", "vet clinic", "grooming"]],
   ["Fees", ["atm fee", "service fee", "late fee", "interest charge", "foreign transaction", "annual fee", "overdraft", "maintenance fee", "wire fee", "convenience fee", "processing fee"]],
 ];
 
@@ -155,6 +157,60 @@ const INCOME_RULES: [string, string[]][] = [
   ["Refund", ["refund", "reimburs", "cash back", "statement credit", "returned item", "return "]],
   ["Gifts", ["gift"]],
 ];
+
+/**
+ * What card issuers call things, and what this app calls them.
+ *
+ * Every issuer ships its own taxonomy, and the names rarely line up: a card
+ * statement's "Restaurants" is this app's "Dining", and its "Gas, parking, and
+ * tolls" is "Transport". Without the translation every row falls through to
+ * keyword guessing, which gets the obvious ones and files the rest under Other.
+ */
+const ISSUER_CATEGORIES: Record<string, string> = {
+  restaurants: "Dining",
+  "bars and nightlife": "Dining",
+  "other food and drink": "Dining",
+  "fast food": "Dining",
+  coffee: "Dining",
+  "other shopping": "Shopping",
+  clothing: "Shopping",
+  electronics: "Shopping",
+  "home and auto": "Household",
+  "house items": "Household",
+  "gas, parking, and tolls": "Transport",
+  "public transit": "Transport",
+  "taxis and rideshares": "Transport",
+  "other transportation": "Transport",
+  "car payment": "Transport",
+  "auto insurance": "Insurance",
+  "home insurance": "Insurance",
+  "life insurance": "Insurance",
+  "internet and phone": "Utilities",
+  "utilities and bills": "Utilities",
+  medical: "Health",
+  "other health": "Health",
+  pharmacy: "Health",
+  beauty: "Health",
+  fitness: "Health",
+  pets: "Dog",
+  hotels: "Travel",
+  flights: "Travel",
+  "kids' activities": "Entertainment",
+  entertainment: "Entertainment",
+  "movies and music": "Entertainment",
+  subscriptions: "Subscriptions",
+  groceries: "Groceries",
+  rent: "Housing",
+  mortgage: "Housing",
+  charity: "Donations",
+  donations: "Donations",
+  education: "Education",
+  "bank fees": "Fees",
+  services: "Other",
+  miscellaneous: "Other",
+  "other personal": "Other",
+  uncategorized: "Other",
+};
 
 export interface Suggestion {
   category: string;
@@ -185,6 +241,8 @@ export function suggestCategory(
     if (allowed.some((c) => c.toLowerCase() === csv)) {
       return { category: titleCase(csv), confident: true };
     }
+    const mapped = resolveCategory(ISSUER_CATEGORIES[csv], allowed);
+    if (mapped) return { category: mapped, confident: true };
     for (const cat of allowed) {
       if (csv.includes(cat.toLowerCase())) return { category: cat, confident: true };
     }
@@ -194,12 +252,38 @@ export function suggestCategory(
   const text = `${payee} ${desc} ${note}`.toLowerCase();
   const baseRules =
     userCategories || type === "expense" ? EXPENSE_RULES : INCOME_RULES;
-  const rules = baseRules.filter(([category]) => allowed.includes(category));
-  for (const [category, keywords] of rules) {
-    if (keywords.some((k) => text.includes(k))) return { category, confident: true };
+  for (const [name, keywords] of baseRules) {
+    const category = resolveCategory(name, allowed);
+    if (category && keywords.some((k) => text.includes(k))) {
+      return { category, confident: true };
+    }
   }
 
   return { category: fallback, confident: false };
+}
+
+/**
+ * The user's name for a category this code knows by another name.
+ *
+ * Categories are the user's to rename, and renaming one used to switch off
+ * every rule that mentioned it: a list saying "Dining" matched nothing once
+ * the category had become "Drinks & Dining", so every restaurant on the
+ * statement arrived as Other. Matching is therefore by containment in either
+ * direction rather than by equality.
+ */
+function resolveCategory(
+  name: string | undefined,
+  allowed: readonly string[],
+): string | null {
+  if (!name) return null;
+  const wanted = name.toLowerCase();
+  const exact = allowed.find((c) => c.toLowerCase() === wanted);
+  if (exact) return exact;
+  const near = allowed.find((c) => {
+    const other = c.toLowerCase();
+    return other.includes(wanted) || wanted.includes(other);
+  });
+  return near ?? null;
 }
 
 function titleCase(s: string): string {

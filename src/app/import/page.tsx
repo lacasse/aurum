@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -19,63 +18,112 @@ import {
   Card,
   CardHeader,
   EmptyState,
-  Input,
   Select,
   cn,
 } from "@/components/ui";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
+import { ImportedRow, suggestCategory, txnKey } from "@/lib/csv";
 import {
-  ImportedRow,
-  ParseResult,
-  parseCsvFile,
-  suggestCategory,
-  txnKey,
-} from "@/lib/csv";
-import { sidesFor } from "@/lib/types";
+  TradeRow,
+  accumulatePositions,
+  markAlreadyImported,
+  positionToHolding,
+  tradeKey,
+} from "@/lib/trades";
+import { RoutedFile, labelFor, routeFile } from "@/lib/import-router";
+import {
+  REGISTRATION_LABELS,
+  Registration,
+  TRANSFER_CATEGORY,
+  isInvestmentAccount,
+  isLiability,
+  sidesFor,
+} from "@/lib/types";
 import { fmtCAD } from "@/lib/format";
 
 type Step = "upload" | "review" | "done";
 
+/**
+ * One import for every kind of file.
+ *
+ * There used to be two pages, and the split was the app's problem rather than
+ * the user's: a monthly export from a brokerage carries salary, bill payments,
+ * transfers, trades and dividends in one file, and there was no door it fit
+ * through. Files now say what they are and are read accordingly, so the
+ * monthly routine is drop both exports here and look over what came out.
+ */
 export default function ImportPage() {
   const ready = useReady();
   const accounts = useFinance((s) => s.accounts);
+  const holdings = useFinance((s) => s.holdings);
   const transactions = useFinance((s) => s.transactions);
   const merchantRules = useFinance((s) => s.merchantRules);
   const userCategories = useFinance((s) => s.categories);
   const addTransaction = useFinance((s) => s.addTransaction);
+  const addHolding = useFinance((s) => s.addHolding);
+  const updateHolding = useFinance((s) => s.updateHolding);
+  const adjustAccountCash = useFinance((s) => s.adjustAccountCash);
   const setMerchantRule = useFinance((s) => s.setMerchantRule);
 
   const [step, setStep] = useState<Step>("upload");
-  const [files, setFiles] = useState<ParseResult[]>([]);
-  const [rows, setRows] = useState<ImportedRow[]>([]);
+  const [files, setFiles] = useState<RoutedFile[]>([]);
+  const [cashRows, setCashRows] = useState<ImportedRow[]>([]);
+  const [tradeRows, setTradeRows] = useState<TradeRow[]>([]);
   const [accountId, setAccountId] = useState("");
-  const [importedCount, setImportedCount] = useState(0);
-  const [learnedCount, setLearnedCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [result, setResult] = useState<{
+    transactions: number;
+    created: number;
+    updated: number;
+    transfers: number;
+    learned: number;
+  } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const existingKeys = useMemo(
+  const investmentAccounts = accounts.filter((a) => isInvestmentAccount(a.kind));
+  const cashAccountId =
+    accounts.find((a) => !isInvestmentAccount(a.kind) && !isLiability(a.kind))?.id ?? "";
+  const effectiveAccountId = accountId || cashAccountId || accounts[0]?.id || "";
+  const accountIdFor = (registration: Registration): string =>
+    investmentAccounts.find((a) => a.registration === registration)?.id ?? "";
+
+  const existingTxnKeys = useMemo(
     () => new Set(transactions.map((t) => txnKey(t.date, t.amount, t.payee))),
     [transactions],
   );
 
-  const effectiveAccountId =
-    accountId ||
-    accounts.find((a) => a.kind === "credit")?.id ||
-    accounts[0]?.id ||
-    "";
+  /*
+   * Trades are checked against what is stored, not just against the other rows
+   * in the file: the point of dropping the same export twice is that the second
+   * one should do nothing.
+   */
+  const checkedTrades = useMemo(
+    () =>
+      markAlreadyImported(
+        tradeRows,
+        accountIdFor,
+        holdings,
+        transactions.filter((t) => t.type === "transfer"),
+        new Set(investmentAccounts.map((a) => a.id)),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tradeRows, holdings, transactions, accounts],
+  );
 
-  const totalRows = files.reduce((s, f) => s + f.rows.length, 0);
-  const included = rows.filter((r) => r.include);
-  const includedExpenses = included
-    .filter((r) => r.type === "expense")
-    .reduce((s, r) => s + r.amount, 0);
-  const includedIncome = included
-    .filter((r) => r.type === "income")
-    .reduce((s, r) => s + r.amount, 0);
-  const dupCount = rows.filter((r) => r.dup).length;
+  const includedCash = cashRows.filter((r) => r.include);
+  const includedTrades = checkedTrades.filter((r) => r.include);
+  const dupCash = cashRows.filter((r) => r.dup).length;
+  const dupTrades = checkedTrades.filter((r) => r.duplicate).length;
+  const needsAttention = files.flatMap((f) => f.needsAttention);
+  const unmatchedRegistrations = [
+    ...new Set(
+      includedTrades
+        .map((r) => r.registration)
+        .filter((reg): reg is Registration => reg !== null && !accountIdFor(reg)),
+    ),
+  ];
 
   const handleFiles = async (list: FileList | File[]) => {
     const csvs = Array.from(list).filter(
@@ -83,21 +131,33 @@ export default function ImportPage() {
     );
     if (csvs.length === 0) return;
     setBusy(true);
-    const results = await Promise.all(
-      csvs.map((f) => parseCsvFile(f, existingKeys, merchantRules, userCategories)),
-    );
-    setFiles((prev) => [...prev, ...results]);
-    setRows((prev) => [...prev, ...results.flatMap((r) => r.rows)]);
+    // Keys carry forward across files so an overlap between two exports — the
+    // usual case when a month is downloaded twice — is caught, not counted.
+    const txnKeys = new Set([...existingTxnKeys, ...cashRows.map((r) => txnKey(r.date, r.amount, r.payee))]);
+    const tKeys = new Set(tradeRows.map(tradeKey));
+    const routed: RoutedFile[] = [];
+    for (const file of csvs) {
+      const res = await routeFile(file, txnKeys, tKeys, merchantRules, userCategories);
+      for (const r of res.cash) txnKeys.add(txnKey(r.date, r.amount, r.payee));
+      for (const t of res.trades) tKeys.add(tradeKey(t));
+      routed.push(res);
+    }
+    setFiles((prev) => [...prev, ...routed]);
+    setCashRows((prev) => [...prev, ...routed.flatMap((r) => r.cash)]);
+    setTradeRows((prev) => [...prev, ...routed.flatMap((r) => r.trades)]);
     setBusy(false);
   };
 
   const removeFile = (name: string) => {
     setFiles((prev) => prev.filter((f) => f.fileName !== name));
-    setRows((prev) => prev.filter((r) => r.sourceFile !== name));
+    setCashRows((prev) => prev.filter((r) => r.sourceFile !== name));
+    setTradeRows((prev) => prev.filter((r) => r.sourceFile !== name));
   };
 
-  const updateRow = (id: string, patch: Partial<ImportedRow>) =>
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const updateCash = (id: string, patch: Partial<ImportedRow>) =>
+    setCashRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const updateTrade = (id: string, patch: Partial<TradeRow>) =>
+    setTradeRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
   const changeType = (row: ImportedRow, type: ImportedRow["type"]) => {
     const s = suggestCategory(
@@ -107,17 +167,22 @@ export default function ImportPage() {
       row.csvCategory,
       type,
       merchantRules,
-      userCategories,
+      type === "expense" ? userCategories : undefined,
     );
-    updateRow(row.id, { type, category: s.category, suggestedCategory: s.category, confident: s.confident });
+    updateCash(row.id, {
+      type,
+      category: s.category,
+      suggestedCategory: s.category,
+      confident: s.confident,
+    });
   };
 
   const save = () => {
-    const valid = included.filter(
+    let learned = 0;
+    const validCash = includedCash.filter(
       (r) => r.payee.trim() && r.amount > 0 && r.date && effectiveAccountId,
     );
-    let learned = 0;
-    for (const r of valid) {
+    for (const r of validCash) {
       addTransaction({
         date: r.date,
         type: r.type,
@@ -127,15 +192,64 @@ export default function ImportPage() {
         payee: r.payee.trim(),
         note: r.note,
       });
+      /*
+       * A category the user corrected is remembered against the merchant, so
+       * the same shop is filed correctly next month without being asked again.
+       */
       if (r.category !== r.suggestedCategory) {
         setMerchantRule(r.payee, r.category);
         learned += 1;
       }
     }
-    setImportedCount(valid.length);
-    setLearnedCount(learned);
-    setRows([]);
+
+    const { positions, cashDeltas, transfers } = accumulatePositions(
+      includedTrades,
+      accountIdFor,
+      holdings,
+    );
+    let created = 0;
+    let updated = 0;
+    for (const pos of positions) {
+      const input = positionToHolding(pos);
+      if (pos.existing) {
+        updateHolding(pos.existing.id, input);
+        updated++;
+      } else if (input.shares > 0 || pos.everHeld) {
+        addHolding(input);
+        created++;
+      }
+    }
+    for (const t of transfers) {
+      const from = t.deposit ? cashAccountId : t.accountId;
+      const to = t.deposit ? t.accountId : cashAccountId;
+      const label = REGISTRATION_LABELS[t.registration];
+      if (from && to && from !== to) {
+        addTransaction({
+          date: t.date,
+          type: "transfer",
+          amount: t.amount,
+          category: TRANSFER_CATEGORY,
+          sourceAccountId: from,
+          destinationAccountId: to,
+          payee: t.deposit ? `Deposit to ${label}` : `Withdrawal from ${label}`,
+          note: `Imported: ${label} ${t.deposit ? "deposit" : "withdrawal"}`,
+        });
+      }
+    }
+    for (const [id, delta] of cashDeltas) {
+      adjustAccountCash(id, Math.round(delta * 100) / 100);
+    }
+
+    setResult({
+      transactions: validCash.length,
+      created,
+      updated,
+      transfers: transfers.length,
+      learned,
+    });
     setFiles([]);
+    setCashRows([]);
+    setTradeRows([]);
     setStep("done");
   };
 
@@ -143,372 +257,395 @@ export default function ImportPage() {
 
   return (
     <Shell
-      title="Import transactions"
-      subtitle="Upload credit card CSV exports — nothing is saved until you review"
+      title="Import"
+      subtitle="Card statements, account activity and trade history — one place, any of them"
     >
-      {step === "upload" ? (
-        <div className="mx-auto max-w-3xl space-y-4">
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => inputRef.current?.click()}
-            onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragOver(true);
-            }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragOver(false);
-              handleFiles(e.dataTransfer.files);
-            }}
-            className={cn(
-              "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-12 text-center transition-colors",
-              dragOver
-                ? "border-brand bg-brand/5"
-                : "border-line bg-surface hover:border-brand/50",
-            )}
-          >
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand/10 text-brand">
-              <Upload size={22} />
-            </span>
-            <div>
-              <p className="text-sm font-semibold">
-                {busy ? "Parsing…" : "Drop CSV files here, or click to browse"}
-              </p>
-              <p className="mx-auto mt-1 max-w-md text-xs text-ink-faint">
-                Multiple files are welcome. Both Amex-style exports and simple{" "}
-                <code className="text-[11px]">transaction_date / merchant / amount</code>{" "}
-                formats are detected automatically.
-              </p>
-            </div>
-            <input
-              ref={inputRef}
-              type="file"
-              accept=".csv,text/csv"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files) handleFiles(e.target.files);
-                e.target.value = "";
-              }}
-            />
-          </div>
+      <div className="space-y-4">
+        {step === "upload" && (
+          <Card className="p-6">
+            <h3 className="text-sm font-semibold">Drop your exports</h3>
+            <p className="mt-1 text-xs text-ink-faint">
+              Each file is read for what it holds: a card statement becomes
+              spending, an account activity export becomes income, transfers,
+              trades and dividends at once.
+            </p>
 
-          {files.length > 0 ? (
-            <Card>
-              <CardHeader
-                title="Uploaded files"
-                subtitle={`${totalRows} transaction${totalRows === 1 ? "" : "s"} ready for review`}
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => inputRef.current?.click()}
+              onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                handleFiles(e.dataTransfer.files);
+              }}
+              className={cn(
+                "mt-4 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-10 text-center transition-colors",
+                dragOver
+                  ? "border-brand bg-brand/5"
+                  : "border-line bg-surface hover:border-brand/50",
+              )}
+            >
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand/10 text-brand">
+                <Upload size={18} />
+              </span>
+              <p className="text-sm font-medium">
+                {busy ? "Reading…" : "Drop CSV files here, or click to browse"}
+              </p>
+              <p className="text-xs text-ink-faint">
+                Several at once is fine — duplicates between them are caught
+              </p>
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".csv,text/csv"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) handleFiles(e.target.files);
+                  e.target.value = "";
+                }}
               />
-              <ul className="divide-y divide-line/60 px-2 pb-2">
+            </div>
+
+            {files.length > 0 && (
+              <ul className="mt-4 space-y-2">
                 {files.map((f) => (
-                  <li key={f.fileName} className="flex items-center gap-3 px-3 py-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-elevated text-ink-dim">
-                      <FileText size={16} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">
-                        {f.fileName}
-                      </span>
-                      {f.error ? (
-                        <span className="block text-xs text-negative">{f.error}</span>
-                      ) : (
-                        <span className="block text-[11px] text-ink-faint">
-                          {f.format === "amex" ? "Amex-style export" : "Standard format"} ·{" "}
-                          {f.rows.length} row{f.rows.length === 1 ? "" : "s"}
-                          {f.skippedPayments > 0
-                            ? ` · ${f.skippedPayments} card payment${f.skippedPayments === 1 ? "" : "s"} skipped`
-                            : ""}
-                          {f.skippedInvalid > 0
-                            ? ` · ${f.skippedInvalid} unusable row${f.skippedInvalid === 1 ? "" : "s"} skipped`
-                            : ""}
-                          {f.rows.length === 0 && !f.error ? " · no data rows found" : ""}
-                        </span>
-                      )}
-                    </span>
+                  <li
+                    key={f.fileName}
+                    className="flex items-start gap-3 rounded-lg border border-line bg-elevated/40 px-3 py-2"
+                  >
+                    <FileText size={15} className="mt-0.5 shrink-0 text-ink-faint" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium">{f.fileName}</p>
+                      <p className="mt-0.5 text-[11px] text-ink-faint">
+                        {f.error ? (
+                          <span className="text-negative">{f.error}</span>
+                        ) : (
+                          <>
+                            Read as {labelFor(f.kind)} · {f.cash.length} cash row
+                            {f.cash.length === 1 ? "" : "s"}, {f.trades.length} security
+                            row{f.trades.length === 1 ? "" : "s"}
+                            {f.skipped.map((s) => `, ${s.count} ${s.reason} skipped`)}
+                          </>
+                        )}
+                      </p>
+                    </div>
                     <Button
                       variant="ghost"
                       size="icon"
                       aria-label={`Remove ${f.fileName}`}
                       onClick={() => removeFile(f.fileName)}
                     >
-                      <X size={15} />
+                      <X size={14} />
                     </Button>
                   </li>
                 ))}
               </ul>
-              <div className="flex justify-end border-t border-line/60 px-5 py-4">
-                <Button disabled={totalRows === 0} onClick={() => setStep("review")}>
-                  Review {totalRows} transaction{totalRows === 1 ? "" : "s"}
-                  <ArrowRight size={15} />
-                </Button>
-              </div>
-            </Card>
-          ) : null}
+            )}
 
-          <p className="text-center text-[11px] text-ink-faint">
-            Card payments to the issuer are skipped automatically. Everything else can be
-            adjusted or removed on the next step.
-          </p>
-        </div>
-      ) : null}
-
-      {step === "review" ? (
-        <div className="space-y-4 pb-24">
-          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-            <Card className="p-4">
-              <p className="text-[11px] font-medium text-ink-dim">Ready to import</p>
-              <p className="mt-1 text-lg font-semibold tabular-nums">
-                {included.length} of {rows.length}
-              </p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-[11px] font-medium text-ink-dim">Expenses</p>
-              <p className="mt-1 text-lg font-semibold tabular-nums text-negative">
-                {fmtCAD(includedExpenses, 2)}
-              </p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-[11px] font-medium text-ink-dim">Credits / refunds</p>
-              <p className="mt-1 text-lg font-semibold tabular-nums text-positive">
-                {fmtCAD(includedIncome, 2)}
-              </p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-[11px] font-medium text-ink-dim">Possible duplicates</p>
-              <p
-                className={cn(
-                  "mt-1 text-lg font-semibold tabular-nums",
-                  dupCount > 0 ? "text-amber-500" : undefined,
-                )}
-              >
-                {dupCount}
-              </p>
-            </Card>
-          </div>
-
-          <Card className="p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="flex-1">
-                <p className="mb-1.5 text-xs font-medium text-ink-dim">
-                  Import into account
+            {cashRows.length + tradeRows.length > 0 && (
+              <div className="mt-4 flex items-center justify-between">
+                <p className="text-xs text-ink-dim">
+                  {cashRows.length} cash row{cashRows.length === 1 ? "" : "s"} ·{" "}
+                  {tradeRows.length} security row{tradeRows.length === 1 ? "" : "s"}
                 </p>
-                <Select
-                  value={effectiveAccountId}
-                  onChange={(e) => setAccountId(e.target.value)}
-                >
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} ({a.institution})
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="secondary" size="sm" onClick={() => setRows((p) => p.map((r) => ({ ...r, include: true })))}>
-                  Include all
+                <Button onClick={() => setStep("review")}>
+                  Review <ArrowRight size={14} />
                 </Button>
-                <Button variant="secondary" size="sm" onClick={() => setRows((p) => p.map((r) => ({ ...r, include: false })))}>
-                  Exclude all
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setRows((p) => p.filter((r) => r.include));
-                  }}
-                >
-                  Remove excluded
-                </Button>
-              </div>
-            </div>
-            <p className="mt-2 text-[11px] text-ink-faint">
-              Charges post as expenses, refunds as income. Categories are guessed from the
-              merchant — fix any you disagree with and Aurum remembers your choice next
-              time.
-            </p>
-          </Card>
-
-          <Card>
-            {rows.length === 0 ? (
-              <EmptyState
-                icon={<Upload size={26} />}
-                title="No rows left"
-                subtitle="Go back and upload a CSV to continue."
-              />
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[980px] text-sm">
-                  <thead>
-                    <tr className="border-b border-line text-left text-[11px] uppercase tracking-wider text-ink-faint">
-                      <th className="px-3 py-3 font-medium">In</th>
-                      <th className="px-3 py-3 font-medium">Date</th>
-                      <th className="px-3 py-3 font-medium">Merchant</th>
-                      <th className="px-3 py-3 text-right font-medium">Amount</th>
-                      <th className="px-3 py-3 font-medium">Type</th>
-                      <th className="px-3 py-3 font-medium">Category</th>
-                      <th className="px-3 py-3 font-medium">Status</th>
-                      <th className="px-3 py-3 font-medium">Source</th>
-                      <th className="px-3 py-3 text-right font-medium">Del</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((r) => (
-                      <tr
-                        key={r.id}
-                        className={cn(
-                          "border-b border-line/50 last:border-0",
-                          !r.include && "opacity-45",
-                        )}
-                      >
-                        <td className="px-3 py-2">
-                          <input
-                            type="checkbox"
-                            checked={r.include}
-                            onChange={(e) => updateRow(r.id, { include: e.target.checked })}
-                            aria-label={`Include ${r.payee}`}
-                            className="h-4 w-4 accent-[var(--brand-strong)]"
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <Input
-                            type="date"
-                            value={r.date}
-                            onChange={(e) => updateRow(r.id, { date: e.target.value })}
-                            className="h-8 w-36 px-2 py-1 text-xs"
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <Input
-                            value={r.payee}
-                            onChange={(e) => updateRow(r.id, { payee: e.target.value })}
-                            className="h-8 w-52 px-2 py-1 text-xs"
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={r.amount}
-                            onChange={(e) =>
-                              updateRow(r.id, { amount: Number(e.target.value) || 0 })
-                            }
-                            className="ml-auto h-8 w-24 px-2 py-1 text-right text-xs tabular-nums"
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <Select
-                            value={r.type}
-                            onChange={(e) => changeType(r, e.target.value as ImportedRow["type"])}
-                            className="h-8 w-28 px-2 py-1 text-xs"
-                          >
-                            <option value="expense">Expense</option>
-                            <option value="income">Refund</option>
-                          </Select>
-                        </td>
-                        <td className="px-3 py-2">
-                          <Select
-                            value={r.category}
-                            onChange={(e) => updateRow(r.id, { category: e.target.value })}
-                            className="h-8 w-36 px-2 py-1 text-xs"
-                          >
-                            {[...new Set([...userCategories, r.category])].map((c) => (
-                              <option key={c} value={c}>
-                                {c}
-                              </option>
-                            ))}
-                          </Select>
-                        </td>
-                        <td className="px-3 py-2">
-                          <span className="flex flex-wrap gap-1">
-                            {r.dup ? (
-                              <Badge tone="negative">
-                                <AlertTriangle size={10} className="mr-1" /> duplicate?
-                              </Badge>
-                            ) : r.category !== r.suggestedCategory ? (
-                              <Badge tone="brand">edited</Badge>
-                            ) : r.confident ? (
-                              <Badge tone="positive">auto</Badge>
-                            ) : (
-                              <Badge>guess</Badge>
-                            )}
-                          </span>
-                        </td>
-                        <td className="max-w-[140px] px-3 py-2">
-                          <span className="block truncate text-[11px] text-ink-faint">
-                            {r.sourceFile}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Delete ${r.payee}`}
-                            onClick={() => setRows((p) => p.filter((x) => x.id !== r.id))}
-                            className="hover:text-negative"
-                          >
-                            <Trash2 size={14} />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </div>
             )}
           </Card>
+        )}
 
-          {/* Sticky action bar */}
-          <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/90 backdrop-blur-md lg:left-60">
-            <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
-              <div className="flex-1 text-xs text-ink-dim">
-                <span className="font-semibold text-ink">{included.length}</span> selected ·{" "}
-                <span className="text-negative">{fmtCAD(includedExpenses, 2)}</span> out ·{" "}
-                <span className="text-positive">{fmtCAD(includedIncome, 2)}</span> in
-              </div>
+        {step === "review" && (
+          <>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Card className="p-3">
+                <p className="text-[11px] font-medium text-ink-dim">Money in</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums text-positive">
+                  {fmtCAD(
+                    includedCash
+                      .filter((r) => r.type === "income")
+                      .reduce((s, r) => s + r.amount, 0),
+                  )}
+                </p>
+              </Card>
+              <Card className="p-3">
+                <p className="text-[11px] font-medium text-ink-dim">Money out</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums text-negative">
+                  {fmtCAD(
+                    includedCash
+                      .filter((r) => r.type === "expense")
+                      .reduce((s, r) => s + r.amount, 0),
+                  )}
+                </p>
+              </Card>
+              <Card className="p-3">
+                <p className="text-[11px] font-medium text-ink-dim">Trades</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums">
+                  {includedTrades.filter((r) => r.type === "buy" || r.type === "sell").length}
+                </p>
+              </Card>
+              <Card className="p-3">
+                <p className="text-[11px] font-medium text-ink-dim">Already known</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums text-ink-faint">
+                  {dupCash + dupTrades}
+                </p>
+              </Card>
+            </div>
+
+            {(needsAttention.length > 0 || unmatchedRegistrations.length > 0) && (
+              <Card className="border-amber-500/40 bg-amber-500/5 p-4">
+                <p className="flex items-center gap-2 text-xs font-medium text-amber-400">
+                  <AlertTriangle size={14} /> Needs a person
+                </p>
+                <ul className="mt-2 space-y-1 text-[11px] text-ink-dim">
+                  {unmatchedRegistrations.map((r) => (
+                    <li key={r}>
+                      No account is marked {REGISTRATION_LABELS[r]} — those trades cannot
+                      be filed until one is.
+                    </li>
+                  ))}
+                  {needsAttention.map((n) => (
+                    <li key={n}>{n} — share counts changed outside a trade, adjust the position by hand.</li>
+                  ))}
+                </ul>
+              </Card>
+            )}
+
+            {cashRows.length > 0 && (
+              <Card>
+                <CardHeader
+                  title="Money in and out"
+                  subtitle="Change a category and it is remembered for that merchant"
+                  action={
+                    <Select
+                      value={effectiveAccountId}
+                      onChange={(e) => setAccountId(e.target.value)}
+                      className="h-8 w-auto py-0 text-xs"
+                      aria-label="Account these belong to"
+                    >
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </Select>
+                  }
+                />
+                <div className="max-h-[28rem] overflow-auto px-3 pb-4">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-surface text-[11px] uppercase tracking-wider text-ink-faint">
+                      <tr>
+                        <th className="px-2 py-2 text-left">Include</th>
+                        <th className="px-2 py-2 text-left">Date</th>
+                        <th className="px-2 py-2 text-left">Payee</th>
+                        <th className="px-2 py-2 text-left">Type</th>
+                        <th className="px-2 py-2 text-left">Category</th>
+                        <th className="px-2 py-2 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cashRows.map((r) => (
+                        <tr
+                          key={r.id}
+                          className={cn(
+                            "border-b border-line/60 last:border-0",
+                            !r.include && "opacity-40",
+                          )}
+                        >
+                          <td className="px-2 py-1.5">
+                            <input
+                              type="checkbox"
+                              checked={r.include}
+                              onChange={(e) => updateCash(r.id, { include: e.target.checked })}
+                              aria-label={`Include ${r.payee}`}
+                            />
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-1.5 text-ink-dim">{r.date}</td>
+                          <td className="max-w-[16rem] truncate px-2 py-1.5" title={r.payee}>
+                            {r.payee}
+                            {r.dup && (
+                              <Badge className="ml-2 text-[9px]">already have it</Badge>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Select
+                              value={r.type}
+                              onChange={(e) =>
+                                changeType(r, e.target.value as ImportedRow["type"])
+                              }
+                              className="h-7 w-auto py-0 text-[11px]"
+                              aria-label={`Type for ${r.payee}`}
+                            >
+                              <option value="expense">Expense</option>
+                              <option value="income">Income</option>
+                            </Select>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Select
+                              value={r.category}
+                              onChange={(e) => updateCash(r.id, { category: e.target.value })}
+                              className={cn(
+                                "h-7 w-auto py-0 text-[11px]",
+                                !r.confident && "border-amber-500/50",
+                              )}
+                              aria-label={`Category for ${r.payee}`}
+                            >
+                              {(r.type === "income"
+                                ? ["Salary", "Additional Income", "RSP / Pension", "Dividends", "Interest", "Refund", "Loan Proceeds", "Gifts", "Other"]
+                                : userCategories
+                              ).map((c) => (
+                                <option key={c} value={c}>
+                                  {c}
+                                </option>
+                              ))}
+                            </Select>
+                          </td>
+                          <td
+                            className={cn(
+                              "whitespace-nowrap px-2 py-1.5 text-right tabular-nums",
+                              r.type === "income" ? "text-positive" : "text-ink",
+                            )}
+                          >
+                            {r.type === "income" ? "+" : "−"}
+                            {fmtCAD(r.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
+
+            {checkedTrades.length > 0 && (
+              <Card>
+                <CardHeader
+                  title="Trades and dividends"
+                  subtitle="Filed by the account each one settled in"
+                />
+                <div className="max-h-[28rem] overflow-auto px-3 pb-4">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-surface text-[11px] uppercase tracking-wider text-ink-faint">
+                      <tr>
+                        <th className="px-2 py-2 text-left">Include</th>
+                        <th className="px-2 py-2 text-left">Date</th>
+                        <th className="px-2 py-2 text-left">What</th>
+                        <th className="px-2 py-2 text-left">Account</th>
+                        <th className="px-2 py-2 text-right">Quantity</th>
+                        <th className="px-2 py-2 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {checkedTrades.map((r) => (
+                        <tr
+                          key={r.id}
+                          className={cn(
+                            "border-b border-line/60 last:border-0",
+                            !r.include && "opacity-40",
+                          )}
+                        >
+                          <td className="px-2 py-1.5">
+                            <input
+                              type="checkbox"
+                              checked={r.include}
+                              onChange={(e) => updateTrade(r.id, { include: e.target.checked })}
+                              aria-label={`Include ${r.ticker}`}
+                            />
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-1.5 text-ink-dim">{r.date}</td>
+                          <td className="px-2 py-1.5">
+                            <span className="font-medium">{r.ticker}</span>{" "}
+                            <span className="text-ink-faint">{r.type ?? r.typeRaw}</span>
+                            {r.duplicate && (
+                              <Badge className="ml-2 text-[9px]">already have it</Badge>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5 text-ink-dim">
+                            {r.registration
+                              ? REGISTRATION_LABELS[r.registration]
+                              : r.registrationRaw || "—"}
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums text-ink-dim">
+                            {r.quantity || "—"}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">
+                            {fmtCAD(r.amountCad)}
+                            {r.currency === "USD" && (
+                              <span className="ml-1 text-[10px] text-info">USD</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
+
+            <div className="flex items-center justify-between">
               <Button variant="secondary" onClick={() => setStep("upload")}>
-                <ArrowLeft size={14} /> Files
+                <ArrowLeft size={14} /> Back
               </Button>
-              <Button onClick={save} disabled={included.length === 0 || !effectiveAccountId}>
-                <CheckCircle2 size={15} />
-                Import {included.length} transaction{included.length === 1 ? "" : "s"}
+              <Button
+                onClick={save}
+                disabled={includedCash.length + includedTrades.length === 0}
+              >
+                Import {includedCash.length + includedTrades.length} row
+                {includedCash.length + includedTrades.length === 1 ? "" : "s"}
               </Button>
             </div>
-          </div>
-        </div>
-      ) : null}
+          </>
+        )}
 
-      {step === "done" ? (
-        <div className="mx-auto max-w-md">
-          <Card className="p-8 text-center">
-            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-positive/10 text-positive">
-              <CheckCircle2 size={28} />
-            </span>
-            <h2 className="mt-4 text-lg font-semibold">
-              Imported {importedCount} transaction{importedCount === 1 ? "" : "s"}
-            </h2>
-            <p className="mt-2 text-sm text-ink-dim">
-              Your dashboard, charts and budgets are up to date.
-              {learnedCount > 0
-                ? ` ${learnedCount} merchant rule${learnedCount === 1 ? "" : "s"} learned for next time.`
-                : ""}
-            </p>
-            <div className="mt-6 flex justify-center gap-2">
-              <Link href="/transactions">
-                <Button variant="secondary">
-                  View transactions <ArrowRight size={14} />
-                </Button>
-              </Link>
-              <Button onClick={() => setStep("upload")}>
-                <Upload size={14} /> Import more
+        {step === "done" && result && (
+          <Card className="p-8">
+            <EmptyState
+              icon={<CheckCircle2 size={20} className="text-positive" />}
+              title="Imported"
+              subtitle={[
+                `${result.transactions} transaction${result.transactions === 1 ? "" : "s"}`,
+                `${result.created} new position${result.created === 1 ? "" : "s"}`,
+                `${result.updated} updated`,
+                `${result.transfers} transfer${result.transfers === 1 ? "" : "s"}`,
+                result.learned > 0
+                  ? `${result.learned} categor${result.learned === 1 ? "y" : "ies"} remembered`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            />
+            <div className="flex justify-center">
+              <Button
+                onClick={() => {
+                  setResult(null);
+                  setStep("upload");
+                }}
+              >
+                Import more
               </Button>
             </div>
           </Card>
-        </div>
-      ) : null}
+        )}
+
+        {step === "upload" && files.length === 0 && (
+          <Card className="p-4">
+            <p className="text-[11px] leading-relaxed text-ink-faint">
+              <Trash2 size={11} className="mr-1 inline" />
+              Nothing is written until you press Import on the review screen, and
+              rows that match something already recorded arrive switched off.
+            </p>
+          </Card>
+        )}
+      </div>
     </Shell>
   );
 }
