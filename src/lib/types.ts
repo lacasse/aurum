@@ -261,10 +261,13 @@ export const EXPENSE_CATEGORIES = [
 
 export const INCOME_CATEGORIES = [
   "Salary",
+  "Additional Income",
   "Freelance",
+  "RSP / Pension",
   "Dividends",
   "Interest",
   "Refund",
+  "Loan Proceeds",
   "Gifts",
   "Other",
 ] as const;
