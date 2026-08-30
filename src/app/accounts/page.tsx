@@ -137,7 +137,7 @@ export default function AccountsPage() {
   // Everything you could actually reach. The pension is yours and counts in
   // net worth, but it cannot pay a bill until you leave the plan.
   const liquid = netWorth - data.pension;
-  const ratio = data.assets > 0 ? (data.liabilities / data.assets) * 100 : 0;
+  const ratio = netWorth > 0 ? (data.liabilities / netWorth) * 100 : 0;
 
   const series =
     range === "all" ? data.series : data.series.slice(-Number(range));
@@ -179,19 +179,21 @@ export default function AccountsPage() {
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
-            label="Total assets"
+            label="Cash"
             value={fmtCAD(data.assets)}
-            deltaLabel={
-              hasPension
-                ? "cash and balances, excluding the pension"
-                : "cash and balances outside the portfolio"
-            }
-            icon={<Landmark size={16} />}
+            deltaLabel="across your accounts, ready to spend"
+            icon={<Banknote size={16} />}
           />
           <StatCard
-            label="Total liabilities"
+            label="Debt"
             value={fmtCAD(data.liabilities)}
-            deltaLabel={`${ratio.toFixed(1)}% of assets`}
+            /*
+             * Against net worth, not against cash. Measured against cash it
+             * read 121.6% — a true ratio of two small numbers that sounded
+             * like an alarm, when the debt is under one percent of what you
+             * own.
+             */
+            deltaLabel={`${ratio.toFixed(1)}% of net worth`}
             tone="negative"
             icon={<CreditCard size={16} />}
           />
@@ -218,8 +220,8 @@ export default function AccountsPage() {
 
         <Card>
           <CardHeader
-            title="Assets vs liabilities"
-            subtitle="Everything you own, stacked, against what you owe"
+            title="Cash vs debt"
+            subtitle={`${fmtCAD(data.assets)} to hand against ${fmtCAD(data.liabilities)} owed`}
             action={
               <Segmented<Range>
                 options={[
@@ -233,31 +235,25 @@ export default function AccountsPage() {
             }
           />
           <div className="px-3 pb-4">
+            {/*
+              * The two things this page is actually about.
+              *
+              * A whole balance sheet belongs on the dashboard, and it was
+              * drawn there: net worth over time, and the portfolio under it.
+              * Repeating it here buried the answer, because next to half a
+              * million dollars of portfolio a few thousand of cash and debt
+              * is a flat line on the floor — the student loan reaching
+              * $77,264 and being paid down to $4,413 was invisible.
+              *
+              * At their own scale they are legible, and they are the pair
+              * that decides whether a month is comfortable.
+              */}
             <SeriesChart
               data={series as unknown as Record<string, unknown>[]}
               xKey="label"
-              stacked
-              /*
-               * Only the asset side is stacked, and it stacks to what you
-               * own. Debt was being piled on top of it, so the top of the
-               * chart read assets plus liabilities — a total of nothing —
-               * and the portfolio, four fifths of the balance sheet, was not
-               * on the chart at all.
-               */
               series={[
                 { key: "assets", name: "Cash", color: "#8b5cf6" },
-                { key: "portfolio", name: "Portfolio", color: "#22d3ee" },
-                // A band for a kind of account you do not have is a legend
-                // entry explaining a flat zero.
-                ...(hasPension
-                  ? [{ key: "pension", name: "Pension", color: "#f59e0b" }]
-                  : []),
-                {
-                  key: "liabilities",
-                  name: "Liabilities",
-                  color: "#fb7185",
-                  kind: "line" as const,
-                },
+                { key: "liabilities", name: "Debt", color: "#fb7185" },
               ]}
               height={280}
               yFmt={fmtCompact}
