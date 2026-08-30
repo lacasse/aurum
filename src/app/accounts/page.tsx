@@ -141,6 +141,7 @@ export default function AccountsPage() {
 
   const series =
     range === "all" ? data.series : data.series.slice(-Number(range));
+  const hasPension = data.pensions.length > 0;
 
   /**
    * How much the account moved over the last month, or nothing when that
@@ -180,7 +181,11 @@ export default function AccountsPage() {
           <StatCard
             label="Total assets"
             value={fmtCAD(data.assets)}
-            deltaLabel="cash and balances, excluding the pension"
+            deltaLabel={
+              hasPension
+                ? "cash and balances, excluding the pension"
+                : "cash and balances outside the portfolio"
+            }
             icon={<Landmark size={16} />}
           />
           <StatCard
@@ -193,7 +198,11 @@ export default function AccountsPage() {
           <StatCard
             label="Net worth"
             value={fmtCAD(netWorth)}
-            deltaLabel={`${fmtCAD(liquid)} of it reachable today`}
+            deltaLabel={
+              hasPension
+                ? `${fmtCAD(liquid)} of it reachable today`
+                : `incl. ${fmtCAD(portfolio)} portfolio`
+            }
             icon={<PiggyBank size={16} />}
             spark={data.series.map((p) => ({ v: p.net }))}
             sparkKey="v"
@@ -238,12 +247,16 @@ export default function AccountsPage() {
               series={[
                 { key: "assets", name: "Cash", color: "#8b5cf6" },
                 { key: "portfolio", name: "Portfolio", color: "#22d3ee" },
-                { key: "pension", name: "Pension", color: "#f59e0b" },
+                // A band for a kind of account you do not have is a legend
+                // entry explaining a flat zero.
+                ...(hasPension
+                  ? [{ key: "pension", name: "Pension", color: "#f59e0b" }]
+                  : []),
                 {
                   key: "liabilities",
                   name: "Liabilities",
                   color: "#fb7185",
-                  kind: "line",
+                  kind: "line" as const,
                 },
               ]}
               height={280}
