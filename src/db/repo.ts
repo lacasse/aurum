@@ -66,6 +66,8 @@ function toAccount(row: AccountRow): Account {
     balanceUSD: row.balanceUSD ?? 0,
     history: row.history,
     registration: (row.registration ?? undefined) as Account["registration"],
+    pensionAnnual: row.pensionAnnual ?? undefined,
+    pensionService: row.pensionService ?? undefined,
   };
 }
 
@@ -469,6 +471,8 @@ export async function insertAccount(a: Account, position: number): Promise<void>
     history: a.history,
     position,
     registration: a.registration ?? null,
+    pensionAnnual: a.pensionAnnual ?? null,
+    pensionService: a.pensionService ?? null,
   });
 }
 
@@ -483,6 +487,8 @@ export async function replaceAccount(a: Account): Promise<void> {
       balanceUSD: a.balanceUSD ?? 0,
       history: a.history,
       registration: a.registration ?? null,
+      pensionAnnual: a.pensionAnnual ?? null,
+      pensionService: a.pensionService ?? null,
     })
     .where(eq(accounts.id, a.id));
 }

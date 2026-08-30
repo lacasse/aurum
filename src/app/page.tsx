@@ -73,6 +73,7 @@ export default function DashboardPage() {
   const holdings = useFinance((s) => s.holdings);
   const usdCadRate = useFinance((s) => s.usdCadRate);
   const [range, setRange] = useState<Range>("all");
+  const [portRange, setPortRange] = useState<Range>("all");
   const [addOpen, setAddOpen] = useState(false);
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [snapshots, setSnapshots] = useState<SnapshotHistory>({});
@@ -145,7 +146,20 @@ export default function DashboardPage() {
       12,
       through,
     ) as unknown as Record<string, unknown>[];
-    const port = portfolioSeries(holdings, 18);
+    /*
+     * The portfolio over the same record as net worth. It used to be capped
+     * at the eighteen months of prices the holdings carry; the recorded
+     * month-end values reach back to the first one, and the cost line with
+     * them, replayed from the trades month by month.
+     */
+    /*
+     * ...but starting where the portfolio does. The record as a whole begins
+     * with the first account balance, which is over a year before the first
+     * holding, and those months are not a flat portfolio — they are months
+     * with no portfolio to draw.
+     */
+    const firstHeld = portAll.findIndex((p) => p.value > 0 || p.cost > 0);
+    const port = firstHeld > 0 ? portAll.slice(firstHeld) : portAll;
     const avg = monthlyAverages(transactions, 12);
     /*
      * What net worth is made of. The portfolio is the largest part of it and
@@ -176,6 +190,10 @@ export default function DashboardPage() {
   const nw = useMemo(
     () => (range === "all" ? data.nwAll : data.nwAll.slice(-Number(range))),
     [data.nwAll, range],
+  );
+  const port = useMemo(
+    () => (portRange === "all" ? data.port : data.port.slice(-Number(portRange))),
+    [data.port, portRange],
   );
 
   if (!ready) return <PageSkeleton />;
@@ -235,7 +253,7 @@ export default function DashboardPage() {
             delta={portDelta}
             deltaLabel="vs last month"
             icon={<LineChart size={16} />}
-            spark={data.port.map((p) => ({ v: p.value }))}
+            spark={data.port.slice(-18).map((p) => ({ v: p.value }))}
             sparkKey="v"
             sparkColor="#22d3ee"
           />
@@ -320,16 +338,27 @@ export default function DashboardPage() {
                   : `Market value vs cost basis · ${fmtCAD(portLast.value)} invested`
               }
               action={
-                <Link href="/investments">
-                  <Button variant="ghost" size="sm">
-                    Details <ArrowRight size={13} />
-                  </Button>
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Segmented<Range>
+                    options={[
+                      { value: "12", label: "1Y" },
+                      { value: "60", label: "5Y" },
+                      { value: "all", label: "All" },
+                    ]}
+                    value={portRange}
+                    onChange={setPortRange}
+                  />
+                  <Link href="/investments">
+                    <Button variant="ghost" size="sm">
+                      Details <ArrowRight size={13} />
+                    </Button>
+                  </Link>
+                </div>
               }
             />
             <div className="px-3 pb-4">
               <SeriesChart
-                data={data.port as unknown as Record<string, unknown>[]}
+                data={port as unknown as Record<string, unknown>[]}
                 xKey="label"
                 series={[
                   { key: "value", name: "Market value", color: "#22d3ee" },
