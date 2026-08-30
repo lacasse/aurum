@@ -931,7 +931,10 @@ export default function InvestmentsPage() {
                               </span>
                             )}
                             {r.currency === "USD" && (
-                              <span className="shrink-0 rounded bg-elevated px-1 py-px text-[8px] font-medium text-amber-400">
+                              /* Not amber: that is what STALE uses, and a
+                                 listing currency is a fact about the security,
+                                 not a warning about its price. */
+                              <span className="shrink-0 rounded bg-sky-500/15 px-1 py-px text-[8px] font-medium text-sky-400">
                                 USD
                               </span>
                             )}
