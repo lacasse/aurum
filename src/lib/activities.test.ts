@@ -96,13 +96,70 @@ describe("parseActivitiesCsv", () => {
     assert.equal(res.skipped.find((s) => s.reason === "credit card payments")?.count, 1);
   });
 
-  test("corporate actions are surfaced rather than guessed at", () => {
+  test("a corporate action nothing explains is surfaced rather than guessed at", () => {
     const res = parse(
-      "2026-07-01,00:00:00,,HQ0,RRSP,CorporateAction,DEMERGER,MBGL: Corrected quantity of shares by 16.0000,LONG,MBGL,Mobility Global Inc.,,16,,,",
+      "2026-07-01,00:00:00,,HQ0,RRSP,CorporateAction,SPLIT,NVDA: 10 for 1,LONG,NVDA,NVIDIA,,90,,,",
     );
     assert.equal(res.trades.length, 0);
     assert.equal(res.needsAttention.length, 1);
-    assert.match(res.needsAttention[0], /MBGL/);
+    assert.match(res.needsAttention[0], /NVDA/);
+  });
+
+  test("journalled shares are one security, not a sale of shares never bought", () => {
+    // Norbert's Gambit: buy the US listing, journal the shares to the Canadian
+    // one, sell that. Read literally the file sells 592 shares of a ticker
+    // nothing ever bought.
+    const res = parse(
+      '2026-06-30,11:57:39,2026-07-02,HQ0,RRSP,Trade,BUY,"DLR.U: Bought 592.0000 shares at $10.09 per share, FX Rate: 1.4235",LONG,DLR.U,Global X US Dollar Currency ETF,USD,592,10.0958,0,-5976.71',
+      "2026-07-03,09:30:03,,HQ0,RRSP,ListingSwap,-,,LONG,DLR,Global X US Dollar Currency ETF,,592,,,",
+      "2026-07-03,09:30:03,,HQ0,RRSP,ListingSwap,-,,LONG,DLR.U,Global X US Dollar Currency ETF,,-592,,,",
+      "2026-07-03,10:47:56,2026-07-06,HQ0,RRSP,Trade,SELL,DLR: Sold 592.0000 shares at $14.33 per share,LONG,DLR,Global X US Dollar Currency ETF,CAD,-592,14.33,0,8483.36",
+    );
+    const tickers = res.trades.map((t) => t.ticker);
+    assert.deepEqual(tickers, ["DLR", "DLR"], "the buy is recorded under the ticker it was sold as");
+    assert.deepEqual(
+      res.trades.map((t) => t.type),
+      ["buy", "sell"],
+    );
+  });
+
+  test("the journalling fee is money even though the journal is not", () => {
+    const res = parse(
+      "2026-07-03,09:30:03,,HQ0,RRSP,ListingSwap,-,,,,,CAD,-11.24,,,-11.24",
+    );
+    assert.equal(res.cash.length, 1);
+    assert.equal(res.cash[0].type, "expense");
+    assert.equal(res.cash[0].amount, 11.24);
+  });
+
+  test("selling shares from a demerger pays out the holding they came from", () => {
+    const res = parse(
+      "2026-07-01,00:00:00,,HQ0,RRSP,CorporateAction,DEMERGER,MBGL: Corrected quantity of shares by 16.0000,LONG,MBGL,Mobility Global Inc.,,16,,,",
+      "2026-07-01,00:00:00,,HQ0,RRSP,CorporateAction,DEMERGER,SPGI: Corrected quantity of shares by 0.0000,LONG,SPGI,S&P Global Inc.,,0,,,",
+      '2026-07-31,13:18:27,2026-08-03,HQ0,RRSP,Trade,SELL,"MBGL: Sold 16.0000 shares at $20.38 per share, FX Rate: 1.4014",LONG,MBGL,Mobility Global Inc.,USD,-16,20.3842,0,326.15',
+    );
+    // The shares were never bought, so selling them is not a sale: it is the
+    // parent holding paying out.
+    assert.equal(res.trades.length, 1);
+    const [t] = res.trades;
+    assert.equal(t.type, "dividend");
+    assert.equal(t.ticker, "SPGI");
+    assert.equal(t.transactedAmount, 326.15);
+    assert.equal(res.needsAttention.length, 0);
+  });
+
+  test("the same amount leaving month after month is rent, and says which one", () => {
+    const res = parse(
+      "2026-06-01,04:00:00,,WK2,Chequing,MoneyMovement,E_TRFOUT,Interac e-Transfer® Out,,,,CAD,-1300,,,-1300",
+      "2026-07-01,04:00:00,,WK2,Chequing,MoneyMovement,E_TRFOUT,Interac e-Transfer® Out,,,,CAD,-1300,,,-1300",
+      "2026-08-01,04:00:00,,WK2,Chequing,MoneyMovement,E_TRFOUT,Interac e-Transfer® Out,,,,CAD,-1300,,,-1300",
+      "2026-08-05,20:54:09,,WK2,Chequing,MoneyMovement,E_TRFOUT,Interac e-Transfer® Out,,,,CAD,-65,,,-65",
+    );
+    const rent = res.cash.filter((r) => r.category === "Housing");
+    assert.equal(rent.length, 3);
+    assert.match(rent[0].payee, /\$1300\.00$/, "the payee names the amount, so correcting it teaches this transfer only");
+    const oneOff = res.cash.find((r) => r.amount === 65);
+    assert.notEqual(oneOff?.category, "Housing", "a one-off transfer is not rent");
   });
 
   test("the trailing 'as of' line is not a transaction", () => {
