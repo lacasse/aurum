@@ -126,9 +126,27 @@ export function Sparkline({
   height?: number;
 }) {
   const gid = useId().replace(/[:]/g, "");
+  /*
+   * Fit the line to its own range rather than to zero.
+   *
+   * Without an axis Recharts anchors the bottom at nothing, so a balance that
+   * moved between $480k and $516k was drawn as a flat line four fifths of the
+   * way up the box — the movement, which is the only thing a sparkline is for,
+   * was a rounding error against the distance to zero. A tenth of the range is
+   * left as headroom so the peaks are not clipped to the edges, and a series
+   * that never moves still draws a line through the middle rather than
+   * dividing by nothing.
+   */
+  const values = data
+    .map((d) => Number(d[dataKey]))
+    .filter((v) => Number.isFinite(v));
+  const low = values.length > 0 ? Math.min(...values) : 0;
+  const high = values.length > 0 ? Math.max(...values) : 0;
+  const pad = high === low ? Math.abs(high) * 0.1 || 1 : (high - low) * 0.1;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={data} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+        <YAxis hide domain={[low - pad, high + pad]} />
         <defs>
           <linearGradient id={`spark-${gid}`} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={color} stopOpacity={0.3} />

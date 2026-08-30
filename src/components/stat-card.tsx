@@ -55,7 +55,7 @@ export function StatCard({
       </div>
       {spark && spark.length > 1 && sparkKey ? (
         <div className="mt-3 -mb-1 opacity-80">
-          <Sparkline data={spark} dataKey={sparkKey} color={sparkColor} height={36} />
+          <Sparkline data={spark} dataKey={sparkKey} color={sparkColor} height={64} />
         </div>
       ) : null}
     </Card>
