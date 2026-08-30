@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -20,12 +20,22 @@ import {
 } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
-import { Badge, Button, Card, CardHeader } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, Segmented } from "@/components/ui";
 import { SeriesChart, Sparkline } from "@/components/charts";
 import { AccountForm, ConfirmDelete } from "@/components/forms";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
-import { accountCadBalance, netWorthSeries } from "@/lib/analytics";
+import {
+  accountCadBalance,
+  accountValueAt,
+  allTimeSeries,
+  firstAccountMonth,
+  firstFlowMonth,
+  monthsSince,
+  netWorthOver,
+  portfolioSeries,
+  type SnapshotHistory,
+} from "@/lib/analytics";
 import { summarize as summarizePension } from "@/lib/pension";
 import { fmtCompact, fmtSignedCAD, fmtCAD, labelMonth, lastMonthKeys } from "@/lib/format";
 import {
@@ -35,6 +45,9 @@ import {
   isLiability,
   isPension,
 } from "@/lib/types";
+
+/** How much of the record to draw: months, or all of it. */
+type Range = "12" | "60" | "all";
 
 const KIND_ICON: Record<AccountKind, typeof Wallet> = {
   checking: Wallet,
@@ -63,9 +76,39 @@ export default function AccountsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [deleting, setDeleting] = useState<Account | null>(null);
+  const [range, setRange] = useState<Range>("all");
+  const [snapshots, setSnapshots] = useState<SnapshotHistory>({});
+
+  /*
+   * The recorded month-end portfolio values, as the dashboard reads them. The
+   * balance sheet has to be the same balance sheet on both pages, and only
+   * these reach back past the eighteen months of prices the holdings carry.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/snapshots/history", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { months: SnapshotHistory }) => {
+        if (!cancelled) setSnapshots(d.months ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const data = useMemo(() => {
-    const series = netWorthSeries(accounts, holdings, 18, usdCadRate);
+    const starts = [
+      firstAccountMonth(accounts),
+      Object.keys(snapshots).sort()[0] ?? null,
+      firstFlowMonth(holdings),
+    ].filter((m): m is string => m !== null);
+    const historyStart = starts.length > 0 ? starts.sort()[0] : null;
+    const portAll =
+      historyStart && Object.keys(snapshots).length > 0
+        ? allTimeSeries(holdings, {}, monthsSince(historyStart), snapshots).points
+        : portfolioSeries(holdings, 18);
+    const series = netWorthOver(accounts, portAll, usdCadRate);
     let assets = 0;
     let liabilities = 0;
     let pension = 0;
@@ -85,7 +128,7 @@ export default function AccountsPage() {
       .filter((a) => isPension(a.kind))
       .map((a) => ({ account: a, summary: summarizePension(a, transactions) }));
     return { series, assets, liabilities, pension, pensions };
-  }, [accounts, holdings, transactions, usdCadRate]);
+  }, [accounts, holdings, transactions, snapshots, usdCadRate]);
 
   if (!ready) return <PageSkeleton />;
 
@@ -96,15 +139,25 @@ export default function AccountsPage() {
   const liquid = netWorth - data.pension;
   const ratio = data.assets > 0 ? (data.liabilities / data.assets) * 100 : 0;
 
+  const series =
+    range === "all" ? data.series : data.series.slice(-Number(range));
+
+  /**
+   * How much the account moved over the last month, or nothing when that
+   * cannot be said.
+   *
+   * The version this replaced fell back to the *oldest* recorded value
+   * whenever a month was missing — and the current month is missing until
+   * something writes it. So the chequing account compared today's $3,628.38
+   * against its balance in February 2020 and reported the difference as one
+   * month's movement: −$688 a month, every month, for six years.
+   */
   const accountDelta1m = (acc: Account): number | undefined => {
-    const keys = lastMonthKeys(2);
-    const at = (k: string) =>
-      acc.history.find((p) => p.month === k)?.value ??
-      acc.history[0]?.value ??
-      acc.balance;
-    const prev = at(keys[0]);
-    const cur = at(keys[1]);
-    return cur - prev;
+    const [prevKey, curKey] = lastMonthKeys(2);
+    const opened = acc.history[0]?.month;
+    // An account younger than the comparison has no month to compare with.
+    if (!opened || opened > prevKey) return undefined;
+    return accountValueAt(acc, curKey) - accountValueAt(acc, prevKey);
   };
 
   return (
@@ -157,22 +210,41 @@ export default function AccountsPage() {
         <Card>
           <CardHeader
             title="Assets vs liabilities"
-            subtitle="How the balance sheet has evolved · 18 months"
+            subtitle="Everything you own, stacked, against what you owe"
+            action={
+              <Segmented<Range>
+                options={[
+                  { value: "12", label: "1Y" },
+                  { value: "60", label: "5Y" },
+                  { value: "all", label: "All" },
+                ]}
+                value={range}
+                onChange={setRange}
+              />
+            }
           />
           <div className="px-3 pb-4">
             <SeriesChart
-              data={data.series as unknown as Record<string, unknown>[]}
+              data={series as unknown as Record<string, unknown>[]}
               xKey="label"
               stacked
+              /*
+               * Only the asset side is stacked, and it stacks to what you
+               * own. Debt was being piled on top of it, so the top of the
+               * chart read assets plus liabilities — a total of nothing —
+               * and the portfolio, four fifths of the balance sheet, was not
+               * on the chart at all.
+               */
               series={[
-                { key: "assets", name: "Assets", color: "#8b5cf6" },
-                /*
-                 * Its own band rather than a share of the first one. Stacked
-                 * in with chequing it was nine tenths of "assets", and the
-                 * chart said there was $41,118 to hand when there was $3,628.
-                 */
+                { key: "assets", name: "Cash", color: "#8b5cf6" },
+                { key: "portfolio", name: "Portfolio", color: "#22d3ee" },
                 { key: "pension", name: "Pension", color: "#f59e0b" },
-                { key: "liabilities", name: "Liabilities", color: "#fb7185" },
+                {
+                  key: "liabilities",
+                  name: "Liabilities",
+                  color: "#fb7185",
+                  kind: "line",
+                },
               ]}
               height={280}
               yFmt={fmtCompact}

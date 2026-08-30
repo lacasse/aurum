@@ -487,6 +487,18 @@ describe("accountValueAt", () => {
     assert.equal(accountValueAt(acc, "2025-11"), 100);
   });
 
+  test("a gap in the middle holds the figure before it, not after", () => {
+    const gappy = {
+      ...(acc as unknown as Record<string, unknown>),
+      history: [
+        { month: "2026-01", value: 100 },
+        { month: "2026-04", value: 400 },
+      ],
+    } as unknown as Parameters<typeof accountValueAt>[0];
+    assert.equal(accountValueAt(gappy, "2026-02"), 100);
+    assert.equal(accountValueAt(gappy, "2026-03"), 100);
+  });
+
   test("after the history ends, holds today's balance", () => {
     // Not the earliest: a chart running past the last recorded month used to
     // fall back to the oldest value and drew a cliff at its right edge.
