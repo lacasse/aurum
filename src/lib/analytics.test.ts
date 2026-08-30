@@ -545,22 +545,40 @@ describe("monthlyAverages", () => {
     assert.equal(avg.income, 4150);
   });
 
-  test("uncommitted takes committed costs off spendable income", () => {
+  test("free cash flow is what landed, less everything that was spent", () => {
     const avg = monthlyAverages(
       [
         txn({ amount: 5000, type: "income", category: "Salary", date: `${m3}-01` }),
-        // Illiquid: a pension contribution cannot be spent this month.
+        // Illiquid: a pension contribution never reaches the account.
         txn({ amount: 500, type: "income", category: "RSP / Pension", date: `${m3}-01` }),
         txn({ amount: 1500, type: "expense", category: "Housing", date: `${m3}-02` }),
         txn({ amount: 400, type: "expense", category: "Debt Repayment", date: `${m3}-03` }),
-        // Discretionary spending is not committed, so it does not reduce it.
+        // Dinner out is spent as surely as rent is.
         txn({ amount: 300, type: "expense", category: "Dining", date: `${m3}-04` }),
       ],
       12,
     );
     assert.equal(avg.income, 5500);
     assert.equal(avg.expenses, 2200);
-    assert.equal(avg.uncommitted, 5000 - 1500 - 400);
+    assert.equal(avg.freeCashFlow, 5000 - 1500 - 400 - 300);
+  });
+
+  test("a transfer is not spending, so it leaves free cash flow alone", () => {
+    // Moving money into a brokerage is the thing free cash flow is *for*.
+    const avg = monthlyAverages(
+      [
+        txn({ amount: 5000, type: "income", category: "Salary", date: `${m3}-01` }),
+        txn({
+          amount: 2000,
+          type: "transfer",
+          category: "Transfer",
+          date: `${m3}-02`,
+          destinationAccountId: "a2",
+        }),
+      ],
+      12,
+    );
+    assert.equal(avg.freeCashFlow, 5000);
   });
 
   test("months with only expenses still count", () => {
@@ -619,8 +637,8 @@ describe("monthlyAverages · the year before", () => {
     assert.equal(previous?.income, 3200, "dividends are income");
     assert.equal(previous?.expenses, 1400);
     assert.equal(previous?.passive, 200);
-    // Liquid income less committed spending: shopping is not committed.
-    assert.equal(previous?.uncommitted, 3200 - 1000);
+    // Everything that landed, less everything spent — shopping included.
+    assert.equal(previous?.freeCashFlow, 3200 - 1000 - 400);
   });
 
   test("months that did not happen are not averaged into the previous window", () => {

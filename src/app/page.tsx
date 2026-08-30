@@ -245,7 +245,7 @@ export default function DashboardPage() {
   const yoy = {
     income: yearOverYear(data.avg.income, prev?.income, "up"),
     expenses: yearOverYear(data.avg.expenses, prev?.expenses, "down"),
-    uncommitted: yearOverYear(data.avg.uncommitted, prev?.uncommitted, "up"),
+    freeCashFlow: yearOverYear(data.avg.freeCashFlow, prev?.freeCashFlow, "up"),
     passive: yearOverYear(data.avg.passive, prev?.passive, "up"),
   };
 
@@ -434,14 +434,14 @@ export default function DashboardPage() {
             sparkColor="#fb7185"
           />
           <StatCard
-            label="Average uncommitted"
-            value={fmtCAD(data.avg.uncommitted)}
-            delta={yoy.uncommitted.delta}
-            deltaValue={yoy.uncommitted.deltaValue}
+            label="Average free cash flow"
+            value={fmtCAD(data.avg.freeCashFlow)}
+            delta={yoy.freeCashFlow.delta}
+            deltaValue={yoy.freeCashFlow.deltaValue}
             deltaLabel="vs the year before"
-            tone={yoy.uncommitted.tone}
+            tone={yoy.freeCashFlow.tone}
             icon={<PiggyBank size={16} />}
-            spark={data.avg.series.map((p) => ({ v: p.uncommitted }))}
+            spark={data.avg.series.map((p) => ({ v: p.freeCashFlow }))}
             sparkKey="v"
             sparkColor="#22d3ee"
           />

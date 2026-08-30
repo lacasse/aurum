@@ -868,28 +868,6 @@ export function monthTotals(
 
 /* ── Monthly averages ── */
 
-/**
- * Spending that arrives whether or not you decide anything this month.
- *
- * The distinction is the one the spreadsheet drew as Necessary against
- * Discretionary, kept because it is what makes an average meaningful: rent and
- * a debt payment are already spoken for, so what is left after them is the
- * figure that answers "what can I actually do with this month".
- */
-export const COMMITTED_CATEGORIES = new Set([
-  "Housing",
-  "Utilities",
-  "Insurance",
-  "Transport",
-  "Groceries",
-  "Health",
-  "Dog",
-  "Subscriptions",
-  "Fees",
-  "Debt Repayment",
-  "Taxes",
-]);
-
 /** Money the holdings made, as opposed to money the job made. */
 export const PASSIVE_INCOME_CATEGORIES = new Set(["Dividends", "Interest"]);
 
@@ -908,8 +886,16 @@ export interface AverageMonth {
   income: number;
   expenses: number;
   passive: number;
-  /** Liquid income less the spending already committed to. */
-  uncommitted: number;
+  /**
+   * What was left over: spendable income, less everything that was spent.
+   *
+   * The money that actually landed and stayed — free to invest, to save, or
+   * to do nothing with. This used to subtract only the *committed* costs, so
+   * a month's dining, travel and shopping were counted as still available
+   * when they had already been spent; on this record that overstated it by
+   * about $1,550 a month.
+   */
+  freeCashFlow: number;
 }
 
 export interface MonthlyAverage extends AverageMonth {
@@ -929,7 +915,7 @@ export interface MonthlyAverage extends AverageMonth {
     income: number;
     expenses: number;
     passive: number;
-    uncommitted: number;
+    freeCashFlow: number;
   }[];
 }
 
@@ -960,7 +946,6 @@ export function monthlyAverages(
     let expenses = 0;
     let passive = 0;
     let liquidIncome = 0;
-    let committed = 0;
     for (const t of transactions) {
       if (monthKeyOf(t.date) !== key) continue;
       const cents = toCents(t.amount);
@@ -970,7 +955,6 @@ export function monthlyAverages(
         if (!ILLIQUID_INCOME_CATEGORIES.has(t.category)) liquidIncome += cents;
       } else if (t.type === "expense") {
         expenses += cents;
-        if (COMMITTED_CATEGORIES.has(t.category)) committed += cents;
       }
     }
     return {
@@ -978,7 +962,9 @@ export function monthlyAverages(
       income: fromCents(income),
       expenses: fromCents(expenses),
       passive: fromCents(passive),
-      uncommitted: fromCents(liquidIncome - committed),
+      // Transfers are neither, which is what makes this the right figure for
+      // "available to invest": moving money into a brokerage does not spend it.
+      freeCashFlow: fromCents(liquidIncome - expenses),
     };
   });
 
@@ -1000,7 +986,7 @@ export function monthlyAverages(
     income: mean((m) => m.income),
     expenses: mean((m) => m.expenses),
     passive: mean((m) => m.passive),
-    uncommitted: mean((m) => m.uncommitted),
+    freeCashFlow: mean((m) => m.freeCashFlow),
     from: active[0]?.key ?? "",
     to: active[active.length - 1]?.key ?? "",
     previous: prior.months > 0 ? prior : null,
@@ -1013,22 +999,22 @@ function averageOver(transactions: Transaction[], keys: string[]): AverageMonth 
   const wanted = new Set(keys);
   const byMonth = new Map<
     string,
-    { income: number; expenses: number; passive: number; uncommitted: number }
+    { income: number; expenses: number; passive: number; freeCashFlow: number }
   >();
   for (const t of transactions) {
     const key = monthKeyOf(t.date);
     if (!wanted.has(key)) continue;
     const slot =
       byMonth.get(key) ??
-      { income: 0, expenses: 0, passive: 0, uncommitted: 0 };
+      { income: 0, expenses: 0, passive: 0, freeCashFlow: 0 };
     const cents = toCents(t.amount);
     if (t.type === "income") {
       slot.income += cents;
       if (PASSIVE_INCOME_CATEGORIES.has(t.category)) slot.passive += cents;
-      if (!ILLIQUID_INCOME_CATEGORIES.has(t.category)) slot.uncommitted += cents;
+      if (!ILLIQUID_INCOME_CATEGORIES.has(t.category)) slot.freeCashFlow += cents;
     } else if (t.type === "expense") {
       slot.expenses += cents;
-      if (COMMITTED_CATEGORIES.has(t.category)) slot.uncommitted -= cents;
+      slot.freeCashFlow -= cents;
     }
     byMonth.set(key, slot);
   }
@@ -1043,7 +1029,7 @@ function averageOver(transactions: Transaction[], keys: string[]): AverageMonth 
     income: mean((m) => m.income),
     expenses: mean((m) => m.expenses),
     passive: mean((m) => m.passive),
-    uncommitted: mean((m) => m.uncommitted),
+    freeCashFlow: mean((m) => m.freeCashFlow),
   };
 }
 
