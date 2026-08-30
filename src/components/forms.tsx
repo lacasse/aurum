@@ -46,11 +46,13 @@ function FormActions({
   return (
     <div className="mt-6 flex items-center justify-between gap-2">
       <div>{destructive}</div>
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={onCancel}>
+      <div className="flex shrink-0 justify-end gap-2">
+        <Button type="button" variant="secondary" onClick={onCancel} className="whitespace-nowrap">
           Cancel
         </Button>
-        <Button type="submit">{label}</Button>
+        <Button type="submit" className="whitespace-nowrap">
+          {label}
+        </Button>
       </div>
     </div>
   );
@@ -432,18 +434,50 @@ function HoldingFormInner({
   onClose: () => void;
 }) {
   const addHolding = useFinance((s) => s.addHolding);
-  const updateHolding = useFinance((s) => s.updateHolding);
+  const updateSecurity = useFinance((s) => s.updateSecurity);
   const deleteHolding = useFinance((s) => s.deleteHolding);
   const usdCadRate = useFinance((s) => s.usdCadRate);
   const accounts = useFinance((s) => s.accounts);
+  const holdings = useFinance((s) => s.holdings);
   const investmentAccounts = accounts.filter((a) => isInvestmentAccount(a.kind));
+
+  /*
+   * Which accounts an edit will reach. Shown rather than assumed: renaming a
+   * ticker held in four accounts touches all four, and the form should say so
+   * before the save, not after.
+   */
+  const lotsOfSecurity = initial
+    ? holdings.filter(
+        (h) => h.ticker.toUpperCase() === initial.ticker.toUpperCase(),
+      )
+    : [];
+  /*
+   * Deletion is the one thing on this form that is per-account, so it names
+   * the account it will empty and lets you pick a different one. Without the
+   * picker the only reachable lot was whichever the row happened to open with.
+   */
+  const [deleteAccountId, setDeleteAccountId] = useState(initial?.accountId ?? "");
+  const deleteTarget =
+    lotsOfSecurity.find((h) => h.accountId === deleteAccountId) ?? initial;
+
+  const heldIn = initial
+    ? [
+        ...new Set(
+          holdings
+            .filter((h) => h.ticker.toUpperCase() === initial.ticker.toUpperCase())
+            .map(
+              (h) =>
+                accounts.find((a) => a.id === h.accountId)?.name ?? "an account",
+            ),
+        ),
+      ]
+    : [];
 
   const [ticker, setTicker] = useState(initial?.ticker ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [assetClass, setAssetClass] = useState<AssetClass>(
     initial?.assetClass ?? "US Equity",
   );
-  const [sector, setSector] = useState(initial?.sector ?? "");
   const [shares, setShares] = useState(initial ? String(initial.shares) : "");
   const [avgCost, setAvgCost] = useState(initial ? String(initial.avgCost) : "");
   const [price, setPrice] = useState(initial ? String(initial.price) : "");
@@ -470,12 +504,38 @@ function HoldingFormInner({
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!ticker.trim()) return setError("Ticker is required.");
+    if (!name.trim()) return setError("Please give the holding a name.");
+
+    /*
+     * Editing changes what the security *is* — its symbol, its name, the class
+     * that decides which price feed quotes it. None of that is per-account, so
+     * it is saved for every account holding the ticker at once. Shares and cost
+     * stay out of it — they come from the trades — but the price can be set by
+     * hand for a security the feed cannot quote.
+     */
+    if (initial) {
+      const manual = Number(price);
+      if (price.trim() !== "" && (!Number.isFinite(manual) || manual <= 0)) {
+        return setError("Price must be greater than zero.");
+      }
+      updateSecurity(initial.ticker, {
+        ticker: ticker.trim().toUpperCase(),
+        name: name.trim(),
+        assetClass,
+        // Only sent when it actually moved: an untouched field should not
+        // count as a manual override of a price the feed just set.
+        price: manual !== initial.price && manual > 0 ? manual : undefined,
+        currency,
+      });
+      onClose();
+      return;
+    }
+
     const sh = Number(shares);
     const cost = Number(avgCost);
     const px = Number(price);
     const divs = Number(dividendsReceived);
-    if (!ticker.trim()) return setError("Ticker is required.");
-    if (!name.trim()) return setError("Please give the holding a name.");
     if (!Number.isFinite(sh) || sh <= 0)
       return setError("Shares must be greater than zero.");
     if (!Number.isFinite(cost) || cost <= 0)
@@ -486,20 +546,17 @@ function HoldingFormInner({
       return setError(
         "Add an investment account first — every holding belongs to one.",
       );
-    const payload = {
+    addHolding({
       ticker: ticker.trim().toUpperCase(),
       name: name.trim(),
       assetClass,
-      sector: sector.trim() || assetClass,
       shares: sh,
       avgCost: cost,
       price: px,
       dividendsReceived: Number.isFinite(divs) ? Math.max(0, divs) : 0,
       accountId,
       currency,
-    };
-    if (initial) updateHolding(initial.id, payload);
-    else addHolding(payload);
+    });
     onClose();
   };
 
@@ -567,13 +624,22 @@ function HoldingFormInner({
             ))}
           </Select>
         </Field>
-        <Field label="Sector / group">
-          <Input
-            value={sector}
-            onChange={(e) => setSector(e.target.value)}
-            placeholder="Technology"
-          />
-        </Field>
+        {initial ? (
+          <Field
+            label={`Current price (${currency})`}
+            hint="Replaced the next time the price feed quotes this security"
+          >
+            <Input
+              type="number"
+              step="any"
+              min="0"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="0.00"
+            />
+          </Field>
+        ) : (
+        <>
         <Field label="Shares / units">
           <Input
             type="number"
@@ -655,48 +721,108 @@ function HoldingFormInner({
             ))}
           </Select>
         </Field>
+        </>
+        )}
       </div>
-      <p className="mt-3 text-[11px] text-ink-faint">
-        This records a position you already hold, so the account&rsquo;s cash
-        balance is left alone. Use{" "}
-        <span className="text-ink-dim">Import trades</span>
-        {" "}to enter a purchase, which pays for the shares out of that cash.
-      </p>
+      {initial ? (
+        <p className="mt-3 text-[11px] text-ink-faint">
+          {heldIn.length > 1
+            ? `Saved for all ${heldIn.length} accounts holding ${initial.ticker}: ${heldIn.join(", ")}. `
+            : ""}
+          Shares and cost come from your trades — use{" "}
+          <span className="text-ink-dim">Log trades</span> to change a position.
+        </p>
+      ) : (
+        <p className="mt-3 text-[11px] text-ink-faint">
+          This records a position you already hold, so the account&rsquo;s cash
+          balance is left alone. Use{" "}
+          <span className="text-ink-dim">Import trades</span>
+          {" "}to enter a purchase, which pays for the shares out of that cash.
+        </p>
+      )}
       {error ? <p className="mt-3 text-xs text-negative">{error}</p> : null}
+      {/*
+        * The confirm step gets its own panel rather than a slot in the footer
+        * row: an account picker and two buttons do not fit beside Cancel and
+        * Save, and cramming them there wrapped the labels mid-word.
+        */}
+      {initial && confirmingDelete ? (
+        <div className="mt-4 rounded-lg border border-negative/40 bg-negative/5 p-3">
+          <p className="text-xs text-ink-dim">
+            Delete this position and everything behind it — its cost basis, its
+            dividends, its trade history. The security stays in your other
+            accounts.
+          </p>
+          {/*
+            * Picker on its own row, buttons below it: at this modal's width
+            * the three could not share a line without the last one wrapping
+            * away on its own.
+            */}
+          <div className="mt-2 space-y-2">
+            {lotsOfSecurity.length > 1 ? (
+              <Select
+                value={deleteAccountId}
+                onChange={(e) => setDeleteAccountId(e.target.value)}
+                className="h-9 w-full py-0 text-xs"
+                aria-label="Account to delete this position from"
+              >
+                {lotsOfSecurity.map((lot) => (
+                  <option key={lot.id} value={lot.accountId}>
+                    {accounts.find((a) => a.id === lot.accountId)?.name ??
+                      "Account"}
+                    {lot.shares > 0
+                      ? ` · ${lot.shares.toLocaleString("en-US")} share${
+                          lot.shares === 1 ? "" : "s"
+                        }`
+                      : " · closed"}
+                  </option>
+                ))}
+              </Select>
+            ) : null}
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                className="text-xs text-ink-faint underline-offset-2 hover:underline"
+                onClick={() => setConfirmingDelete(false)}
+              >
+                Keep it
+              </button>
+              <Button
+                type="button"
+                variant="danger"
+                disabled={!deleteTarget}
+                className="whitespace-nowrap"
+                onClick={() => {
+                  if (!deleteTarget) return;
+                  deleteHolding(deleteTarget.id);
+                  onClose();
+                }}
+              >
+                Delete permanently
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <FormActions
         onCancel={onClose}
         label={initial ? "Save changes" : "Add holding"}
         destructive={
-          initial ? (
-            confirmingDelete ? (
-              <span className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="danger"
-                  onClick={() => {
-                    deleteHolding(initial.id);
-                    onClose();
-                  }}
-                >
-                  Delete permanently
-                </Button>
-                <button
-                  type="button"
-                  className="text-xs text-ink-faint underline-offset-2 hover:underline"
-                  onClick={() => setConfirmingDelete(false)}
-                >
-                  Keep
-                </button>
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setConfirmingDelete(true)}
-                className="text-xs text-ink-faint transition-colors hover:text-negative"
-              >
-                Delete holding
-              </button>
-            )
+          initial && !confirmingDelete ? (
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              className="text-xs text-ink-faint transition-colors hover:text-negative"
+            >
+              {/* Everything else on this form is ticker-wide; deletion is not,
+                  so it says which account it empties. */}
+              {lotsOfSecurity.length > 1
+                ? "Delete from one account…"
+                : `Delete from ${
+                    accounts.find((a) => a.id === initial.accountId)?.name ??
+                    "this account"
+                  }`}
+            </button>
           ) : undefined
         }
       />
@@ -789,7 +915,6 @@ interface NewHoldingMeta {
   ticker: string;
   name: string;
   assetClass: AssetClass;
-  sector: string;
 }
 
 /** A trailing row the user has not touched yet is not a trade. */
@@ -826,7 +951,6 @@ function NewHoldingDetails({
           meta.map((m) => ({
             ...m,
             name: m.name.trim() || m.ticker,
-            sector: m.sector.trim() || m.assetClass,
           })),
         );
       }}
@@ -860,13 +984,6 @@ function NewHoldingDetails({
                     </option>
                   ))}
                 </Select>
-              </Field>
-              <Field label="Sector / group">
-                <Input
-                  value={m.sector}
-                  onChange={(e) => set(m.ticker, "sector", e.target.value)}
-                  placeholder={m.assetClass}
-                />
               </Field>
             </div>
           </div>
@@ -1135,7 +1252,6 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
         ticker: lot.ticker,
         name: m?.name ?? sibling?.name ?? lot.ticker,
         assetClass: m?.assetClass ?? sibling?.assetClass ?? "US Equity",
-        sector: m?.sector ?? sibling?.sector ?? "Other",
         shares,
         avgCost,
         price: lot.price,
@@ -1192,7 +1308,6 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
         // A coin is never an equity, and routing it as one sends it to the
         // wrong price feed — so start from what the symbol already tells us.
         assetClass: isCoinTicker(ticker) ? "Crypto" : "US Equity",
-        sector: "",
       });
     }
 

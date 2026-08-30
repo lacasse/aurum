@@ -43,6 +43,7 @@ import {
   merchantRuleSchema,
   recurringRuleSchema,
   renameCategorySchema,
+  securityUpdateSchema,
   snapshotSchema,
   snapshotsBodySchema,
   transactionSchema,
@@ -73,7 +74,6 @@ function toHolding(row: HoldingRow): Holding {
     ticker: row.ticker,
     name: row.name,
     assetClass: row.assetClass as Holding["assetClass"],
-    sector: row.sector,
     shares: row.shares,
     avgCost: row.avgCost,
     price: row.price,
@@ -211,7 +211,6 @@ export async function seed(data: FinanceData): Promise<void> {
         ticker: h.ticker,
         name: h.name,
         assetClass: h.assetClass,
-        sector: h.sector,
         shares: h.shares,
         avgCost: h.avgCost,
         price: h.price,
@@ -608,7 +607,6 @@ export async function insertHolding(h: Holding, position: number): Promise<void>
     ticker: h.ticker,
     name: h.name,
     assetClass: h.assetClass,
-    sector: h.sector,
     shares: h.shares,
     avgCost: h.avgCost,
     price: h.price,
@@ -625,6 +623,76 @@ export async function insertHolding(h: Holding, position: number): Promise<void>
   });
 }
 
+/**
+ * Rename a security, or move it to another asset class, everywhere it is held.
+ *
+ * Ticker, name and asset class describe the security itself, so they cannot
+ * differ between two accounts holding it — the holdings page pools by ticker,
+ * and a rename applied to one account only would split the position in two.
+ * One statement covers every row, so a rename cannot land half-applied.
+ *
+ * A manual price can ride along. It is deliberately not sticky: the next price
+ * refresh writes over it, which is the point — the manual figure fills the gap
+ * until the feed can quote the security again.
+ *
+ * Returns the number of rows changed, which is what the caller reports.
+ */
+export async function updateSecurity(
+  ticker: string,
+  next: {
+    ticker: string;
+    name: string;
+    assetClass: string;
+    price?: number;
+    priceCAD?: number;
+    currency?: string;
+  },
+): Promise<number> {
+  const where = sql`upper(${holdings.ticker}) = upper(${ticker})`;
+
+  const rows = await db
+    .update(holdings)
+    .set({
+      ticker: next.ticker,
+      name: next.name,
+      assetClass: next.assetClass,
+    })
+    .where(where)
+    .returning({ id: holdings.id });
+
+  /*
+   * A manual price is a separate statement because it reaches fewer rows: only
+   * the lots quoted in the same currency as the one that was edited, since the
+   * number typed in is a price in that currency and nothing converts it for a
+   * lot listed elsewhere.
+   *
+   * `history` carries the monthly prices and ends on the current one, so its
+   * last entry moves with the price — otherwise the chart's final point and
+   * the table would disagree by exactly the manual correction.
+   */
+  if (next.price != null && next.priceCAD != null) {
+    const last = sql`greatest(jsonb_array_length(${holdings.history}) - 1, 0)::text`;
+    const lastCad = sql`greatest(jsonb_array_length(${holdings.historyCAD}) - 1, 0)::text`;
+    await db
+      .update(holdings)
+      .set({
+        price: next.price,
+        priceCAD: next.priceCAD,
+        history: sql`CASE WHEN jsonb_array_length(${holdings.history}) > 0
+          THEN jsonb_set(${holdings.history}, ARRAY[${last}], to_jsonb(${next.price}::numeric))
+          ELSE ${holdings.history} END`,
+        historyCAD: sql`CASE WHEN jsonb_array_length(${holdings.historyCAD}) > 0
+          THEN jsonb_set(${holdings.historyCAD}, ARRAY[${lastCad}], to_jsonb(${next.priceCAD}::numeric))
+          ELSE ${holdings.historyCAD} END`,
+      })
+      .where(
+        sql`upper(${holdings.ticker}) = upper(${next.ticker}) and ${holdings.currency} = ${next.currency ?? "CAD"}`,
+      );
+  }
+
+  return rows.length;
+}
+
 export async function replaceHolding(h: Holding): Promise<void> {
   await db
     .update(holdings)
@@ -632,7 +700,6 @@ export async function replaceHolding(h: Holding): Promise<void> {
       ticker: h.ticker,
       name: h.name,
       assetClass: h.assetClass,
-      sector: h.sector,
       shares: h.shares,
       avgCost: h.avgCost,
       price: h.price,
@@ -725,6 +792,18 @@ export function parseAccount(body: unknown): Account {
 
 export function parseHolding(body: unknown): Holding {
   return parseWith(holdingSchema, body);
+}
+
+export function parseSecurityUpdate(body: unknown): {
+  from: string;
+  ticker: string;
+  name: string;
+  assetClass: string;
+  price?: number;
+  priceCAD?: number;
+  currency: string;
+} {
+  return parseWith(securityUpdateSchema, body);
 }
 
 export function parseBudget(body: unknown): { category: string; limit: number } {

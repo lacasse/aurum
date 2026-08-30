@@ -15,8 +15,8 @@ import { StatCard } from "@/components/stat-card";
 import { Badge, Button, Card, CardHeader, Progress, Segmented, cn } from "@/components/ui";
 import {
   DonutChart,
+  ExposurePie,
   PALETTE,
-  SectorRadar,
   SeriesChart,
   SignedHBars,
   TwrChart,
@@ -38,7 +38,7 @@ import {
   sortHoldingRows,
   simpleReturn,
   portfolioSeries,
-  sectorExposure,
+  holdingExposure,
   type SnapshotHistory,
 } from "@/lib/analytics";
 import { fmtCompact, fmtPct, fmtSignedCAD, fmtCAD, labelMonth } from "@/lib/format";
@@ -365,7 +365,7 @@ export default function InvestmentsPage() {
     const open = all.filter((r) => !r.closed);
     const series = portfolioSeries(holdings, 18);
     const allocation = allocationByClass(holdings).sort((a, b) => b.value - a.value);
-    const sectors = sectorExposure(holdings);
+    const exposure = holdingExposure(holdings);
     const totalValue = open.reduce((s, r) => s + r.marketValue, 0);
     const totalCost = open.reduce((s, r) => s + r.costBasis, 0);
     const totalDividends = open.reduce((s, r) => s + r.totalDividends, 0);
@@ -386,7 +386,7 @@ export default function InvestmentsPage() {
       closedCount,
       series,
       allocation,
-      sectors,
+      exposure,
       totalValue,
       totalCost,
       totalDividends,
@@ -787,8 +787,8 @@ export default function InvestmentsPage() {
           </Card>
         )}
 
-        <div className="grid gap-4 lg:grid-cols-5">
-          <Card className="lg:col-span-3">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
             <CardHeader
               title="Gain / loss by position"
               subtitle="Total return including dividends (top 10)"
@@ -808,18 +808,21 @@ export default function InvestmentsPage() {
             </div>
           </Card>
 
-          <Card className="lg:col-span-2">
-            <CardHeader title="Sector exposure" subtitle="Diversification snapshot" />
+          <Card>
+            <CardHeader
+              title="Holdings exposure"
+              subtitle="Every position, shaded by asset class"
+            />
             <div className="px-3 pb-4">
-              {data.sectors.length > 1 ? (
-                <SectorRadar
-                  data={data.sectors}
-                  height={280}
+              {data.exposure.length > 0 ? (
+                <ExposurePie
+                  data={data.exposure}
+                  height={260}
                   fmt={(n) => fmtCompact(n)}
                 />
               ) : (
                 <p className="py-16 text-center text-xs text-ink-faint">
-                  Add holdings in at least two sectors to compare.
+                  Add a holding to see the breakdown.
                 </p>
               )}
             </div>
@@ -830,7 +833,7 @@ export default function InvestmentsPage() {
         <Card>
           <CardHeader
             title="Holdings"
-            subtitle="Click the pencil to update price or shares"
+            subtitle="Click the pencil to rename a holding or change its asset class"
             action={
               data.closedCount > 0 ? (
                 <Button variant="secondary" onClick={() => setShowClosed((v) => !v)}>
@@ -993,29 +996,22 @@ export default function InvestmentsPage() {
                     </td>
                     <td className="whitespace-nowrap px-3 py-2.5 text-right">
                       {/*
-                        * Editing is per position, not per security: a pooled row
-                        * has a separate cost basis in each account, so there is
-                        * nothing coherent to edit at this level. Expand instead.
+                        * The pencil edits the security — ticker, name, asset
+                        * class — which is the same in every account holding it,
+                        * so a pooled row can be edited from here directly and
+                        * the change reaches all of its lots.
                         */}
-                      {pooled ? (
-                        <span className="text-[11px] text-ink-faint">
-                          {lots.length} accounts
-                        </span>
-                      ) : (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Edit ${r.ticker}`}
-                            onClick={() => {
-                              setEditing(lots[0]);
-                              setFormOpen(true);
-                            }}
-                          >
-                            <Pencil size={14} />
-                          </Button>
-                        </>
-                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Edit ${r.ticker}`}
+                        onClick={() => {
+                          setEditing(lots[0]);
+                          setFormOpen(true);
+                        }}
+                      >
+                        <Pencil size={14} />
+                      </Button>
                     </td>
                   </tr>
                   {pooled &&
@@ -1048,19 +1044,13 @@ export default function InvestmentsPage() {
                         <td className="px-3 py-2" />
                         <td className="px-3 py-2" />
                         <td className="hidden px-3 py-2 xl:table-cell" />
-                        <td className="whitespace-nowrap px-3 py-2 text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`Edit ${r.ticker} in ${accountLabel(lot.accountId)}`}
-                            onClick={() => {
-                              setEditing(lot);
-                              setFormOpen(true);
-                            }}
-                          >
-                            <Pencil size={14} />
-                          </Button>
-                        </td>
+                        {/*
+                          * No pencil per account. Everything the form edits is
+                          * a property of the security and saves to every
+                          * account at once, so a pencil here would promise a
+                          * per-account edit that does not exist.
+                          */}
+                        <td className="px-3 py-2" />
                       </tr>
                     ))}
                   </Fragment>

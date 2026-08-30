@@ -2,6 +2,7 @@
 
 import {
   Account,
+  AssetClass,
   Budget,
   CashFlow,
   Currency,
@@ -181,24 +182,60 @@ export function allocationByClass(
   }));
 }
 
-export function sectorExposure(
-  holdings: Holding[],
-): { sector: string; value: number }[] {
-  const totals = new Map<string, number>();
+/**
+ * One slice per security for the exposure pie, pooled across accounts.
+ *
+ * Asset class is what groups them — the individual positions, not the group
+ * totals, are what the chart draws. Closed positions are left out: a pie is a
+ * picture of what is owned now.
+ *
+ * Slices come out grouped, largest group first and largest holding first
+ * within a group, so that a caller shading a group can walk the array in order
+ * and get the shades adjacent on the arc.
+ */
+export interface ExposureSlice {
+  ticker: string;
+  name: string;
+  assetClass: AssetClass;
+  value: number;
+}
+
+export function holdingExposure(holdings: Holding[]): ExposureSlice[] {
+  const pooled = new Map<string, ExposureSlice>();
   for (const h of holdings) {
-    const px = h.priceCAD ?? h.price;
-    totals.set(h.sector, (totals.get(h.sector) ?? 0) + toCents(h.shares * px));
+    const value = fromCents(toCents(h.shares * (h.priceCAD ?? h.price)));
+    if (value <= 0) continue;
+    const key = `${h.assetClass}|${h.ticker.toUpperCase()}`;
+    const seen = pooled.get(key);
+    if (seen) {
+      seen.value = fromCents(toCents(seen.value + value));
+      // Several rows for one ticker can disagree on the name, one of them
+      // being the bare ticker. Prefer whichever says more.
+      if (h.name.length > seen.name.length) seen.name = h.name;
+    } else {
+      pooled.set(key, {
+        ticker: h.ticker,
+        name: h.name,
+        assetClass: h.assetClass,
+        value,
+      });
+    }
   }
-  const rows = [...totals.entries()].map(([sector, cents]) => ({
-    sector,
-    value: fromCents(cents),
-  }));
-  rows.sort((a, b) => b.value - a.value);
-  if (rows.length <= 6) return rows;
-  const top = rows.slice(0, 5);
-  const other = sumMoney(rows.slice(5).map((r) => r.value));
-  top.push({ sector: "Other", value: other });
-  return top;
+
+  const slices = [...pooled.values()];
+  const groupTotal = new Map<AssetClass, number>();
+  for (const s of slices) {
+    groupTotal.set(s.assetClass, (groupTotal.get(s.assetClass) ?? 0) + s.value);
+  }
+  slices.sort((a, b) => {
+    const ga = groupTotal.get(a.assetClass) ?? 0;
+    const gb = groupTotal.get(b.assetClass) ?? 0;
+    if (ga !== gb) return gb - ga;
+    if (a.assetClass !== b.assetClass) return a.assetClass.localeCompare(b.assetClass);
+    if (a.value !== b.value) return b.value - a.value;
+    return a.ticker.localeCompare(b.ticker);
+  });
+  return slices;
 }
 
 /**

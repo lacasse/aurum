@@ -544,7 +544,6 @@ export function positionToHolding(pos: Position) {
     assetClass:
       pos.existing?.assetClass ??
       ((isCoinTicker(pos.ticker) ? "Crypto" : "US Equity") as AssetClass),
-    sector: pos.existing?.sector ?? "Other",
     shares,
     avgCost,
     price: pos.lastPrice,

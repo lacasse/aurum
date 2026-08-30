@@ -52,6 +52,17 @@ export const api = {
     send(`/api/holdings/${encodeURIComponent(holding.id)}`, "PUT", holding),
   deleteHolding: (id: string) =>
     send(`/api/holdings/${encodeURIComponent(id)}`, "DELETE"),
+  updateSecurity: (
+    from: string,
+    input: {
+      ticker: string;
+      name: string;
+      assetClass: string;
+      price?: number;
+      priceCAD?: number;
+      currency: string;
+    },
+  ) => send("/api/holdings/security", "PUT", { from, ...input }),
 
   setBudget: (category: string, limit: number) =>
     send("/api/budgets", "PUT", { category, limit }),

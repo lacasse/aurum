@@ -194,7 +194,6 @@ describe("holdingSchema", () => {
     assert.equal(h.ticker, "VFV");
     assert.equal(h.name, "vfv", "name falls back to the ticker");
     assert.equal(h.assetClass, "US Equity");
-    assert.equal(h.sector, "US Equity", "sector falls back to the asset class");
     assert.equal(h.accountId, "acc-1");
     assert.equal(h.priceCAD, 120, "CAD price falls back to the listing price");
     assert.equal(h.avgCostCAD, 100);
