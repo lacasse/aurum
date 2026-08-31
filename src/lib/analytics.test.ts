@@ -26,6 +26,8 @@ import {
   firstAccountMonth,
   netWorthOver,
   netWorthByClass,
+  fiProgress,
+  DEFAULT_WITHDRAWAL_RATE,
   netWorthSeries,
 } from "./analytics";
 import { currentMonthKey, lastCompleteMonthKey, lastMonthKeys } from "./format";
@@ -267,6 +269,59 @@ describe("the pension is not counted as money", () => {
     assert.equal(series[1].assets, 0);
     assert.equal(series[1].pension, 1000);
     assert.equal(series[1].net, 1000);
+  });
+});
+
+describe("fiProgress", () => {
+  test("the target follows from what a year costs, and is not entered", () => {
+    // The workbook's own figures: $3,961.115 a month at 3.5% is $1,358,096.60,
+    // and $509,242.63 of net worth is 37.5% of the way there.
+    const fi = fiProgress(509242.63, 3961.115);
+    assert.equal(fi.target, 1358096.57);
+    assert.equal(Math.round(fi.pct * 10) / 10, 37.5);
+  });
+
+  test("the payout is the rate on net worth", () => {
+    const fi = fiProgress(509242.63, 3961.115);
+    assert.equal(fi.yearly, 17823.49);
+    assert.equal(fi.monthly, 1485.29);
+  });
+
+  test("progress and coverage are the same number", () => {
+    // Net worth over the target equals the payout over a month's spending,
+    // which is why one percentage answers both questions.
+    const fi = fiProgress(400000, 3000);
+    assert.equal(
+      Math.round(fi.pct * 100) / 100,
+      Math.round((fi.monthly / 3000) * 10000) / 100,
+    );
+  });
+
+  test("a different rate moves the target and the payout together", () => {
+    const strict = fiProgress(500000, 4000, 0.03);
+    const loose = fiProgress(500000, 4000, 0.04);
+    assert.ok(strict.target > loose.target, "a lower rate needs a bigger pot");
+    assert.ok(strict.monthly < loose.monthly);
+    assert.ok(strict.pct < loose.pct);
+  });
+
+  test("the shortfall is what a month still needs", () => {
+    const fi = fiProgress(509242.63, 4736);
+    assert.equal(fi.shortfall, roundTo(4736 - fi.monthly));
+    function roundTo(n: number) {
+      return Math.round(n * 100) / 100;
+    }
+  });
+
+  test("nothing spent is no target, rather than an infinite one", () => {
+    const fi = fiProgress(500000, 0);
+    assert.equal(fi.target, 0);
+    assert.equal(fi.pct, 0);
+    assert.equal(fi.shortfall, 0);
+  });
+
+  test("the default rate is the one the record has always used", () => {
+    assert.equal(DEFAULT_WITHDRAWAL_RATE, 0.035);
   });
 });
 
