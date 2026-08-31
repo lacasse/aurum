@@ -457,6 +457,57 @@ export async function deleteDemoData(): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
+/* Allocation targets                                                  */
+/* ------------------------------------------------------------------ */
+
+const TARGETS_KEY = "allocation_targets";
+
+/**
+ * What share of the portfolio each security is meant to be, by ticker.
+ *
+ * A single row of JSON rather than a table: it is one small map that is read
+ * whole and written whole, and a table would buy nothing but joins. Absent
+ * means no targets have been set, which is different from every target being
+ * zero — the first draws no comparison, the second says sell everything.
+ */
+export async function getAllocationTargets(): Promise<Record<string, number>> {
+  const [row] = await db.select().from(appMeta).where(eq(appMeta.key, TARGETS_KEY));
+  if (!row) return {};
+  try {
+    const parsed: unknown = JSON.parse(row.value);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, number> = {};
+    for (const [ticker, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const pct = Number(value);
+      if (Number.isFinite(pct) && pct >= 0) out[ticker.toUpperCase()] = pct;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export async function setAllocationTargets(
+  targets: Record<string, number>,
+): Promise<void> {
+  const clean: Record<string, number> = {};
+  for (const [ticker, value] of Object.entries(targets)) {
+    const pct = Number(value);
+    // A target of zero is a real answer — "hold none of this" — so it is kept.
+    if (Number.isFinite(pct) && pct >= 0 && pct <= 100) {
+      clean[ticker.trim().toUpperCase()] = Math.round(pct * 100) / 100;
+    }
+  }
+  await db
+    .insert(appMeta)
+    .values({ key: TARGETS_KEY, value: JSON.stringify(clean) })
+    .onConflictDoUpdate({
+      target: appMeta.key,
+      set: { value: JSON.stringify(clean) },
+    });
+}
+
+/* ------------------------------------------------------------------ */
 /* Accounts                                                            */
 /* ------------------------------------------------------------------ */
 
