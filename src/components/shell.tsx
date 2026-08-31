@@ -7,6 +7,7 @@ import { useState } from "react";
 import {
   ArrowLeftRight,
   BookOpen,
+  CalendarRange,
   Landmark,
   LayoutDashboard,
   Menu,
@@ -33,6 +34,7 @@ const NAV = [
   { href: "/budgets", label: "Budgets", icon: Target },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/import", label: "Import", icon: Upload },
+  { href: "/year", label: "Year", icon: CalendarRange },
   { href: "/tax", label: "Tax", icon: Receipt },
   { href: "/guide", label: "How this works", icon: BookOpen },
 ] as const;
