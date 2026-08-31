@@ -1282,6 +1282,35 @@ export function allTimeSeries(
   return { points, unpriced: [...unpriced].sort(), snapshotMonths };
 }
 
+/* ── Two ratios ── */
+
+/**
+ * What share of everything that came in was not spent.
+ *
+ * Total income is the denominator, pension contributions included: money that
+ * goes straight into a plan is saved as surely as money left in an account,
+ * and leaving it out would report a lower rate for the act of saving harder.
+ *
+ * No income is no rate rather than zero — a month with nothing coming in did
+ * not fail to save, it had nothing to save from.
+ */
+export function savingsRate(income: number, expenses: number): number | null {
+  if (income <= 0) return null;
+  return ((income - expenses) / income) * 100;
+}
+
+/**
+ * How many months of spending the cash on hand would cover.
+ *
+ * Cash only. The portfolio could be sold, but selling it is a decision with
+ * consequences — tax, timing, whether it is sheltered — and the number is
+ * worth having precisely because it says what is available without making one.
+ */
+export function runwayMonths(cash: number, monthlyExpenses: number): number | null {
+  if (monthlyExpenses <= 0) return null;
+  return Math.max(cash, 0) / monthlyExpenses;
+}
+
 /* ── Financial independence ── */
 
 /**
