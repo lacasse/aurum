@@ -29,7 +29,10 @@ import {
   firstFlowMonth,
   monthlyAverages,
   monthsSince,
+  netWorthByClass,
   netWorthOver,
+  NET_WORTH_CLASSES,
+  type NetWorthClass,
   portfolioSeries,
   stackedSpend,
   type SnapshotHistory,
@@ -44,6 +47,21 @@ import {
 } from "@/lib/format";
 import { ACCOUNT_KIND_LABELS } from "@/lib/types";
 import { roundMoney } from "@/lib/money";
+
+/**
+ * A colour per band of net worth.
+ *
+ * Cash and the pension keep the colours they carry on the accounts page, so a
+ * band means the same thing wherever it is drawn; the portfolio's three sit
+ * between them, cool to warm as they get more volatile.
+ */
+const CLASS_COLORS: Record<NetWorthClass, string> = {
+  Cash: "#8b5cf6",
+  Bonds: "#60a5fa",
+  Stocks: "#22d3ee",
+  Crypto: "#a3e635",
+  Pension: "#f59e0b",
+};
 
 /** How much of the net worth history to draw: months, or the whole record. */
 type Range = "12" | "60" | "all";
@@ -181,6 +199,20 @@ export default function DashboardPage() {
      * lines. The cost basis runs under both, so the distance from it is the
      * gain.
      */
+    /*
+     * What net worth is made of, rather than what it adds up to. The line
+     * above says it doubled; these bands say the doubling was crypto.
+     */
+    const byClass = historyStart
+      ? netWorthByClass(
+          accounts,
+          holdings,
+          {},
+          monthsSince(historyStart),
+          snapshots,
+          usdCadRate,
+        )
+      : [];
     const port = portAll.map((p, i) => ({
       ...nwAll[i],
       value: p.value,
@@ -205,6 +237,7 @@ export default function DashboardPage() {
       stacked,
       topCats,
       port,
+      byClass,
       avg,
       invested,
       market,
@@ -215,6 +248,11 @@ export default function DashboardPage() {
   const nw = useMemo(
     () => (range === "all" ? data.port : data.port.slice(-Number(range))),
     [data.port, range],
+  );
+  const bandsLast = data.byClass[data.byClass.length - 1];
+  const bands = useMemo(
+    () => (range === "all" ? data.byClass : data.byClass.slice(-Number(range))),
+    [data.byClass, range],
   );
 
   if (!ready) return <PageSkeleton />;
@@ -394,6 +432,33 @@ export default function DashboardPage() {
             </ul>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader
+            title="What net worth is made of"
+            subtitle={`${NET_WORTH_CLASSES.filter((c) => (bandsLast?.[c] ?? 0) > 0).join(" · ")} — stacked to what you own`}
+          />
+          <div className="px-3 pb-4">
+            {/*
+              * The same months as the line above, kept apart by what they are.
+              * Net worth doubling tells you nothing about what did it; six
+              * bands do, and the shape of the mix is the part that changes
+              * slowly enough to act on.
+              */}
+            <SeriesChart
+              data={bands as unknown as Record<string, unknown>[]}
+              xKey="label"
+              stacked
+              series={NET_WORTH_CLASSES.map((name) => ({
+                key: name,
+                name,
+                color: CLASS_COLORS[name],
+              }))}
+              height={300}
+              yFmt={fmtCompact}
+            />
+          </div>
+        </Card>
 
         <SectionHeading
           title="Cash flow"

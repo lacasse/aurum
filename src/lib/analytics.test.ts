@@ -25,10 +25,11 @@ import {
   avgSpendByCategory,
   firstAccountMonth,
   netWorthOver,
+  netWorthByClass,
   netWorthSeries,
 } from "./analytics";
 import { currentMonthKey, lastCompleteMonthKey, lastMonthKeys } from "./format";
-import type { Budget, Holding, Transaction } from "./types";
+import type { Account, Budget, Holding, Transaction } from "./types";
 
 const MONTH = currentMonthKey();
 const DAY = `${MONTH}-05`;
@@ -266,6 +267,115 @@ describe("the pension is not counted as money", () => {
     assert.equal(series[1].assets, 0);
     assert.equal(series[1].pension, 1000);
     assert.equal(series[1].net, 1000);
+  });
+});
+
+describe("netWorthByClass", () => {
+  const months = ["2026-06", "2026-07", "2026-08"];
+  const holding = (ticker: string, assetClass: string, flows: unknown[] = []) =>
+    ({
+      id: ticker,
+      ticker,
+      name: ticker,
+      assetClass,
+      shares: 0,
+      avgCost: 0,
+      avgCostCAD: 0,
+      price: 0,
+      priceCAD: 0,
+      dividendsReceived: 0,
+      dividendsReceivedCAD: 0,
+      history: [],
+      historyCAD: [],
+      currency: "CAD",
+      accountId: "a1",
+      flows,
+    }) as unknown as Holding;
+
+  const chequing = {
+    id: "c",
+    kind: "checking",
+    balance: 500,
+    history: [{ month: "2026-06", value: 500 }],
+  } as unknown as Account;
+  const pension = {
+    id: "p",
+    kind: "pension",
+    balance: 9000,
+    history: [{ month: "2026-07", value: 9000 }],
+  } as unknown as Account;
+  const loan = {
+    id: "l",
+    kind: "loan",
+    balance: 200,
+    history: [{ month: "2026-06", value: 200 }],
+  } as unknown as Account;
+
+  const snapshots = {
+    "2026-07": { "BTC": 4000, "XEQT.TO": 3000, "XGB.TO": 1000 },
+    "2026-08": { "BTC": 5000, "XEQT.TO": 3200, "XGB.TO": 900 },
+  };
+  const holdings = [
+    holding("BTC", "Crypto"),
+    holding("XEQT.TO", "Intl Equity"),
+    holding("XGB.TO", "Bonds"),
+  ];
+
+  test("splits the portfolio by what each holding is", () => {
+    const series = netWorthByClass([chequing], holdings, {}, months, snapshots);
+    const july = series[1];
+    assert.equal(july.Crypto, 4000);
+    assert.equal(july.Stocks, 3000);
+    assert.equal(july.Bonds, 1000);
+  });
+
+  test("US and international equity are one band", () => {
+    // The split between them is a question about the stocks, not about the mix.
+    const series = netWorthByClass(
+      [chequing],
+      [holding("VOO", "US Equity"), holding("CAGE.TO", "Intl Equity")],
+      {},
+      months,
+      { "2026-07": { VOO: 100, "CAGE.TO": 250 } },
+    );
+    assert.equal(series[1].Stocks, 350);
+  });
+
+  test("cash and the pension are bands of their own", () => {
+    const series = netWorthByClass([chequing, pension], holdings, {}, months, snapshots);
+    assert.equal(series[0].Cash, 500);
+    assert.equal(series[0].Pension, 0, "the pension has no record for June");
+    assert.equal(series[1].Pension, 9000);
+  });
+
+  test("debts sit beside the bands, not inside them", () => {
+    const series = netWorthByClass([chequing, loan], holdings, {}, months, snapshots);
+    assert.equal(series[1].liabilities, 200);
+    assert.equal(series[1].net, 500 + 4000 + 3000 + 1000 - 200);
+  });
+
+  test("the bands and the debt add up to net worth", () => {
+    const series = netWorthByClass([chequing, pension, loan], holdings, {}, months, snapshots);
+    for (const p of series) {
+      const bands = p.Cash + p.Bonds + p.Stocks + p.Crypto + p.Pension;
+      assert.equal(Math.round((bands - p.liabilities) * 100) / 100, p.net);
+    }
+  });
+
+  test("a class nothing is held in stays at zero rather than vanishing", () => {
+    const series = netWorthByClass([chequing], [holding("BTC", "Crypto")], {}, months, {
+      "2026-07": { BTC: 100 },
+    });
+    assert.equal(series[1].Bonds, 0);
+    assert.equal(series[1].Stocks, 0);
+  });
+
+  test("a recorded ticker nobody holds any more still counts as its class", () => {
+    // Sold in 2022, but it was bonds while it was open.
+    const series = netWorthByClass([chequing], holdings, {}, months, {
+      "2026-07": { "XGB.TO": 1500 },
+    });
+    assert.equal(series[1].Bonds, 1500);
   });
 });
 

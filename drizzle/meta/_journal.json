@@ -148,6 +148,13 @@
       "when": 1789800000000,
       "tag": "0020_pension_statement_figures",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789900000000,
+      "tag": "0021_classify_bond_and_crypto_etfs",
+      "breakpoints": true
     }
   ]
 }
