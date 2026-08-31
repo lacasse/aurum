@@ -1282,6 +1282,68 @@ export function allTimeSeries(
   return { points, unpriced: [...unpriced].sort(), snapshotMonths };
 }
 
+/* ── Financial independence ── */
+
+/**
+ * The withdrawal rate the target and the payout are both built on.
+ *
+ * Three and a half percent rather than the usual four: it is the rate the
+ * spreadsheet has always used, and every figure it reports agrees with it to
+ * the cent. Conservative by a half point, which on a retirement lasting
+ * decades is the difference the half point is there for.
+ */
+export const DEFAULT_WITHDRAWAL_RATE = 0.035;
+
+export interface FiProgress {
+  /** The withdrawal rate everything here assumes. */
+  rate: number;
+  /** A year of spending at the recent average. */
+  annualExpenses: number;
+  /** What the portfolio would have to be worth to pay for that year forever. */
+  target: number;
+  netWorth: number;
+  /** How far along, as a percentage of the target. */
+  pct: number;
+  /** What today's net worth would pay out at that rate. */
+  monthly: number;
+  yearly: number;
+  /** The shortfall between that payout and a month's spending. */
+  shortfall: number;
+}
+
+/**
+ * How much of your life the money already pays for.
+ *
+ * The target is not a number to be entered: it follows from what a year costs
+ * and the rate you would draw at. So does the progress — net worth over
+ * target is the same figure as the payout over a month's spending, which is
+ * why one percentage answers both "how far along" and "how much of a month
+ * does this cover".
+ *
+ * Zero expenses have no target, since a life that costs nothing needs nothing
+ * to fund it, and dividing by it would report infinity.
+ */
+export function fiProgress(
+  netWorth: number,
+  monthlyExpenses: number,
+  rate = DEFAULT_WITHDRAWAL_RATE,
+): FiProgress {
+  const annualExpenses = roundMoney(monthlyExpenses * 12);
+  const target = annualExpenses > 0 && rate > 0 ? roundMoney(annualExpenses / rate) : 0;
+  const yearly = roundMoney(Math.max(netWorth, 0) * rate);
+  const monthly = roundMoney(yearly / 12);
+  return {
+    rate,
+    annualExpenses,
+    target,
+    netWorth,
+    pct: target > 0 ? (netWorth / target) * 100 : 0,
+    monthly,
+    yearly,
+    shortfall: roundMoney(Math.max(monthlyExpenses - monthly, 0)),
+  };
+}
+
 /* ── Net worth by asset class ── */
 
 export const NET_WORTH_CLASSES = [
