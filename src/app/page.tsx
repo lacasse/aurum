@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
-import { Button, Card, CardHeader, Segmented } from "@/components/ui";
+import { Button, Card, CardHeader, Progress, Segmented } from "@/components/ui";
 import { DonutChart, SeriesChart, categoryColors } from "@/components/charts";
 import { TransactionForm } from "@/components/forms";
 import { MonthlyChecklistButton, MonthlyChecklistModal } from "@/components/monthly-checklist";
@@ -29,6 +29,8 @@ import {
   firstFlowMonth,
   monthlyAverages,
   monthsSince,
+  fiProgress,
+  DEFAULT_WITHDRAWAL_RATE,
   netWorthByClass,
   netWorthOver,
   NET_WORTH_CLASSES,
@@ -111,6 +113,7 @@ export default function DashboardPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [snapshots, setSnapshots] = useState<SnapshotHistory>({});
+  const [rate, setRate] = useState("0.035");
 
   /*
    * Recorded month-end portfolio values. They reach back years further than
@@ -281,6 +284,8 @@ export default function DashboardPage() {
     passive: yearOverYear(data.avg.passive, prev?.passive, "up"),
   };
 
+  const fi = fiProgress(nwLast.net, data.avg.expenses, Number(rate) || DEFAULT_WITHDRAWAL_RATE);
+
   const spark = data.nwAll.slice(-18);
   const totalSpend = data.spend.reduce((s, c) => s + c.value, 0);
   const monthName = labelMonth(data.through);
@@ -342,6 +347,63 @@ export default function DashboardPage() {
             sparkColor="#f59e0b"
           />
         </div>
+
+        {/*
+          * How much of a life the money already pays for.
+          *
+          * The target is not a figure anybody entered: a year of spending at
+          * the rate you would draw at is what it takes to fund that year
+          * forever. Which also means net worth over the target and the payout
+          * over a month's spending are the same percentage, so one number
+          * answers both.
+          */}
+        <Card className="p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium text-ink-dim">
+                Financial independence
+              </p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums">
+                {fi.pct.toFixed(1)}%
+                <span className="ml-2 text-sm font-normal text-ink-faint">
+                  of {fmtCAD(fi.target)}
+                </span>
+              </p>
+            </div>
+            <Segmented<string>
+              options={[
+                { value: "0.03", label: "3%" },
+                { value: "0.035", label: "3.5%" },
+                { value: "0.04", label: "4%" },
+              ]}
+              value={rate}
+              onChange={setRate}
+            />
+          </div>
+          <Progress value={fi.pct} max={100} tone="positive" className="mt-4" />
+          <div className="mt-3 flex flex-wrap gap-x-8 gap-y-1 text-[11px] text-ink-faint">
+            <span>
+              Pays{" "}
+              <span className="font-medium tabular-nums text-ink-dim">
+                {fmtCAD(fi.monthly)}
+              </span>{" "}
+              a month at {(fi.rate * 100).toFixed(1)}%
+            </span>
+            <span>
+              A month costs{" "}
+              <span className="font-medium tabular-nums text-ink-dim">
+                {fmtCAD(data.avg.expenses)}
+              </span>
+            </span>
+            <span>
+              Still short{" "}
+              <span className="font-medium tabular-nums text-ink-dim">
+                {fmtCAD(fi.shortfall)}
+              </span>{" "}
+              a month
+            </span>
+          </div>
+        </Card>
 
         {/* The whole record, in one chart */}
         <div className="grid gap-4 lg:grid-cols-3">
