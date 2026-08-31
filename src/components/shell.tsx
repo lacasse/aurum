@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   Menu,
   Moon,
+  Receipt,
   Sun,
   Target,
   Trash2,
@@ -32,6 +33,7 @@ const NAV = [
   { href: "/budgets", label: "Budgets", icon: Target },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/import", label: "Import", icon: Upload },
+  { href: "/tax", label: "Tax", icon: Receipt },
   { href: "/guide", label: "How this works", icon: BookOpen },
 ] as const;
 
