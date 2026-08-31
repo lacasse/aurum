@@ -32,7 +32,7 @@ import {
 import { HoldingForm, TradeEntry } from "@/components/forms";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
-import type { SortKey } from "@/lib/analytics";
+import type { HoldingRow, SortKey } from "@/lib/analytics";
 import {
   allTimeSeries,
   allocationByClass,
@@ -60,6 +60,7 @@ import {
 } from "@/lib/format";
 import type { Holding } from "@/lib/types";
 import { awaitingPrice, priceReward } from "@/lib/rewards";
+import { drift } from "@/lib/allocation";
 import { replayFlows } from "@/lib/analytics";
 
 const POLL_MS = 60 * 60_000;
@@ -228,6 +229,201 @@ function PendingRewards() {
           </li>
         ))}
       </ul>
+    </Card>
+  );
+}
+
+/**
+ * What the portfolio is against what it is meant to be.
+ *
+ * Targets are per security and kept as one small map, because that is the
+ * question actually being asked: two funds in the same class can be one you
+ * are building and one you are leaving. The drift is shown in money as well as
+ * in points — "eight points over" is a judgement, "$38,000 over" is an
+ * instruction.
+ */
+function TargetAllocation({ rows }: { rows: HoldingRow[] }) {
+  const [targets, setTargets] = useState<Record<string, number> | null>(null);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/targets", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { targets: Record<string, number> }) => {
+        if (!cancelled) setTargets(d.targets ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setTargets({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const open = useMemo(() => rows.filter((r) => !r.closed), [rows]);
+  const result = useMemo(
+    () =>
+      drift(
+        open.map((r) => ({ ticker: r.ticker, name: r.name, marketValue: r.marketValue })),
+        targets ?? {},
+      ),
+    [open, targets],
+  );
+
+  if (targets === null) return null;
+
+  const startEditing = () => {
+    const next: Record<string, string> = {};
+    for (const r of result.rows) {
+      next[r.ticker] = r.targetPct === null ? "" : String(r.targetPct);
+    }
+    setDraft(next);
+    setEditing(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    const next: Record<string, number> = {};
+    // A box left empty removes the target rather than setting it to zero:
+    // "no plan for this" and "hold none of this" are different answers.
+    for (const [ticker, raw] of Object.entries(draft)) {
+      if (raw.trim() === "") continue;
+      const pct = Number(raw);
+      if (Number.isFinite(pct) && pct >= 0 && pct <= 100) next[ticker.toUpperCase()] = pct;
+    }
+    try {
+      const res = await fetch("/api/targets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets: next }),
+      });
+      const body: { targets?: Record<string, number> } = await res.json();
+      setTargets(body.targets ?? next);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const noTargets = Object.keys(targets).length === 0;
+
+  return (
+    <Card>
+      <CardHeader
+        title="Target allocation"
+        subtitle={
+          noTargets
+            ? "Set a share for each position and this will show how far off it has drifted"
+            : `Targets total ${result.targetTotal.toFixed(0)}%${
+                result.untargeted > 0
+                  ? ` · ${result.untargeted} position${result.untargeted === 1 ? "" : "s"} with no target`
+                  : ""
+              }`
+        }
+        action={
+          editing ? (
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={save} disabled={saving}>
+                {saving ? "Saving…" : "Save targets"}
+              </Button>
+            </div>
+          ) : (
+            <Button variant="secondary" size="sm" onClick={startEditing}>
+              {noTargets ? "Set targets" : "Edit targets"}
+            </Button>
+          )
+        }
+      />
+      <div className="overflow-x-auto px-2 pb-3">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[11px] uppercase tracking-wider text-ink-faint">
+              <th className="px-3 py-2 text-left font-medium">Security</th>
+              <th className="px-3 py-2 text-right font-medium">Value</th>
+              <th className="px-3 py-2 text-right font-medium">Actual</th>
+              <th className="px-3 py-2 text-right font-medium">Target</th>
+              <th className="px-3 py-2 text-right font-medium">Drift</th>
+              <th className="px-3 py-2 text-right font-medium">To rebalance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.rows.map((r) => (
+              <tr key={r.ticker} className="border-t border-line/60">
+                <td className="px-3 py-2.5">
+                  <span className="font-medium">{r.ticker}</span>
+                  <span className="ml-2 text-[11px] text-ink-faint">{r.name}</span>
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-ink-dim">
+                  {fmtCAD(r.value)}
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums">
+                  {r.actualPct.toFixed(1)}%
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums">
+                  {editing ? (
+                    <Input
+                      type="number"
+                      step="any"
+                      min="0"
+                      max="100"
+                      className="ml-auto w-20 text-right"
+                      placeholder="—"
+                      value={draft[r.ticker] ?? ""}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setDraft((prev) => ({ ...prev, [r.ticker]: e.target.value }))
+                      }
+                    />
+                  ) : r.targetPct === null ? (
+                    <span className="text-ink-faint">—</span>
+                  ) : (
+                    `${r.targetPct.toFixed(1)}%`
+                  )}
+                </td>
+                <td
+                  className={cn(
+                    "px-3 py-2.5 text-right tabular-nums",
+                    r.driftPct === null
+                      ? "text-ink-faint"
+                      : Math.abs(r.driftPct) < 1
+                        ? "text-ink-dim"
+                        : r.driftPct > 0
+                          ? "text-amber-500"
+                          : "text-brand",
+                  )}
+                >
+                  {r.driftPct === null
+                    ? "—"
+                    : `${r.driftPct > 0 ? "+" : ""}${r.driftPct.toFixed(1)} pts`}
+                </td>
+                <td className="px-3 py-2.5 text-right font-medium tabular-nums">
+                  {r.driftValue === null ? (
+                    <span className="text-ink-faint">—</span>
+                  ) : (
+                    <span className={r.driftValue > 0 ? "text-amber-500" : "text-brand"}>
+                      {r.driftValue > 0 ? "sell " : "buy "}
+                      {fmtCAD(Math.abs(r.driftValue))}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!noTargets && result.targetTotal !== 100 && (
+        <p className="px-5 pb-4 text-xs text-ink-faint">
+          The targets add up to {result.targetTotal.toFixed(1)}%, not 100%. Every
+          drift is measured against the portfolio as it stands, so the figures
+          still hold — but a plan that does not add to all of it is missing a
+          piece.
+        </p>
+      )}
     </Card>
   );
 }
@@ -968,6 +1164,8 @@ export default function InvestmentsPage() {
         </div>
 
         {/* Holdings table */}
+        <TargetAllocation rows={data.rows} />
+
         <Card>
           <CardHeader
             title="Holdings"

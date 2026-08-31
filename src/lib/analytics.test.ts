@@ -27,6 +27,8 @@ import {
   netWorthOver,
   netWorthByClass,
   fiProgress,
+  savingsRate,
+  runwayMonths,
   DEFAULT_WITHDRAWAL_RATE,
   netWorthSeries,
 } from "./analytics";
@@ -269,6 +271,35 @@ describe("the pension is not counted as money", () => {
     assert.equal(series[1].assets, 0);
     assert.equal(series[1].pension, 1000);
     assert.equal(series[1].net, 1000);
+  });
+});
+
+describe("savingsRate", () => {
+  test("what came in, less what went out, over what came in", () => {
+    assert.equal(savingsRate(8485, 4736), ((8485 - 4736) / 8485) * 100);
+  });
+
+  test("spending more than came in is a negative rate, not a floor at zero", () => {
+    assert.equal(savingsRate(1000, 1500), -50);
+  });
+
+  test("no income is no rate", () => {
+    // A month with nothing coming in did not fail to save.
+    assert.equal(savingsRate(0, 500), null);
+  });
+});
+
+describe("runwayMonths", () => {
+  test("cash over a month of spending", () => {
+    assert.equal(runwayMonths(3628, 4736), 3628 / 4736);
+  });
+
+  test("a negative balance covers nothing rather than a negative time", () => {
+    assert.equal(runwayMonths(-200, 1000), 0);
+  });
+
+  test("spending nothing has no answer, not an infinite one", () => {
+    assert.equal(runwayMonths(5000, 0), null);
   });
 });
 

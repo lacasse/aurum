@@ -8,7 +8,9 @@ import {
   ArrowUpRight,
   Banknote,
   Coins,
+  Gauge,
   LineChart,
+  Timer,
   PiggyBank,
   TrendingUp,
   Wallet,
@@ -30,6 +32,8 @@ import {
   monthlyAverages,
   monthsSince,
   fiProgress,
+  savingsRate,
+  runwayMonths,
   DEFAULT_WITHDRAWAL_RATE,
   netWorthByClass,
   netWorthOver,
@@ -277,11 +281,33 @@ export default function DashboardPage() {
   const unrealizedPct = data.invested > 0 ? (unrealized / data.invested) * 100 : 0;
 
   const prev = data.avg.previous;
+  /*
+   * Two ratios that need no window of their own: both read the twelve-month
+   * averages above them, so all six cards answer for the same months.
+   */
+  const saved = savingsRate(data.avg.income, data.avg.expenses);
+  const savedBefore = prev ? savingsRate(prev.income, prev.expenses) : null;
+  const runway = runwayMonths(nwLast.assets, data.avg.expenses);
+
   const yoy = {
     income: yearOverYear(data.avg.income, prev?.income, "up"),
     expenses: yearOverYear(data.avg.expenses, prev?.expenses, "down"),
     uncommittedLiquid: yearOverYear(data.avg.uncommittedLiquid, prev?.uncommittedLiquid, "up"),
     passive: yearOverYear(data.avg.passive, prev?.passive, "up"),
+    /*
+     * A rate is already a percentage, so the change is in points and the
+     * "percent of a percent" a ratio would give is not a thing anybody wants.
+     */
+    savings:
+      saved !== null && savedBefore !== null
+        ? {
+            delta: undefined,
+            deltaValue: `${savedBefore <= saved ? "+" : ""}${(saved - savedBefore).toFixed(1)} pts`,
+            tone: (saved >= savedBefore ? "positive" : "negative") as
+              | "positive"
+              | "negative",
+          }
+        : { delta: undefined, deltaValue: "", tone: "neutral" as const },
   };
 
   const fi = fiProgress(nwLast.net, data.avg.expenses, Number(rate) || DEFAULT_WITHDRAWAL_RATE);
@@ -528,7 +554,7 @@ export default function DashboardPage() {
         />
 
         {/* How the months average out */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <StatCard
             label="Monthly income"
             value={fmtCAD(data.avg.income)}
@@ -576,6 +602,23 @@ export default function DashboardPage() {
             spark={data.avg.series.map((p) => ({ v: p.passive }))}
             sparkKey="v"
             sparkColor="#a78bfa"
+          />
+          <StatCard
+            label="Savings rate"
+            value={saved === null ? "—" : `${saved.toFixed(1)}%`}
+            delta={yoy.savings.delta}
+            deltaValue={yoy.savings.deltaValue}
+            deltaLabel="vs the year before"
+            tone={yoy.savings.tone}
+            icon={<Gauge size={16} />}
+          />
+          <StatCard
+            label="Runway"
+            value={runway === null ? "—" : `${runway.toFixed(1)} mo`}
+            deltaValue={fmtCAD(nwLast.assets)}
+            deltaLabel="of cash, against a month's spending"
+            tone={runway !== null && runway < 3 ? "negative" : "neutral"}
+            icon={<Timer size={16} />}
           />
         </div>
 
