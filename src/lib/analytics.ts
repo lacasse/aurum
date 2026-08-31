@@ -1282,6 +1282,149 @@ export function allTimeSeries(
   return { points, unpriced: [...unpriced].sort(), snapshotMonths };
 }
 
+/* ── Net worth by asset class ── */
+
+export const NET_WORTH_CLASSES = [
+  "Cash",
+  "Bonds",
+  "Stocks",
+  "Crypto",
+  "Pension",
+] as const;
+
+export type NetWorthClass = (typeof NET_WORTH_CLASSES)[number];
+
+export interface ClassPoint {
+  key: string;
+  label: string;
+  Cash: number;
+  Bonds: number;
+  Stocks: number;
+  Crypto: number;
+  Pension: number;
+  /** Debts, positive. Kept beside the bands rather than in them. */
+  liabilities: number;
+  net: number;
+}
+
+/**
+ * Which band a holding's asset class belongs to.
+ *
+ * Two equity classes collapse into one band: the split between US and
+ * international is a question about the stocks, and this chart is a question
+ * about the mix. Anything unrecognised counts as stocks rather than being
+ * dropped, since a missing band is worse than a coarse one.
+ */
+function bandFor(assetClass: AssetClass): NetWorthClass {
+  if (assetClass === "Crypto") return "Crypto";
+  if (assetClass === "Bonds") return "Bonds";
+  return "Stocks";
+}
+
+/**
+ * What net worth was made of, month by month.
+ *
+ * The same month-end values that drive the all-time chart, but kept apart by
+ * what they are rather than summed: a line says net worth doubled, and this
+ * says the doubling was crypto. The portfolio is split by the asset class on
+ * each holding, and the account side supplies cash and the pension, which are
+ * bands in their own right and not securities at all.
+ *
+ * A ticker recorded in a month but no longer held keeps its class, because the
+ * class travels with the holding row rather than with the snapshot — a
+ * position sold in 2022 was still bonds while it was open.
+ */
+export function netWorthByClass(
+  accounts: Account[],
+  holdings: Holding[],
+  closes: CloseHistory,
+  months: string[],
+  snapshots: SnapshotHistory = {},
+  usdCadRate = 1,
+): ClassPoint[] {
+  const classOf = new Map<string, NetWorthClass>();
+  const currentPrice = new Map<string, number>();
+  const closedPrice = new Map<string, number>();
+  const walked = new Map<string, MonthlyPosition>();
+
+  for (const h of holdings) {
+    const ticker = h.ticker.toUpperCase();
+    classOf.set(ticker, bandFor(h.assetClass));
+    const px = h.priceCAD ?? h.price;
+    if (Number.isFinite(px) && px > 0) {
+      if (h.shares > 0) currentPrice.set(ticker, px);
+      else if (!closedPrice.has(ticker)) closedPrice.set(ticker, px);
+    }
+    const position = walkPositionByMonth(h.flows, months);
+    const existing = walked.get(ticker);
+    if (!existing) {
+      walked.set(ticker, position);
+      continue;
+    }
+    for (const month of months) {
+      existing.shares.set(month, (existing.shares.get(month) ?? 0) + (position.shares.get(month) ?? 0));
+      existing.cost.set(month, (existing.cost.get(month) ?? 0) + (position.cost.get(month) ?? 0));
+    }
+  }
+  for (const [ticker, px] of closedPrice) {
+    if (!currentPrice.has(ticker)) currentPrice.set(ticker, px);
+  }
+
+  const lastMonth = months[months.length - 1];
+
+  return months.map((month) => {
+    const bands: Record<NetWorthClass, number> = {
+      Cash: 0,
+      Bonds: 0,
+      Stocks: 0,
+      Crypto: 0,
+      Pension: 0,
+    };
+    let liabilityCents = 0;
+
+    for (const acc of accounts) {
+      const begins = acc.history[0]?.month;
+      if (begins && month < begins) continue;
+      const usd = month === lastMonth ? (acc.balanceUSD ?? 0) * usdCadRate : 0;
+      const value = accountValueAt(acc, month) + usd;
+      if (isLiability(acc.kind)) liabilityCents += toCents(value);
+      else if (isPension(acc.kind)) bands.Pension += value;
+      else bands.Cash += value;
+    }
+
+    const recorded = snapshots[month] ?? {};
+    for (const [ticker, value] of Object.entries(recorded)) {
+      bands[classOf.get(ticker) ?? "Stocks"] += value;
+    }
+    for (const [ticker, position] of walked) {
+      if (recorded[ticker] !== undefined) continue; // already counted
+      const held = position.shares.get(month) ?? 0;
+      if (held <= 0) continue;
+      const px =
+        month === lastMonth
+          ? (currentPrice.get(ticker) ?? closeFor(closes[ticker], month))
+          : closeFor(closes[ticker], month);
+      const band = classOf.get(ticker) ?? "Stocks";
+      // Book cost when nothing better exists, as the all-time series does.
+      bands[band] += px === null ? (position.cost.get(month) ?? 0) : held * px;
+    }
+
+    const liabilities = fromCents(liabilityCents);
+    const assets = NET_WORTH_CLASSES.reduce((sum, c) => sum + toCents(bands[c]), 0);
+    return {
+      key: month,
+      label: labelMonth(month),
+      Cash: roundMoney(bands.Cash),
+      Bonds: roundMoney(bands.Bonds),
+      Stocks: roundMoney(bands.Stocks),
+      Crypto: roundMoney(bands.Crypto),
+      Pension: roundMoney(bands.Pension),
+      liabilities,
+      net: fromCents(assets - liabilityCents),
+    };
+  });
+}
+
 /* ── Time-weighted return ── */
 
 /**
