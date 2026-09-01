@@ -184,6 +184,7 @@ export function SeriesChart({
   yFmt,
   xFmt,
   stacked = false,
+  yDomain,
 }: {
   data: Record<string, unknown>[];
   xKey: string;
@@ -192,6 +193,15 @@ export function SeriesChart({
   yFmt?: (n: number) => string;
   xFmt?: (n: number) => string;
   stacked?: boolean;
+  /**
+   * Fixes the axis instead of fitting it to the data.
+   *
+   * Recharts pads its domain above the largest value, which is right for a
+   * chart of money and wrong for one of shares: a stack that always totals a
+   * hundred percent was given an axis running to 120, leaving a fifth of the
+   * plot as blank space above a ceiling nothing can cross.
+   */
+  yDomain?: [number, number];
 }) {
   const gid = useId().replace(/[:]/g, "");
   const stackId = stacked ? "1" : undefined;
@@ -220,6 +230,8 @@ export function SeriesChart({
           tickLine={false}
           axisLine={false}
           width={56}
+          domain={yDomain}
+          ticks={yDomain ? [0, 25, 50, 75, 100] : undefined}
           tickFormatter={(v) => (yFmt ? yFmt(Number(v)) : String(v))}
         />
         <Tooltip
