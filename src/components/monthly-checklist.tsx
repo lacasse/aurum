@@ -1143,6 +1143,7 @@ function SnapshotStep({
   const snapshotMonth = useFinance((s) => s.snapshotMonth);
   const gaps = useSnapshotGaps(month);
   const [editValues, setEditValues] = useState<Record<string, Partial<MonthlySnapshot>>>({});
+  const [showClosed, setShowClosed] = useState(false);
 
   useEffect(() => {
     loadSnapshots(month);
@@ -1175,6 +1176,21 @@ function SnapshotStep({
 
   const totalValue = rows.reduce((s, r) => s + r.value, 0);
   const hasExisting = snapshots.length > 0 && snapshotMonth === month;
+
+  /*
+   * Sorted by what each position is worth, and closed ones folded away.
+   *
+   * Forty-three of the sixty positions on this record are sold out and worth
+   * nothing, and unsorted they sit among the seventeen that matter — so the
+   * step opened on a wall of zeros with the real portfolio scattered through
+   * it. They are still snapshotted, because a month should record the shape of
+   * the portfolio rather than an edited version of it, and because a position
+   * reopened later needs the zero behind it. Hidden, not dropped: the toggle
+   * is there for the case where a closed position needs correcting.
+   */
+  const sorted = useMemo(() => [...rows].sort((a, b) => b.value - a.value), [rows]);
+  const closed = sorted.filter((r) => r.value === 0 && r.shares === 0);
+  const visible = showClosed ? sorted : sorted.filter((r) => !closed.includes(r));
 
   const stage = () => {
     onDraft(
@@ -1274,7 +1290,7 @@ function SnapshotStep({
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {visible.map((r) => (
                 <tr key={r.holdingId} className="border-b border-line/40 last:border-0">
                   <td className="px-3 py-1.5 text-xs font-medium">{r.ticker}</td>
                   <td className="px-2 py-1.5">
@@ -1327,6 +1343,17 @@ function SnapshotStep({
               </tr>
             </tfoot>
           </table>
+          {closed.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowClosed((v) => !v)}
+              className="w-full border-t border-line px-3 py-2 text-left text-[11px] text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
+            >
+              {showClosed ? "Hide" : "Show"} {closed.length} closed{" "}
+              {closed.length === 1 ? "position" : "positions"} worth nothing —
+              recorded either way
+            </button>
+          )}
         </div>
       )}
     </StepBody>
