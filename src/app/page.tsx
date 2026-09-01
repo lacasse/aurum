@@ -51,6 +51,7 @@ import {
   labelMonth,
   lastCompleteMonthKey,
 } from "@/lib/format";
+import { snapshotGaps } from "@/lib/checklist";
 import { ACCOUNT_KIND_LABELS } from "@/lib/types";
 import { roundMoney } from "@/lib/money";
 
@@ -235,8 +236,22 @@ export default function DashboardPage() {
     const invested = rows.reduce((sum, r) => sum + r.costBasis, 0);
     const market = rows.reduce((sum, r) => sum + r.marketValue, 0);
     const dividends = rows.reduce((sum, r) => sum + r.totalDividends, 0);
+    /*
+     * Months the portfolio record never got. Counted here because the history
+     * is already loaded for the chart, and shown on the checklist button —
+     * nothing takes a snapshot on its own, so a skipped month stays skipped
+     * until somebody is told.
+     */
+    const gaps = snapshotGaps(
+      Object.fromEntries(
+        Object.entries(snapshots).map(([m, t]) => [m, Object.keys(t).length]),
+      ),
+      through,
+    ).length;
+
     return {
       through,
+      snapshotGaps: gaps,
       nwAll,
       cf,
       spend,
@@ -322,7 +337,10 @@ export default function DashboardPage() {
       subtitle="Your complete financial picture at a glance"
       action={
         <div className="flex items-center gap-2">
-          <MonthlyChecklistButton onOpen={() => setChecklistOpen(true)} />
+          <MonthlyChecklistButton
+            onOpen={() => setChecklistOpen(true)}
+            gaps={data.snapshotGaps}
+          />
           <Button onClick={() => setAddOpen(true)}>
             <ArrowUpRight size={15} /> Add transaction
           </Button>
