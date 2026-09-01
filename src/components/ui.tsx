@@ -208,13 +208,18 @@ export function Modal({
   onClose,
   title,
   children,
-  wide,
+  size = "md",
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
-  wide?: boolean;
+  /**
+   * How much room the contents need. A form of stacked fields is fine at
+   * `md`; a table of numbers is not, and squeezing one into a narrow dialog
+   * only moves the problem into a horizontal scrollbar the reader has to find.
+   */
+  size?: "md" | "lg" | "xl";
 }) {
   useEffect(() => {
     if (!open) return;
@@ -239,7 +244,7 @@ export function Modal({
         aria-label={title}
         className={cn(
           "animate-fade-up w-full rounded-2xl border border-line bg-surface shadow-2xl",
-          wide ? "max-w-xl" : "max-w-md",
+          size === "xl" ? "max-w-3xl" : size === "lg" ? "max-w-xl" : "max-w-md",
         )}
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
@@ -248,7 +253,7 @@ export function Modal({
             <X size={16} />
           </Button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto p-5">{children}</div>
+        <div className="max-h-[75vh] overflow-y-auto p-5">{children}</div>
       </div>
     </div>
   );
