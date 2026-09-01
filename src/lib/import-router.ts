@@ -1,5 +1,10 @@
 import Papa from "papaparse";
-import { ImportedRow, detectFormat, parseCsvRecords } from "./csv";
+import {
+  ImportedRow,
+  SignConvention,
+  detectFormat,
+  parseCsvRecords,
+} from "./csv";
 import { TradeRow, parseTradeCsv } from "./trades";
 import { isActivityExport, parseActivitiesCsv } from "./activities";
 import { CorporateAction } from "./corporate-actions";
@@ -14,7 +19,7 @@ import { CorporateAction } from "./corporate-actions";
  * is, so it says so here instead.
  */
 
-export type FileKind = "card" | "trades" | "activities";
+export type FileKind = "card" | "bank" | "trades" | "activities";
 
 export interface RoutedFile {
   fileName: string;
@@ -24,11 +29,17 @@ export interface RoutedFile {
   actions: CorporateAction[];
   skipped: { reason: string; count: number }[];
   needsAttention: string[];
+  /**
+   * Which sign the file used for money going out, and how that was decided.
+   * Null for files whose rows name their own direction.
+   */
+  signs?: SignConvention | null;
   error?: string;
 }
 
 const KIND_LABEL: Record<FileKind, string> = {
   card: "card statement",
+  bank: "bank statement",
   trades: "trade history",
   activities: "account activity",
 };
@@ -90,7 +101,8 @@ export async function routeFile(
     };
   }
 
-  if (detectFormat(fields)) {
+  const format = detectFormat(fields);
+  if (format) {
     const parsed = Papa.parse<Record<string, string>>(text, {
       header: true,
       skipEmptyLines: "greedy",
@@ -106,7 +118,13 @@ export async function routeFile(
     );
     return {
       fileName: file.name,
-      kind: "card",
+      /*
+       * A file with debit and credit columns is an account export, not a card
+       * one — which is what decides the account it lands in by default. The
+       * two are opposite: a card statement's rows belong to the credit card,
+       * a bank statement's to chequing.
+       */
+      kind: format === "debit-credit" ? "bank" : "card",
       cash: res.rows,
       trades: [],
       actions: [],
@@ -115,6 +133,7 @@ export async function routeFile(
         { reason: "rows that could not be read", count: res.skippedInvalid },
       ].filter((s) => s.count > 0),
       needsAttention: [],
+      signs: res.signs,
       error: res.error,
     };
   }
