@@ -278,6 +278,17 @@ export default function DashboardPage() {
    * rather than netted off: a share of a total that something has already been
    * subtracted from is not a share of anything you can point at.
    */
+  /*
+   * Only the bands that exist somewhere in the window.
+   *
+   * A class held in none of these months still drew a line, and being flat it
+   * lay exactly along the top edge of the band below — so an empty Bonds
+   * allocation was a blue rule through the middle of Cash.
+   */
+  const mixBands = useMemo(
+    () => NET_WORTH_CLASSES.filter((c) => bands.some((p) => p[c] > 0)),
+    [bands],
+  );
   const mix = useMemo(
     () =>
       bands.map((p) => {
@@ -481,11 +492,6 @@ export default function DashboardPage() {
             </span>{" "}
             a month short of never needing to work again.
           </p>
-          <p className="mt-1.5 text-[11px] text-ink-faint">
-            The target is not a figure anybody entered — it is what a year of
-            your own spending costs to fund forever at that rate, so it moves
-            when your spending does.
-          </p>
         </Card>
 
         {/* The whole record, in one chart */}
@@ -536,8 +542,8 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader
-            title="What net worth is made of"
-            subtitle={`Share of what you own, month by month${
+            title="What the money is in"
+            subtitle={`Share of everything you own, month by month${
               bandsLast && bandsLast.liabilities > 0
                 ? ` · ${fmtCAD(bandsLast.liabilities)} of debt sits outside this`
                 : ""
@@ -561,19 +567,26 @@ export default function DashboardPage() {
               data={mix as unknown as Record<string, unknown>[]}
               xKey="label"
               stacked
-              series={NET_WORTH_CLASSES.map((name) => ({
+              series={mixBands.map((name) => ({
                 key: name,
                 name,
                 color: CLASS_COLORS[name],
               }))}
               height={280}
+              solid
               yDomain={[0, 100]}
               yFmt={(n) => `${Math.round(n)}%`}
             />
           </div>
           {bandsLast && (
             <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
-              {NET_WORTH_CLASSES.filter((c) => bandsLast[c] > 0).map((c) => {
+              {/*
+                * The bands the chart drew, not the ones held today — a colour
+                * in the chart with no key beside it is a colour you cannot
+                * name. One held earlier in the window and since sold reads as
+                * zero here, which is the answer rather than an omission.
+                */}
+              {mixBands.map((c) => {
                 const owned = NET_WORTH_CLASSES.reduce(
                   (sum, k) => sum + Math.max(0, bandsLast[k]),
                   0,

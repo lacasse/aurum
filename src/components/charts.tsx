@@ -185,6 +185,7 @@ export function SeriesChart({
   xFmt,
   stacked = false,
   yDomain,
+  solid = false,
 }: {
   data: Record<string, unknown>[];
   xKey: string;
@@ -202,6 +203,17 @@ export function SeriesChart({
    * plot as blank space above a ceiling nothing can cross.
    */
   yDomain?: [number, number];
+  /**
+   * Draws stacked areas as opaque regions separated by a hairline, instead of
+   * translucent washes outlined in their own colour.
+   *
+   * The default suits a chart of two or three quantities laid over each other,
+   * where the gradient keeps what is behind visible. It fails a composition:
+   * every band carried a two-pixel stroke in its own colour, so a band worth
+   * one percent — under three pixels tall — was entirely outline, and a band
+   * worth nothing still drew a line straight across its neighbour.
+   */
+  solid?: boolean;
 }) {
   const gid = useId().replace(/[:]/g, "");
   const stackId = stacked ? "1" : undefined;
@@ -257,9 +269,12 @@ export function SeriesChart({
               type="monotone"
               dataKey={s.key}
               name={s.name}
-              stroke={s.color}
-              strokeWidth={2}
-              fill={`url(#${gid}-${i})`}
+              // A hairline in the page's own colour reads as a gap between
+              // bands rather than as a line belonging to one of them.
+              stroke={solid ? "var(--surface)" : s.color}
+              strokeWidth={solid ? 1 : 2}
+              fill={solid ? s.color : `url(#${gid}-${i})`}
+              fillOpacity={solid ? 0.9 : undefined}
               stackId={stackId}
               activeDot={{ r: 3 }}
             />
