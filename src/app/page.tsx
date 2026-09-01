@@ -8,18 +8,17 @@ import {
   ArrowUpRight,
   Banknote,
   Coins,
+  CreditCard,
   Gauge,
   LineChart,
   Timer,
   PiggyBank,
-  TrendingUp,
   Wallet,
 } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
 import { Button, Card, CardHeader, Progress, Segmented } from "@/components/ui";
 import { DonutChart, SeriesChart, categoryColors } from "@/components/charts";
-import { TransactionForm } from "@/components/forms";
 import { MonthlyChecklistButton, MonthlyChecklistModal } from "@/components/monthly-checklist";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
@@ -52,7 +51,6 @@ import {
   lastCompleteMonthKey,
 } from "@/lib/format";
 import { snapshotGaps } from "@/lib/checklist";
-import { ACCOUNT_KIND_LABELS } from "@/lib/types";
 import { roundMoney } from "@/lib/money";
 
 /**
@@ -115,7 +113,6 @@ export default function DashboardPage() {
   const holdings = useFinance((s) => s.holdings);
   const usdCadRate = useFinance((s) => s.usdCadRate);
   const [range, setRange] = useState<Range>("all");
-  const [addOpen, setAddOpen] = useState(false);
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [snapshots, setSnapshots] = useState<SnapshotHistory>({});
   const [rate, setRate] = useState("0.035");
@@ -276,6 +273,23 @@ export default function DashboardPage() {
     () => (range === "all" ? data.byClass : data.byClass.slice(-Number(range))),
     [data.byClass, range],
   );
+  /*
+   * The same months as shares of what was owned that month. Debt is left out
+   * rather than netted off: a share of a total that something has already been
+   * subtracted from is not a share of anything you can point at.
+   */
+  const mix = useMemo(
+    () =>
+      bands.map((p) => {
+        const owned = NET_WORTH_CLASSES.reduce((sum, c) => sum + Math.max(0, p[c]), 0);
+        const row: Record<string, string | number> = { key: p.key, label: p.label };
+        for (const c of NET_WORTH_CLASSES) {
+          row[c] = owned > 0 ? (Math.max(0, p[c]) / owned) * 100 : 0;
+        }
+        return row;
+      }),
+    [bands],
+  );
 
   if (!ready) return <PageSkeleton />;
 
@@ -291,9 +305,14 @@ export default function DashboardPage() {
     portPrev.value !== 0
       ? ((portLast.value - portPrev.value) / portPrev.value) * 100
       : 0;
-  // Dividends count: they are return the position paid out rather than kept.
-  const unrealized = data.market - data.invested + data.dividends;
-  const unrealizedPct = data.invested > 0 ? (unrealized / data.invested) * 100 : 0;
+  /*
+   * Null rather than zero when nothing is owed, so a record with no debt says
+   * "nothing owed" instead of reporting a 0% move against a zero balance.
+   */
+  const debtDelta =
+    nwLast.liabilities === 0 && nwPrev.liabilities === 0
+      ? null
+      : nwLast.liabilities - nwPrev.liabilities;
 
   const prev = data.avg.previous;
   /*
@@ -336,15 +355,10 @@ export default function DashboardPage() {
       title="Dashboard"
       subtitle="Your complete financial picture at a glance"
       action={
-        <div className="flex items-center gap-2">
-          <MonthlyChecklistButton
-            onOpen={() => setChecklistOpen(true)}
-            gaps={data.snapshotGaps}
-          />
-          <Button onClick={() => setAddOpen(true)}>
-            <ArrowUpRight size={15} /> Add transaction
-          </Button>
-        </div>
+        <MonthlyChecklistButton
+          onOpen={() => setChecklistOpen(true)}
+          gaps={data.snapshotGaps}
+        />
       }
     >
       <div className="space-y-4">
@@ -372,13 +386,28 @@ export default function DashboardPage() {
             sparkKey="v"
             sparkColor="#22d3ee"
           />
+          {/*
+            * Debt rather than unrealized gain.
+            *
+            * The gain is a fact about the portfolio and it is already on the
+            * Investments page beside the rest of the portfolio's arithmetic.
+            * What the dashboard was missing is the other side of the balance
+            * sheet: everything here was something owned, and what is owed
+            * appeared only in a chart subtitle. With it, the row is the whole
+            * position — owned, invested, spendable, owed.
+            */}
           <StatCard
-            label="Unrealized gain"
-            value={fmtSignedCAD(unrealized)}
-            delta={unrealizedPct}
-            deltaLabel="of what you paid"
-            tone={unrealized >= 0 ? "positive" : "negative"}
-            icon={<TrendingUp size={16} />}
+            label="Debt"
+            value={fmtCAD(nwLast.liabilities)}
+            deltaValue={
+              debtDelta === null ? undefined : fmtSignedCAD(debtDelta)
+            }
+            deltaLabel={debtDelta === null ? "nothing owed" : "vs last month"}
+            tone={debtDelta !== null && debtDelta > 0 ? "negative" : "positive"}
+            icon={<CreditCard size={16} />}
+            spark={spark.map((p) => ({ v: p.liabilities }))}
+            sparkKey="v"
+            sparkColor="#fb7185"
           />
           <StatCard
             label="Cash and accounts"
@@ -410,7 +439,8 @@ export default function DashboardPage() {
               <p className="mt-1 text-2xl font-semibold tabular-nums">
                 {fi.pct.toFixed(1)}%
                 <span className="ml-2 text-sm font-normal text-ink-faint">
-                  of {fmtCAD(fi.target)}
+                  of the {fmtCAD(fi.target)} that would cover a month like
+                  yours for good
                 </span>
               </p>
             </div>
@@ -425,35 +455,43 @@ export default function DashboardPage() {
             />
           </div>
           <Progress value={fi.pct} max={100} tone="positive" className="mt-4" />
-          <div className="mt-3 flex flex-wrap gap-x-8 gap-y-1 text-[11px] text-ink-faint">
-            <span>
-              Pays{" "}
-              <span className="font-medium tabular-nums text-ink-dim">
-                {fmtCAD(fi.monthly)}
-              </span>{" "}
-              a month at {(fi.rate * 100).toFixed(1)}%
+          {/*
+            * A sentence rather than three labelled figures. The old row read
+            * "Pays $1,492 a month at 3.5% · A month costs $4,487 · Still short
+            * $2,995 a month" — every number correct and the relationship
+            * between them left for the reader to assemble. It is one idea:
+            * what the money would pay you, against what you spend.
+            */}
+          <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">
+            Drawing{" "}
+            <span className="font-medium text-ink-dim">
+              {(fi.rate * 100).toFixed(1)}% a year
+            </span>{" "}
+            from what you have now would pay you{" "}
+            <span className="font-medium tabular-nums text-ink-dim">
+              {fmtCAD(fi.monthly)}
+            </span>{" "}
+            a month. You spend{" "}
+            <span className="font-medium tabular-nums text-ink-dim">
+              {fmtCAD(data.avg.expenses)}
             </span>
-            <span>
-              A month costs{" "}
-              <span className="font-medium tabular-nums text-ink-dim">
-                {fmtCAD(data.avg.expenses)}
-              </span>
-            </span>
-            <span>
-              Still short{" "}
-              <span className="font-medium tabular-nums text-ink-dim">
-                {fmtCAD(fi.shortfall)}
-              </span>{" "}
-              a month
-            </span>
-          </div>
+            , so you are{" "}
+            <span className="font-medium tabular-nums text-ink-dim">
+              {fmtCAD(fi.shortfall)}
+            </span>{" "}
+            a month short of never needing to work again.
+          </p>
+          <p className="mt-1.5 text-[11px] text-ink-faint">
+            The target is not a figure anybody entered — it is what a year of
+            your own spending costs to fund forever at that rate, so it moves
+            when your spending does.
+          </p>
         </Card>
 
         {/* The whole record, in one chart */}
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Card className="lg:col-span-2">
+        <Card>
             <CardHeader
-              title="Net worth and portfolio"
+              title="Net worth"
               subtitle={
                 nwLast.pension > 0
                   ? `${fmtCAD(nwLast.assets)} cash + ${fmtCAD(nwLast.portfolio)} portfolio + ${fmtCAD(nwLast.pension)} pension − ${fmtCAD(nwLast.liabilities)} debt`
@@ -480,79 +518,47 @@ export default function DashboardPage() {
             />
             <div className="px-3 pb-4">
               {/*
-                * Three lines that only mean something together: what you are
-                * worth, how much of it is the market, and what the market
-                * cost you. The gap between the first two is everything that
-                * is not the portfolio; the gap between the last two is the
-                * gain.
+                * One line. The portfolio is four fifths of net worth, so its
+                * line had the same shape and the same peaks a few pixels
+                * below — two lines saying one thing. What the net worth is
+                * made of is a different question, and the chart below answers
+                * it properly.
                 */}
               <SeriesChart
                 data={nw as unknown as Record<string, unknown>[]}
                 xKey="label"
-                series={[
-                  { key: "net", name: "Net worth", color: "#8b5cf6" },
-                  { key: "value", name: "Portfolio", color: "#22d3ee" },
-                  {
-                    key: "cost",
-                    name: "Cost basis",
-                    color: "#6e6e79",
-                    kind: "line",
-                    dashed: true,
-                  },
-                ]}
+                series={[{ key: "net", name: "Net worth", color: "#8b5cf6" }]}
                 height={320}
                 yFmt={fmtCompact}
               />
             </div>
-          </Card>
-
-          <Card>
-            <CardHeader
-              title="Accounts"
-              subtitle={`${accounts.length} connected`}
-              action={
-                <Link href="/accounts">
-                  <Button variant="ghost" size="sm">
-                    All <ArrowRight size={13} />
-                  </Button>
-                </Link>
-              }
-            />
-            <ul className="space-y-1 px-3 pb-4">
-              {accounts.slice(0, 6).map((a) => (
-                <li
-                  key={a.id}
-                  className="flex items-center justify-between rounded-lg px-2 py-2 hover:bg-elevated"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{a.name}</p>
-                    <p className="text-[11px] text-ink-faint">
-                      {ACCOUNT_KIND_LABELS[a.kind]} · {a.institution}
-                    </p>
-                  </div>
-                  <span className="ml-3 shrink-0 text-sm font-semibold tabular-nums">
-                    {fmtCAD(a.balance)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        </div>
+        </Card>
 
         <Card>
           <CardHeader
             title="What net worth is made of"
-            subtitle={`${NET_WORTH_CLASSES.filter((c) => (bandsLast?.[c] ?? 0) > 0).join(" · ")} — stacked to what you own`}
+            subtitle={`Share of what you own, month by month${
+              bandsLast && bandsLast.liabilities > 0
+                ? ` · ${fmtCAD(bandsLast.liabilities)} of debt sits outside this`
+                : ""
+            }`}
           />
-          <div className="px-3 pb-4">
-            {/*
-              * The same months as the line above, kept apart by what they are.
-              * Net worth doubling tells you nothing about what did it; six
-              * bands do, and the shape of the mix is the part that changes
-              * slowly enough to act on.
-              */}
+          {/*
+            * Shares, not dollars.
+            *
+            * Drawn in dollars this was the net worth line again with lines
+            * inside it: the total grew fivefold, so every band swept upward
+            * together and the mix — the only thing this chart is for — was a
+            * few pixels of thickness at the bottom. Normalised, the shape
+            * moves only when the composition moves, which is what "made of"
+            * means and the part slow enough to act on.
+            *
+            * The dollars are not lost; they are the row underneath, where a
+            * figure is easier to read than a band is to measure anyway.
+            */}
+          <div className="px-3 pb-2">
             <SeriesChart
-              data={bands as unknown as Record<string, unknown>[]}
+              data={mix as unknown as Record<string, unknown>[]}
               xKey="label"
               stacked
               series={NET_WORTH_CLASSES.map((name) => ({
@@ -560,10 +566,45 @@ export default function DashboardPage() {
                 name,
                 color: CLASS_COLORS[name],
               }))}
-              height={300}
-              yFmt={fmtCompact}
+              height={280}
+              yDomain={[0, 100]}
+              yFmt={(n) => `${Math.round(n)}%`}
             />
           </div>
+          {bandsLast && (
+            <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
+              {NET_WORTH_CLASSES.filter((c) => bandsLast[c] > 0).map((c) => {
+                const owned = NET_WORTH_CLASSES.reduce(
+                  (sum, k) => sum + Math.max(0, bandsLast[k]),
+                  0,
+                );
+                return (
+                  <div key={c} className="flex items-baseline gap-2">
+                    <span
+                      className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
+                      style={{ background: CLASS_COLORS[c] }}
+                    />
+                    <span className="text-[11px] text-ink-faint">{c}</span>
+                    <span className="text-sm font-semibold tabular-nums">
+                      {fmtCompact(bandsLast[c])}
+                    </span>
+                    <span className="text-[11px] tabular-nums text-ink-faint">
+                      {owned > 0 ? `${Math.round((bandsLast[c] / owned) * 100)}%` : "—"}
+                    </span>
+                  </div>
+                );
+              })}
+              {bandsLast.liabilities > 0 && (
+                <div className="flex items-baseline gap-2">
+                  <span className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full border border-negative" />
+                  <span className="text-[11px] text-ink-faint">Debt</span>
+                  <span className="text-sm font-semibold tabular-nums text-negative">
+                    −{fmtCompact(bandsLast.liabilities)}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </Card>
 
         <SectionHeading
@@ -714,7 +755,6 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <TransactionForm open={addOpen} onClose={() => setAddOpen(false)} />
       <MonthlyChecklistModal open={checklistOpen} onClose={() => setChecklistOpen(false)} />
     </Shell>
   );
