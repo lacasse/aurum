@@ -55,6 +55,19 @@ loss is irreversible. Follow these rules without exception.
   ```
 - Only commit changes when the user asks. Never commit secrets.
 
+## Tests
+
+- `npm test` transpiles with `tsc --noCheck` and runs the suite. Skipping the
+  type check is what makes it quick — checking is roughly half the wall clock,
+  and it is duplicated work: `npm run typecheck` already covers every file,
+  test files included, and CI runs it as its own step before the tests.
+- So a type error will **not** fail `npm test`. Run `npm run typecheck`, or
+  `npm run test:checked` for both in one command.
+- Don't run the checked and unchecked builds alternately out of habit — they
+  share `.test-build`, and switching invalidates the incremental cache, which
+  costs a full rebuild each way. `test:checked` avoids this by type-checking
+  through the separate `tsconfig.json` build instead.
+
 ## Rebuilds / restarts
 
 - Restarting or rebuilding the app/proxy/backup containers is safe (data lives in volumes).

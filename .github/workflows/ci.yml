@@ -41,6 +41,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # This is what type-checks the test files too: `npm test` builds them
+      # with --noCheck, which is where most of its time used to go. Keep this
+      # step ahead of the tests so a type error still fails the job.
       - name: Typecheck
         run: npm run typecheck
 
