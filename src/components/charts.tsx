@@ -24,14 +24,29 @@ import {
 } from "recharts";
 import { cn } from "./ui";
 
+/**
+ * Categorical colours, assigned in this order and never cycled into.
+ *
+ * The order is the safety mechanism rather than decoration. Categories are
+ * coloured by rank and then stacked in that same rank, so slots that sit next
+ * to each other in this list are the ones that touch on a chart — and touching
+ * is where confusion happens. Cyan sat directly beside green here, a pair that
+ * measures ΔE 12.1 for normal vision, under the 15 floor: full-colour readers
+ * genuinely struggle to tell them apart, and they were the second and third
+ * biggest categories on the spending stack.
+ *
+ * Re-ordered so every adjacent pair clears both floors — worst is ΔE 23.1 for
+ * normal vision and 8.5 simulating deuteranopia. Moving a colour means
+ * measuring again rather than assuming it still holds.
+ */
 export const PALETTE = [
   "#8b5cf6",
-  "#22d3ee",
   "#34d399",
   "#f59e0b",
+  "#22d3ee",
   "#f472b6",
-  "#60a5fa",
   "#a3e635",
+  "#60a5fa",
   "#fb7185",
 ];
 
@@ -207,6 +222,7 @@ export function SeriesChart({
   stacked = false,
   yDomain,
   fadeAtZero = false,
+  strokeOnly = false,
 }: {
   data: Record<string, unknown>[];
   xKey: string;
@@ -235,6 +251,16 @@ export function SeriesChart({
    * comes back when it comes back.
    */
   fadeAtZero?: boolean;
+  /**
+   * Draws a stack as lines with nothing under them.
+   *
+   * Recharts stacks areas, not lines — a `Line` ignores `stackId` — so a
+   * stacked line chart is an area chart with the fill taken away. The strokes
+   * are still cumulative, which is what stacking means, and the reader takes
+   * each band as the distance to the line below rather than as a filled
+   * region.
+   */
+  strokeOnly?: boolean;
 }) {
   const gid = useId().replace(/[:]/g, "");
   const stackId = stacked ? "1" : undefined;
@@ -318,7 +344,7 @@ export function SeriesChart({
               name={s.name}
               stroke={fadeAtZero ? `url(#fade-${gid}-${i})` : s.color}
               strokeWidth={2}
-              fill={`url(#${gid}-${i})`}
+              fill={strokeOnly ? "none" : `url(#${gid}-${i})`}
               stackId={stackId}
               activeDot={{ r: 3 }}
             />
