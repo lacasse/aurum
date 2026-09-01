@@ -92,6 +92,15 @@ const CLASS_COLORS: Record<NetWorthClass, string> = {
  */
 const BAND_ORDER: NetWorthClass[] = ["Cash", "Bonds", "Pension", "Stocks", "Crypto"];
 
+/**
+ * The band that carries whatever the named categories do not.
+ *
+ * A share chart has to total a hundred, and five categories are not a month.
+ * Drawn in the muted ink rather than a sixth hue, so it reads as the remainder
+ * it is and never competes with a category for attention.
+ */
+const OTHER_BAND = "Everything else";
+
 /** How much of the net worth history to draw: months, or the whole record. */
 type Range = "12" | "60" | "all";
 
@@ -211,12 +220,7 @@ export default function DashboardPage() {
     const spend = avgSpendByCategory(transactions, 12, through);
     const catColors = categoryColors(spend.map((c) => c.name));
     const topCats = spend.slice(0, 5).map((c) => c.name);
-    const stacked = stackedSpend(
-      transactions,
-      topCats,
-      12,
-      through,
-    ) as unknown as Record<string, unknown>[];
+    const stacked = stackedSpend(transactions, topCats, 12, through);
     /*
      * Net worth and the portfolio on one set of months.
      *
@@ -270,9 +274,36 @@ export default function DashboardPage() {
       through,
     ).length;
 
+    /*
+     * The same twelve months as shares of what was spent in each.
+     *
+     * Five categories do not add up to a month, so the rest of the month is
+     * carried as one band rather than left out — without it the stack would
+     * total whatever those five happened to be, which is not a share of
+     * anything. It comes from the cash-flow series, which is the same window
+     * and the same definition of an expense.
+     */
+    const expensesByMonth = new Map(cf.map((m) => [m.key, m.expenses]));
+    const spendMix = stacked.map((row) => {
+      const key = String(row.key);
+      const named = topCats.reduce((sum, c) => sum + Number(row[c] ?? 0), 0);
+      const total = expensesByMonth.get(key) ?? named;
+      const other = Math.max(0, total - named);
+      const out: Record<string, string | number> = {
+        key,
+        label: String(row.label),
+      };
+      for (const c of topCats) {
+        out[c] = total > 0 ? (Number(row[c] ?? 0) / total) * 100 : 0;
+      }
+      out[OTHER_BAND] = total > 0 ? (other / total) * 100 : 0;
+      return out;
+    });
+
     return {
       through,
       snapshotGaps: gaps,
+      spendMix,
       nwAll,
       cf,
       spend,
@@ -770,21 +801,77 @@ export default function DashboardPage() {
         <Card>
           <CardHeader
             title="Spending by category"
-            subtitle={`Top five categories · 12 months through ${monthName} (stacked)`}
+            subtitle={`Share of each month's spending · top five categories · 12 months through ${monthName}`}
           />
           <div className="px-3 pb-4">
+            {/*
+              * A hundred percent stacked, as lines.
+              *
+              * In dollars this was a chart of how much a month cost with the
+              * categories as texture inside it — the same thing the totals
+              * above already say. As shares it answers the question the card
+              * is titled with: what the spending was made of, and which way
+              * that is drifting. Recharts stacks areas and not lines, since a
+              * `Line` ignores `stackId`, so this is an area chart with the
+              * fill taken away and each category read as the distance from
+              * its line to the one below.
+              *
+              * Faded at zero for the same reason the composition chart is: a
+              * category with nothing in a month still has a place in the
+              * stack, so it drew a flat line along its neighbour for every
+              * month it was empty. Travel is missing from five of the last
+              * twelve.
+              */}
             <SeriesChart
-              data={data.stacked}
+              data={data.spendMix as unknown as Record<string, unknown>[]}
               xKey="label"
               stacked
-              series={data.topCats.map((cat) => ({
+              strokeOnly
+              fadeAtZero
+              series={[...data.topCats, OTHER_BAND].map((cat) => ({
                 key: cat,
                 name: cat,
-                color: data.catColors[cat],
+                color: cat === OTHER_BAND ? "var(--ink-faint)" : data.catColors[cat],
               }))}
               height={280}
-              yFmt={fmtCompact}
+              yDomain={[0, 100]}
+              yFmt={(n) => `${Math.round(n)}%`}
             />
+          </div>
+          {/*
+            * The same legend the composition chart carries. Five stacked lines
+            * and no key is five colours nobody can name — and the figure beside
+            * each one is what the chart cannot show anyway, since a band is
+            * measured against the line below it rather than against zero.
+            */}
+          <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
+            {[...data.topCats, OTHER_BAND].map((cat) => {
+              const avg =
+                cat === OTHER_BAND
+                  ? totalSpend - data.topCats.reduce(
+                      (sum, c) => sum + (data.spend.find((x) => x.name === c)?.value ?? 0),
+                      0,
+                    )
+                  : (data.spend.find((c) => c.name === cat)?.value ?? 0);
+              return (
+                <div key={cat} className="flex items-baseline gap-2">
+                  <span
+                    className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
+                    style={{
+                      background:
+                        cat === OTHER_BAND ? "var(--ink-faint)" : data.catColors[cat],
+                    }}
+                  />
+                  <span className="text-[11px] text-ink-faint">{cat}</span>
+                  <span className="text-sm font-semibold tabular-nums">
+                    {fmtCAD(avg)}
+                  </span>
+                  <span className="text-[11px] tabular-nums text-ink-faint">
+                    {totalSpend > 0 ? `${Math.round((avg / totalSpend) * 100)}%` : "—"}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </Card>
 
