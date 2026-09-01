@@ -291,6 +291,124 @@ export default function GuidePage() {
         </Section>
 
         <Section
+          id="spending"
+          title="Necessity, choice, and neither"
+          lead="The three judgements the expenses page makes about a category"
+        >
+          <p>
+            Every category on the{" "}
+            <Link href="/expenses" className="text-brand hover:underline">
+              expenses page
+            </Link>{" "}
+            sits in one of three groups. A{" "}
+            <strong className="text-ink">necessity</strong> arrives whether or
+            not the month went well — rent, food, getting to work, keeping a
+            body and a dog alive. A{" "}
+            <strong className="text-ink">choice</strong> is decided one
+            purchase at a time, and it is the part a bad quarter can actually
+            move. Everything else is{" "}
+            <strong className="text-ink">neither</strong>, and is left out of
+            every total on that page.
+          </p>
+          <p>
+            Debt repayment starts in that third group. Paying down a loan is
+            not consumption: the money leaves chequing and lands on the other
+            side of the balance sheet as debt that no longer exists. Counted as
+            spending it both overstates what living costs and understates what
+            was saved — it is what made 2024 read as a year that spent $132,000
+            and kept nothing.
+          </p>
+          <p>
+            The split is a default rather than a rule — donations may feel less
+            optional than groceries — so any category can be moved with the
+            Categories button on that page. Only the departures from the
+            defaults are stored, which is why a category added later still
+            picks up a sensible side rather than whatever the map happened to
+            say when it was last saved.
+          </p>
+        </Section>
+
+        <Section
+          id="running-costs"
+          title="What a car costs"
+          lead="Why the average is divided by months owned rather than months billed"
+        >
+          <p>
+            The card takes the month you say ownership started, the categories
+            you say its costs land in, and divides the total by every calendar
+            month since — including the ones with no charge at all. A car costs
+            what it costs in the months it is not filled up, and averaging over
+            only the months with a receipt would price it off its expensive
+            months alone.
+          </p>
+          <p>
+            The starting point is yours to choose because it changes the
+            question. Starting from the purchase includes the purchase, which
+            is the true cost of having owned it; starting after includes only
+            what it takes to keep running. If the car shares a category with
+            anything else, that comes along too — separating it means giving
+            the car a category of its own.
+          </p>
+        </Section>
+
+        <Section
+          id="checklist"
+          title="What the monthly checklist covers"
+          lead="One month, closed in order, and only that month"
+        >
+          <p>
+            The checklist closes the month that has just finished, not the one
+            running. Everything it imports is trimmed to that month: rows dated
+            earlier belong to a close already done, and rows from the current
+            month belong to the next one. A statement downloaded on the third
+            carries a few days of both, and without the trim those days would
+            land silently in the wrong month&apos;s totals.
+          </p>
+          <p>
+            The file is read first, because every step after it is a review of
+            what the file said — income is a total of it, spending is a list of
+            it, trades are read out of it. Each is editable.
+          </p>
+          <p>
+            <strong className="text-ink">Nothing is written until the last
+            step.</strong> Every step collects; the final one lists exactly
+            what is about to be recorded and saves the lot at once. Closing the
+            dialog before then discards all of it and changes nothing. The
+            steps used to save as you left them, which meant abandoning the
+            checklist halfway left half a month behind — income recorded
+            against a month whose spending was never reviewed, or trades posted
+            before the snapshot meant to value them. Income is dated the last
+            day of the month being closed, whatever day the checklist is
+            actually done on.
+          </p>
+          <p>
+            The last two steps close the same month. The pension figure and the
+            portfolio snapshot are both recorded against the month that ended,
+            not the day the checklist is done — a snapshot taken on the second
+            or third is near enough to the month-end it stands for, and the
+            alternative was a single run writing to two different months.
+          </p>
+          <p>
+            <strong className="text-ink">Nothing takes a snapshot on its
+            own.</strong> There is no scheduled job and no automatic capture:
+            if this step is skipped, that month simply has no closing value,
+            and every chart that reaches back through it draws a straight line
+            across the hole — which looks like a quiet month rather than a
+            missing one. So the months that are missing, or that hold a
+            fraction of the positions the months around them hold, are listed
+            on the snapshot step and counted on the checklist button.
+          </p>
+          <p>
+            For anything older, use{" "}
+            <Link href="/import" className="text-brand hover:underline">
+              Import
+            </Link>
+            , which takes whatever you have and does not care what month it is
+            from.
+          </p>
+        </Section>
+
+        <Section
           id="months"
           title="Which months a chart shows"
           lead="Why the current month is on some charts and not others"

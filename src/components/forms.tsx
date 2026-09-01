@@ -16,7 +16,6 @@ import {
   AccountKind,
   AssetClass,
   Currency,
-  CashFlow,
   Holding,
   INCOME_CATEGORIES,
   RecurrenceFrequency,
@@ -30,9 +29,15 @@ import {
 } from "@/lib/types";
 import { todayISO } from "@/lib/format";
 import { useFinance } from "@/lib/store";
-import { rewardFlows } from "@/lib/rewards";
 import { useTickerValidation } from "@/lib/hooks";
 import { isCoinTicker } from "@/lib/market";
+import {
+  isBlankTrade,
+  newPositionsNeeded,
+  planTrades,
+  type TradeBatch,
+  type TradeInput,
+} from "@/lib/trade-batch";
 import { Button, Field, Input, Modal, Select } from "./ui";
 
 function FormActions({
@@ -994,14 +999,7 @@ interface NewHoldingMeta {
 }
 
 /** A trailing row the user has not touched yet is not a trade. */
-function isBlankRow(row: TradeRow): boolean {
-  return (
-    !row.ticker.trim() &&
-    !row.quantity.trim() &&
-    !row.price.trim() &&
-    !row.cadAmount.trim()
-  );
-}
+const isBlankRow = isBlankTrade;
 
 function NewHoldingDetails({
   pending,
@@ -1070,7 +1068,48 @@ function NewHoldingDetails({
   );
 }
 
-export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
+/**
+ * A trade as it arrives from an import, before it is a form row.
+ *
+ * Everything is a string here because the form edits strings; the caller does
+ * the numbers, and this stays the narrow contract between the two so the
+ * importer's row type does not leak into the form.
+ */
+export interface TradeDraft {
+  date: string;
+  action: "buy" | "sell" | "dividend";
+  ticker: string;
+  quantity: string;
+  price: string;
+  accountId: string;
+  currency: string;
+  cadAmount: string;
+}
+
+export function TradeEntry({
+  onComplete,
+  initial,
+  onStage,
+  submitLabel,
+}: {
+  onComplete?: () => void;
+  /**
+   * When given, the batch is handed over instead of being written.
+   *
+   * The monthly checklist stages every step and applies the lot at the end, so
+   * it needs the validated batch rather than its effects. Without this the
+   * form is the thing that writes, which is right everywhere else.
+   */
+  onStage?: (batch: TradeBatch, rows: TradeInput[]) => void;
+  /** Overrides the button's wording where "submit" would be a lie. */
+  submitLabel?: string;
+  /**
+   * Rows to open with, when something has already been read out of a file.
+   * Read once, on mount: they are a starting point to be edited, and
+   * re-seeding them under an edit in progress would throw that edit away.
+   */
+  initial?: TradeDraft[];
+}) {
   const holdings = useFinance((s) => s.holdings);
   const addHolding = useFinance((s) => s.addHolding);
   const updateHolding = useFinance((s) => s.updateHolding);
@@ -1080,9 +1119,15 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
   const investmentAccounts = accounts.filter((a) => isInvestmentAccount(a.kind));
   const defaultAccountId = investmentAccounts[0]?.id ?? "";
 
-  const [rows, setRows] = useState<TradeRow[]>([
-    { ...emptyRow(), accountId: defaultAccountId },
-  ]);
+  const [rows, setRows] = useState<TradeRow[]>(() =>
+    initial && initial.length > 0
+      ? initial.map((d) => ({
+          ...emptyRow(),
+          ...d,
+          accountId: d.accountId || defaultAccountId,
+        }))
+      : [{ ...emptyRow(), accountId: defaultAccountId }],
+  );
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
   /** Non-null while the new-position dialog is asking for the missing details. */
@@ -1145,241 +1190,70 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
   };
 
   /**
-   * Applies the batch. `meta` carries the identity of tickers that have no
-   * holding yet, collected by the dialog; it is empty when every row names a
-   * position that already exists.
+   * Works out what the batch would do, then either does it or hands it over.
+   *
+   * `meta` carries the identity of tickers that have no holding yet, collected
+   * by the dialog; it is empty when every row names a position that already
+   * exists. The arithmetic itself lives in `planTrades`, so that a caller who
+   * wants to know what a batch *would* do — the monthly checklist, which saves
+   * nothing until its last step — can ask without doing it.
    */
   const commit = (entered: NewHoldingMeta[]) => {
     setError("");
     setOk("");
-    const meta = new Map(entered.map((m) => [m.ticker, m]));
-    const active = rows.filter((r) => !isBlankRow(r));
-
-    // Netted per account and applied once at the end, so a batch that buys and
-    // sells in the same account does not race itself through the API.
-    const cashDeltas = new Map<string, number>();
-
-    /*
-     * A batch can touch the same position on several rows, but `holdings` is a
-     * render-time snapshot that does not move between them. Rows are replayed
-     * onto this working copy and each position is written back exactly once, so
-     * a second buy of the same ticker builds on the first rather than
-     * overwriting it — or, for a ticker that is new, opening a duplicate.
-     *
-     * Keyed by ticker *and* account, because one ticker held in two accounts is
-     * two positions with their own cost bases.
-     */
-    interface WorkingLot {
-      ticker: string;
-      existing: Holding | null;
-      accountId: string;
-      currency: string;
-      shares: number;
-      avgCost: number;
-      dividends: number;
-      price: number;
-      flows: CashFlow[];
+    const plan = planTrades(rows, entered, holdings, usdCadRate);
+    if (!plan.ok) {
+      setError(plan.error);
+      return;
     }
-    const lots = new Map<string, WorkingLot>();
-    const lotFor = (ticker: string, row: TradeRow): WorkingLot => {
-      const key = `${ticker} ${row.accountId}`;
-      const found = lots.get(key);
-      if (found) return found;
-      const existing =
-        holdings.find(
-          (h) =>
-            h.ticker.toUpperCase() === ticker && h.accountId === row.accountId,
-        ) ?? null;
-      const lot: WorkingLot = {
-        ticker,
-        existing,
-        accountId: row.accountId,
-        currency: existing?.currency ?? row.currency,
-        shares: existing?.shares ?? 0,
-        avgCost: existing?.avgCost ?? 0,
-        dividends: existing?.dividendsReceived ?? 0,
-        price: existing?.price ?? 0,
-        flows: [...(existing?.flows ?? [])],
-      };
-      lots.set(key, lot);
-      return lot;
-    };
+    setPending(null);
 
-    for (const row of active) {
-      const ticker = row.ticker.trim().toUpperCase();
-      const qty = Number(row.quantity);
-      const px = Number(row.price);
-      const isUsd = row.currency === "USD";
-      const lot = lotFor(ticker, row);
-      const held = lot.existing != null || lot.shares > 0;
-
-      if (row.action === "buy") {
-        if (!Number.isFinite(qty) || qty <= 0) {
-          setError(`Buy ${ticker}: quantity must be > 0.`);
-          return;
-        }
-        if (!Number.isFinite(px) || px <= 0) {
-          setError(`Buy ${ticker}: price must be > 0.`);
-          return;
-        }
-        const costCad = isUsd ? Number(row.cadAmount) || qty * px * usdCadRate : qty * px;
-        // The cash that paid for the shares leaves the account's balance; the
-        // shares themselves are valued from the holding.
-        cashDeltas.set(
-          row.accountId,
-          (cashDeltas.get(row.accountId) ?? 0) - Math.abs(costCad),
-        );
-        const newShares = lot.shares + qty;
-        lot.avgCost =
-          lot.shares > 0
-            ? (lot.shares * lot.avgCost + costCad) / newShares
-            : costCad / qty;
-        lot.shares = newShares;
-        if (lot.price <= 0) lot.price = px;
-        // Recorded so this trade counts towards the realized gain and the
-        // money-weighted return, same as an imported one.
-        lot.flows.push({
-          date: row.date,
-          kind: "buy",
-          amount: Math.abs(costCad),
-          shares: qty,
-        });
-      } else if (row.action === "sell") {
-        if (!Number.isFinite(qty) || qty <= 0) {
-          setError(`Sell ${ticker}: quantity must be > 0.`);
-          return;
-        }
-        if (!held) {
-          setError(`Sell ${ticker}: no position found.`);
-          return;
-        }
-        if (qty > lot.shares) {
-          setError(
-            `Sell ${ticker}: cannot sell ${qty} shares, only ${lot.shares} held.`,
-          );
-          return;
-        }
-        const proceedsCad = isUsd
-          ? Number(row.cadAmount) || qty * px * usdCadRate
-          : qty * px;
-        cashDeltas.set(
-          row.accountId,
-          (cashDeltas.get(row.accountId) ?? 0) + Math.abs(proceedsCad),
-        );
-        lot.shares -= qty;
-        lot.flows.push({
-          date: row.date,
-          kind: "sell",
-          amount: Math.abs(proceedsCad),
-          shares: -qty,
-        });
-      } else if (row.action === "reward") {
-        /*
-         * Tokens that arrived without being bought: income equal to what they
-         * were worth that day, and an acquisition at that same value. Leaving
-         * the price empty records the units and lists the reward for the
-         * figure to be filled in later — better than calling them free, which
-         * is what makes every dollar they later fetch look like profit.
-         */
-        if (!Number.isFinite(qty) || qty <= 0) {
-          setError(`Reward ${ticker}: quantity must be > 0.`);
-          return;
-        }
-        const perUnit = row.price.trim() === "" ? 0 : px;
-        if (!Number.isFinite(perUnit) || perUnit < 0) {
-          setError(`Reward ${ticker}: value must be a number, or left empty.`);
-          return;
-        }
-        const valueCad = isUsd
-          ? Number(row.cadAmount) || qty * perUnit * usdCadRate
-          : qty * perUnit;
-        // No cash moves: a reward is paid in tokens, so nothing arrives in the
-        // account's balance the way a distribution would.
-        const newShares = lot.shares + qty;
-        lot.avgCost =
-          lot.shares > 0
-            ? (lot.shares * lot.avgCost + valueCad) / newShares
-            : valueCad / qty;
-        lot.shares = newShares;
-        if (lot.price <= 0 && perUnit > 0) lot.price = perUnit;
-        if (valueCad > 0) lot.dividends += valueCad;
-        lot.flows.push(...rewardFlows(row.date, qty, valueCad));
-      } else if (row.action === "dividend") {
-        const cadAmount = isUsd ? Number(row.cadAmount) || 0 : Number(row.price) || 0;
-        if (!Number.isFinite(cadAmount) || cadAmount <= 0) {
-          setError(`Dividend ${ticker}: amount must be > 0.`);
-          return;
-        }
-        if (!held) {
-          setError(`Dividend ${ticker}: no position found to credit.`);
-          return;
-        }
-        cashDeltas.set(
-          row.accountId,
-          (cashDeltas.get(row.accountId) ?? 0) + cadAmount,
-        );
-        lot.dividends += cadAmount;
-        lot.flows.push({
-          date: row.date,
-          kind: "dividend",
-          amount: cadAmount,
-          shares: 0,
-        });
-      }
+    if (onStage) {
+      // Deferred: the caller holds the batch and applies it later.
+      onStage(plan.batch, rows.filter((r) => !isBlankRow(r)));
+      onComplete?.();
+      return;
     }
 
-    // Nothing below can fail, so the writes and the cash only happen once every
-    // row has validated: an early `return` above aborts the whole batch, and
-    // the cash must not move for a batch that never posted its trades.
-    let created = 0;
-    for (const lot of lots.values()) {
-      const shares = Math.round(lot.shares * 1e8) / 1e8;
-      const avgCost = Math.round(lot.avgCost * 10000) / 10000;
-      if (lot.existing) {
-        updateHolding(lot.existing.id, {
-          ...lot.existing,
-          shares,
-          avgCost,
-          dividendsReceived: Math.round(lot.dividends * 100) / 100,
-          flows: lot.flows,
-        });
-        continue;
-      }
-      // A ticker already held in another account keeps that position's
-      // identity; only one nobody has held before goes through the dialog.
-      const sibling = holdings.find((h) => h.ticker.toUpperCase() === lot.ticker);
-      const m = meta.get(lot.ticker);
-      if (!m && !sibling) {
-        // Unreachable: every unknown ticker is collected before commit runs.
-        // Guessing an asset class here would send it to the wrong price feed.
-        setError(`${lot.ticker}: missing position details.`);
-        return;
-      }
-      addHolding({
-        ticker: lot.ticker,
-        name: m?.name ?? sibling?.name ?? lot.ticker,
-        assetClass: m?.assetClass ?? sibling?.assetClass ?? "US Equity",
-        shares,
-        avgCost,
-        price: lot.price,
-        dividendsReceived: Math.round(lot.dividends * 100) / 100,
-        accountId: lot.accountId,
-        currency: lot.currency as Holding["currency"],
-        flows: lot.flows,
-      });
-      created++;
-    }
-
-    for (const [accountId, delta] of cashDeltas) {
-      adjustAccountCash(accountId, Math.round(delta * 100) / 100);
-    }
-
+    apply(plan.batch);
     setOk(
-      `Recorded ${active.length} trade${active.length !== 1 ? "s" : ""}` +
-        (created > 0 ? ` (${created} new position${created !== 1 ? "s" : ""})` : ""),
+      `Recorded ${plan.batch.trades} trade${plan.batch.trades !== 1 ? "s" : ""}` +
+        (plan.batch.created > 0
+          ? ` (${plan.batch.created} new position${plan.batch.created !== 1 ? "s" : ""})`
+          : ""),
     );
     reset();
     onComplete?.();
+  };
+
+  const apply = (batch: TradeBatch) => {
+    for (const c of batch.changes) {
+      if (c.existing) {
+        updateHolding(c.existing.id, {
+          ...c.existing,
+          shares: c.shares,
+          avgCost: c.avgCost,
+          dividendsReceived: c.dividendsReceived,
+          flows: c.flows,
+        });
+        continue;
+      }
+      addHolding({
+        ticker: c.ticker,
+        name: c.name,
+        assetClass: c.assetClass,
+        shares: c.shares,
+        avgCost: c.avgCost,
+        price: c.price,
+        dividendsReceived: c.dividendsReceived,
+        accountId: c.accountId,
+        currency: c.currency,
+        flows: c.flows,
+      });
+    }
+    for (const { accountId, delta } of batch.cash) {
+      adjustAccountCash(accountId, delta);
+    }
   };
 
   const process = () => {
@@ -1396,28 +1270,7 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
         return;
       }
     }
-
-    /*
-     * Buying a ticker with no holding behind it opens a position, and a
-     * position needs a name and an asset class that no trade row carries. Ask
-     * for them here, once per ticker, instead of guessing.
-     */
-    const needed: NewHoldingMeta[] = [];
-    const seen = new Set<string>();
-    for (const row of active) {
-      const ticker = row.ticker.trim().toUpperCase();
-      if ((row.action !== "buy" && row.action !== "reward") || seen.has(ticker)) continue;
-      if (holdings.some((h) => h.ticker.toUpperCase() === ticker)) continue;
-      seen.add(ticker);
-      needed.push({
-        ticker,
-        name: "",
-        // A coin is never an equity, and routing it as one sends it to the
-        // wrong price feed — so start from what the symbol already tells us.
-        assetClass: isCoinTicker(ticker) ? "Crypto" : "US Equity",
-      });
-    }
-
+    const needed = newPositionsNeeded(rows, holdings);
     if (needed.length > 0) {
       setPending(needed);
       return;
@@ -1536,7 +1389,7 @@ export function TradeEntry({ onComplete }: { onComplete?: () => void }) {
 
       <div className="flex items-center gap-2">
         <Button type="button" onClick={process}>
-          Submit trades
+          {submitLabel ?? "Submit trades"}
         </Button>
       </div>
 
