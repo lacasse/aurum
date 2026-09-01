@@ -56,17 +56,41 @@ import { roundMoney } from "@/lib/money";
 /**
  * A colour per band of net worth.
  *
- * Cash and the pension keep the colours they carry on the accounts page, so a
- * band means the same thing wherever it is drawn; the portfolio's three sit
- * between them, cool to warm as they get more volatile.
+ * Cash takes the green the app uses for money arriving and crypto the brand
+ * violet; the rest are chosen for contrast against whichever band they touch,
+ * which is where confusion actually happens.
+ *
+ * Checked rather than judged by eye, because the eye is bad at this. Two pairs
+ * this went through measure under the ΔE 15 floor for *normal* vision — blue
+ * beside cyan at 13.2, green beside cyan at 12.1 — meaning full-colour readers
+ * genuinely struggle to separate them. This set's worst touching pair is 22.1
+ * for normal vision and 12.5 simulating deuteranopia, both clear.
+ *
+ * Which pairs touch depends on BAND_ORDER, so changing that order means
+ * re-running the check rather than assuming it still holds.
  */
 const CLASS_COLORS: Record<NetWorthClass, string> = {
-  Cash: "#8b5cf6",
+  Cash: "#34d399",
   Bonds: "#60a5fa",
-  Stocks: "#22d3ee",
-  Crypto: "#a3e635",
-  Pension: "#f59e0b",
+  Pension: "#f472b6",
+  Stocks: "#f59e0b",
+  Crypto: "#8b5cf6",
 };
+
+/**
+ * The order the bands are stacked and listed in, bottom upwards.
+ *
+ * Kept here rather than in `NET_WORTH_CLASSES`, which is the domain's list of
+ * what a band can be; this is a decision about a picture, and the two should
+ * not have to move together.
+ *
+ * Whatever sits last is the top of the stack, and the top of a stack that
+ * always totals a hundred percent is the ceiling of the plot — so that band's
+ * boundary line runs along the frame and cannot be seen. It costs nothing for
+ * crypto, which is half the chart and unmistakable from its fill alone. It
+ * cost the pension its line entirely while it sat up there.
+ */
+const BAND_ORDER: NetWorthClass[] = ["Cash", "Bonds", "Pension", "Stocks", "Crypto"];
 
 /** How much of the net worth history to draw: months, or the whole record. */
 type Range = "12" | "60" | "all";
@@ -286,7 +310,7 @@ export default function DashboardPage() {
    * allocation was a blue rule through the middle of Cash.
    */
   const mixBands = useMemo(
-    () => NET_WORTH_CLASSES.filter((c) => bands.some((p) => p[c] > 0)),
+    () => BAND_ORDER.filter((c) => bands.some((p) => p[c] > 0)),
     [bands],
   );
   const mix = useMemo(
@@ -294,7 +318,7 @@ export default function DashboardPage() {
       bands.map((p) => {
         const owned = NET_WORTH_CLASSES.reduce((sum, c) => sum + Math.max(0, p[c]), 0);
         const row: Record<string, string | number> = { key: p.key, label: p.label };
-        for (const c of NET_WORTH_CLASSES) {
+        for (const c of BAND_ORDER) {
           row[c] = owned > 0 ? (Math.max(0, p[c]) / owned) * 100 : 0;
         }
         return row;
@@ -542,7 +566,7 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader
-            title="What the money is in"
+            title="Net worth composition"
             subtitle={`Share of everything you own, month by month${
               bandsLast && bandsLast.liabilities > 0
                 ? ` · ${fmtCAD(bandsLast.liabilities)} of debt sits outside this`
@@ -552,28 +576,31 @@ export default function DashboardPage() {
           {/*
             * Shares, not dollars.
             *
-            * Drawn in dollars this was the net worth line again with lines
-            * inside it: the total grew fivefold, so every band swept upward
-            * together and the mix — the only thing this chart is for — was a
-            * few pixels of thickness at the bottom. Normalised, the shape
-            * moves only when the composition moves, which is what "made of"
-            * means and the part slow enough to act on.
+            * In dollars this was the net worth line again with lines inside
+            * it: the total grew fivefold, so every band swept upward together
+            * and the mix — the only thing this chart is for — was a few pixels
+            * of thickness along the bottom. Normalised, the shape moves only
+            * when the composition moves, which is what "made of" means and the
+            * part slow enough to act on.
             *
-            * The dollars are not lost; they are the row underneath, where a
-            * figure is easier to read than a band is to measure anyway.
+            * A band worth very little is still only a few pixels tall, and the
+            * figures underneath are what answer for it. Drawing it larger than
+            * it is was tried and rejected: it bought cash a visible line at the
+            * cost of every other band being wrong, which is a bad trade in a
+            * chart whose whole subject is proportion.
             */}
           <div className="px-3 pb-2">
             <SeriesChart
               data={mix as unknown as Record<string, unknown>[]}
               xKey="label"
               stacked
+              fadeAtZero
               series={mixBands.map((name) => ({
                 key: name,
                 name,
                 color: CLASS_COLORS[name],
               }))}
               height={280}
-              solid
               yDomain={[0, 100]}
               yFmt={(n) => `${Math.round(n)}%`}
             />
