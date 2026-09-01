@@ -1,7 +1,7 @@
 import Papa from "papaparse";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, TxnType } from "./types";
 
-export type CsvFormat = "amex" | "simple";
+export type CsvFormat = "amex" | "simple" | "debit-credit";
 
 export interface ImportedRow {
   id: string;
@@ -27,6 +27,12 @@ export interface ImportedRow {
   confident: boolean; // suggestion came from a strong match
   include: boolean;
   dup: boolean; // matches an existing transaction or a row in this import
+  /**
+   * True when the direction came from the file's own words — a "Debit" or a
+   * "Charge" column — rather than from the sign convention worked out for the
+   * file as a whole.
+   */
+  explicitType: boolean;
 }
 
 export interface ParseResult {
@@ -35,6 +41,8 @@ export interface ParseResult {
   rows: ImportedRow[];
   skippedPayments: number;
   skippedInvalid: number;
+  /** How the file's signs were read. Null when nothing needed reading. */
+  signs: SignConvention | null;
   error?: string;
 }
 
@@ -48,16 +56,93 @@ function rowId(): string {
 /* Format detection                                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Column names, as the banks actually write them.
+ *
+ * Every export names the same four things differently — a date is "Date",
+ * "Transaction Date", "Posting Date" or "Date Posted" depending on who wrote
+ * the exporter — so the names are matched against a list rather than assumed.
+ */
+const DATE_COLUMNS = [
+  "date",
+  "transaction date",
+  "transaction_date",
+  "posted date",
+  "post date",
+  "posting date",
+  "date posted",
+  "effective date",
+];
+
+const DESC_COLUMNS = [
+  "description",
+  "description 1",
+  "merchant",
+  "payee",
+  "name",
+  "details",
+  "transaction description",
+  "narrative",
+  "memo",
+];
+
+/** Columns that hold money leaving the account. */
+const DEBIT_COLUMNS = [
+  "debit",
+  "debits",
+  "debit amount",
+  "amount debit",
+  "withdrawal",
+  "withdrawals",
+  "withdrawal amount",
+  "money out",
+  "paid out",
+  "funds out",
+];
+
+/** …and the ones that hold money arriving. */
+const CREDIT_COLUMNS = [
+  "credit",
+  "credits",
+  "credit amount",
+  "amount credit",
+  "deposit",
+  "deposits",
+  "deposit amount",
+  "money in",
+  "paid in",
+  "funds in",
+];
+
+function normalizeHeaders(fields: string[] | undefined): Set<string> {
+  return new Set(
+    (fields ?? []).map((f) => f.replace(/^\uFEFF/, "").trim().toLowerCase()),
+  );
+}
+
+const hasAny = (set: Set<string>, names: string[]) => names.some((n) => set.has(n));
+
 export function detectFormat(fields: string[] | undefined): CsvFormat | null {
   if (!fields || fields.length === 0) return null;
-  const set = new Set(
-    fields.map((f) => f.replace(/^\uFEFF/, "").trim().toLowerCase()),
-  );
+  const set = normalizeHeaders(fields);
   if (
     set.has("merchant name") &&
     (set.has("activity type") || set.has("reference number"))
   ) {
     return "amex";
+  }
+  /*
+   * Checked before the single-amount format, because a file that has both a
+   * signed amount column and a debit/credit pair has told us the direction
+   * outright — and a column that names the direction beats any amount of
+   * inference from signs.
+   */
+  if (
+    hasAny(set, DEBIT_COLUMNS) &&
+    hasAny(set, CREDIT_COLUMNS) &&
+    hasAny(set, DATE_COLUMNS)
+  ) {
+    return "debit-credit";
   }
   if (set.has("transaction_date") && set.has("merchant")) return "simple";
   return null;
@@ -161,11 +246,14 @@ const EXPENSE_RULES: [string, string[]][] = [
 ];
 
 const INCOME_RULES: [string, string[]][] = [
-  ["Salary", ["payroll", "direct dep", "salary", "paycheck", "gusto", "adp ", "workday"]],
-  ["Dividends", ["dividend"]],
-  ["Interest", ["interest"]],
-  ["Refund", ["refund", "reimburs", "cash back", "statement credit", "returned item", "return "]],
-  ["Gifts", ["gift"]],
+  ["Salary", ["payroll", "direct dep", "salary", "paycheck", "pay cheque", "paycheque", "wages", "gusto", "adp ", "workday", "employer", "net pay", "pay - ", "dep pay"]],
+  ["Freelance", ["freelance", "consulting", "invoice", "contract pay", "upwork", "fiverr", "stripe payout", "self-employ"]],
+  ["Dividends", ["dividend", "distribution"]],
+  ["Interest", ["interest", "int paid", "int credit"]],
+  ["RSP / Pension", ["pension", "rrsp contribution", "rsp contribution", "employer match", "superannuation"]],
+  ["Loan Proceeds", ["loan advance", "loan proceeds", "line of credit advance", "mortgage advance", "loan disburs"]],
+  ["Refund", ["refund", "reimburs", "cash back", "statement credit", "returned item", "return ", "rebate"]],
+  ["Gifts", ["gift", "e-transfer from", "etransfer from"]],
 ];
 
 /**
@@ -236,9 +324,16 @@ export function suggestCategory(
   merchantRules: Record<string, string>,
   userCategories?: readonly string[],
 ): Suggestion {
-  // The user-managed category list (Budgets page) wins when provided.
+  /*
+   * The user-managed list (Budgets page) is a list of *expense* categories —
+   * there is no user-managed income list, and `categoriesFor` in types.ts says
+   * the same. Offering it for an income row meant every deposit was matched
+   * against Housing, Groceries and Dining, matched nothing, and arrived as
+   * Other: a month of payroll, interest and dividends imported as
+   * uncategorised, which then had to be fixed by hand one row at a time.
+   */
   const allowed: readonly string[] =
-    userCategories ?? (type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES);
+    type === "income" ? INCOME_CATEGORIES : userCategories ?? EXPENSE_CATEGORIES;
   const fallback = allowed.includes("Other") ? "Other" : allowed[0] ?? "Other";
 
   // 1. Rules the user taught us on previous imports
@@ -260,8 +355,9 @@ export function suggestCategory(
 
   // 3. Keyword heuristics over merchant + description + notes
   const text = `${payee} ${desc} ${note}`.toLowerCase();
-  const baseRules =
-    userCategories || type === "expense" ? EXPENSE_RULES : INCOME_RULES;
+  // Income has its own vocabulary. "Payroll" is not a merchant, and the
+  // expense rules have nothing to say about it.
+  const baseRules = type === "income" ? INCOME_RULES : EXPENSE_RULES;
   for (const [name, keywords] of baseRules) {
     const category = resolveCategory(name, allowed);
     if (category && keywords.some((k) => text.includes(k))) {
@@ -304,10 +400,179 @@ function titleCase(s: string): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Which sign means money out                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * There is no convention. Half the world writes a purchase as -42.00 and half
+ * writes it as 42.00, and the same bank will do it differently on the card
+ * export and the chequing export.
+ *
+ * A chequing statement is written from the account's point of view: money
+ * leaving is negative. A card statement is written from the balance's point of
+ * view: a purchase *increases* what you owe, so it is positive, and the
+ * payment that clears it is the negative one. Reading either with the other's
+ * rule inverts the whole file — every expense becomes income and the month
+ * reports several thousand dollars that never arrived.
+ *
+ * So it is not assumed. It is worked out from the file, once, before any row
+ * is given a direction.
+ */
+export type SignBasis = "columns" | "type-column" | "majority" | "unsigned";
+
+export interface SignConvention {
+  /** Which sign the file uses for money going out. */
+  outflow: "negative" | "positive";
+  /** What settled it, which is what the UI tells the reader. */
+  basis: SignBasis;
+  /** Rows that supported it, against rows that did not. */
+  agreed: number;
+  disagreed: number;
+}
+
+export interface SignSample {
+  amount: number;
+  /** The direction the file stated in words, when it stated one. */
+  stated: TxnType | null;
+}
+
+/**
+ * Decide, for one file, which sign means an expense.
+ *
+ * In order of authority:
+ *
+ * 1. **The file's own words.** A row labelled "Debit" or "Charge" is not a
+ *    guess, so the sign those rows carry is the file's convention, and the
+ *    rest of the file is read by it. This is exact whenever a type column
+ *    exists, which is most of the time.
+ * 2. **The majority.** Failing that: a statement is mostly spending. Forty
+ *    charges and one payment, or forty debits and one deposit — either way the
+ *    sign that appears most often is the one that means money out.
+ * 3. **Neither.** A file with every amount the same sign says nothing at all
+ *    through its signs, and is read as a statement of spending.
+ */
+export function detectSignConvention(samples: SignSample[]): SignConvention {
+  let outNeg = 0;
+  let outPos = 0;
+  for (const s of samples) {
+    if (s.stated === null || s.amount === 0) continue;
+    // An outflow labelled in words says its sign means "money out"; an
+    // inflow says the same about the sign it does not carry.
+    const negativeMeansOut =
+      s.stated === "expense" ? s.amount < 0 : s.amount > 0;
+    if (negativeMeansOut) outNeg++;
+    else outPos++;
+  }
+  /*
+   * Two agreeing rows is the threshold. One row is an anecdote — a single
+   * refund at the top of a card statement would otherwise invert everything
+   * under it — and a file whose labelled rows contradict each other has not
+   * told us anything, so it falls through to counting.
+   */
+  if (outNeg + outPos >= 2 && outNeg !== outPos) {
+    const negative = outNeg > outPos;
+    return {
+      outflow: negative ? "negative" : "positive",
+      basis: "type-column",
+      agreed: negative ? outNeg : outPos,
+      disagreed: negative ? outPos : outNeg,
+    };
+  }
+
+  let neg = 0;
+  let pos = 0;
+  for (const s of samples) {
+    if (s.amount < 0) neg++;
+    else if (s.amount > 0) pos++;
+  }
+  if (neg === 0 || pos === 0) {
+    // Nothing to read: one sign throughout. Treat the file as spending, which
+    // is what a statement of one sign almost always is.
+    return {
+      outflow: neg > 0 ? "negative" : "positive",
+      basis: "unsigned",
+      agreed: neg + pos,
+      disagreed: 0,
+    };
+  }
+  const negative = neg >= pos;
+  return {
+    outflow: negative ? "negative" : "positive",
+    basis: "majority",
+    agreed: negative ? neg : pos,
+    disagreed: negative ? pos : neg,
+  };
+}
+
+/** How the reader is told what was decided. */
+export function describeSigns(c: SignConvention): string {
+  const side = c.outflow === "negative" ? "Negative" : "Positive";
+  if (c.basis === "columns") {
+    return "Direction taken from the file's separate debit and credit columns.";
+  }
+  if (c.basis === "unsigned") {
+    return `Every amount has the same sign, so the file was read as spending.`;
+  }
+  const how =
+    c.basis === "type-column"
+      ? "matching the file's own debit and credit labels"
+      : "since most rows on a statement are spending";
+  return `${side} amounts read as money out, ${how}.`;
+}
+
+/* ------------------------------------------------------------------ */
 /* Row extraction                                                      */
 /* ------------------------------------------------------------------ */
 
 const BAD_STATUS = /declin|fail|void|cancel|revers|error/;
+
+/** The direction a row's own words claim, or null when it does not say. */
+function statedType(format: CsvFormat, typeStr: string): TxnType | null {
+  if (format === "amex") {
+    if (["charge", "fee"].includes(typeStr)) return "expense";
+    if (["credit", "return", "refund"].includes(typeStr)) return "income";
+    // "Adjustment" goes either way, so it says nothing and is left to the sign.
+    return null;
+  }
+  if (["debit", "sale", "purchase", "charge", "withdrawal", "fee"].includes(typeStr)) {
+    return "expense";
+  }
+  if (["credit", "refund", "return", "deposit"].includes(typeStr)) return "income";
+  return null;
+}
+
+/**
+ * A record's values by lower-cased column name.
+ *
+ * The Amex and simple formats know their exact headers; a bank export does
+ * not — the same bank ships "Withdrawal" one year and "withdrawal amount" the
+ * next — so those columns are matched without regard to case or padding.
+ */
+function normalizeRecord(r: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(r)) {
+    out[k.replace(/^\uFEFF/, "").trim().toLowerCase()] = v;
+  }
+  return out;
+}
+
+function pickFrom(r: Record<string, string>, names: string[]): string {
+  for (const n of names) {
+    const v = r[n];
+    if (v != null && String(v).trim() !== "") return String(v).trim();
+  }
+  return "";
+}
+
+interface RawRow {
+  date: string;
+  payee: string;
+  signed: number;
+  stated: TxnType | null;
+  desc: string;
+  note?: string;
+  csvCategory?: string;
+}
 
 export function rowsFromRecords(
   fileName: string,
@@ -316,11 +581,14 @@ export function rowsFromRecords(
   existingKeys: Set<string>,
   merchantRules: Record<string, string>,
   userCategories?: readonly string[],
-): { rows: ImportedRow[]; skippedPayments: number; skippedInvalid: number } {
-  const rows: ImportedRow[] = [];
+): {
+  rows: ImportedRow[];
+  skippedPayments: number;
+  skippedInvalid: number;
+  signs: SignConvention | null;
+} {
   let skippedPayments = 0;
   let skippedInvalid = 0;
-  const seen = new Set<string>(existingKeys);
   const pick = (r: Record<string, string>, ...names: string[]): string => {
     for (const n of names) {
       const v = r[n];
@@ -328,6 +596,13 @@ export function rowsFromRecords(
     }
     return "";
   };
+
+  /*
+   * Read every row first, then decide what the signs mean, then hand out
+   * directions. The direction of a row is a fact about the file, not about
+   * the row, so it cannot be settled while still reading the file.
+   */
+  const raw: RawRow[] = [];
 
   for (const r of records) {
     let dateStr = "";
@@ -338,7 +613,26 @@ export function rowsFromRecords(
     let note: string | undefined;
     let csvCategory: string | undefined;
 
-    if (format === "amex") {
+    if (format === "debit-credit") {
+      const n = normalizeRecord(r);
+      dateStr = pickFrom(n, DATE_COLUMNS);
+      payee = pickFrom(n, DESC_COLUMNS) || "Unknown merchant";
+      const debit = parseAmount(pickFrom(n, DEBIT_COLUMNS)) ?? 0;
+      const credit = parseAmount(pickFrom(n, CREDIT_COLUMNS)) ?? 0;
+      /*
+       * The column is the answer, so its own sign is not consulted: a file
+       * that writes withdrawals as -84.20 under "Debit" means the same thing
+       * as one that writes 84.20, and the magnitude is all that is wanted.
+       * Both filled at once is netted, which is the only sane reading of a row
+       * that claims to be a withdrawal and a deposit together.
+       */
+      const net = Math.abs(debit) - Math.abs(credit);
+      amountStr = String(net);
+      typeStr = net > 0 ? "debit" : net < 0 ? "credit" : "";
+      desc = pickFrom(n, ["category", "transaction type", "type"]);
+      csvCategory = pickFrom(n, ["category"]) || undefined;
+      note = pickFrom(n, ["notes", "memo", "description 2"]) || undefined;
+    } else if (format === "amex") {
       dateStr = pick(r, "Date", "Posted Date");
       payee = pick(r, "Merchant Name", "Merchant Category Description") || "Unknown merchant";
       amountStr = pick(r, "Amount");
@@ -374,50 +668,73 @@ export function rowsFromRecords(
       continue;
     }
 
-    let type: TxnType;
-    if (format === "amex") {
-      if (["charge", "fee", "adjustment"].includes(typeStr)) type = "expense";
-      else if (["credit", "return", "refund"].includes(typeStr)) type = "income";
-      else type = signed < 0 ? "expense" : "income";
-    } else {
-      if (["debit", "sale", "purchase", "charge", "withdrawal", "fee"].includes(typeStr))
-        type = "expense";
-      else if (["credit", "refund", "return", "deposit"].includes(typeStr))
-        type = "income";
-      else type = signed < 0 ? "expense" : "income";
-    }
+    raw.push({
+      date,
+      payee,
+      signed,
+      stated: statedType(format, typeStr),
+      desc,
+      note,
+      csvCategory,
+    });
+  }
 
-    const key = `${date}|${Math.abs(signed).toFixed(2)}|${payee.toLowerCase()}`;
+  const signs =
+    raw.length === 0
+      ? null
+      : format === "debit-credit"
+        ? {
+            outflow: "positive" as const,
+            basis: "columns" as const,
+            agreed: raw.length,
+            disagreed: 0,
+          }
+        : detectSignConvention(
+            raw.map((r) => ({ amount: r.signed, stated: r.stated })),
+          );
+  const outflowIsNegative = signs?.outflow !== "positive";
+
+  const rows: ImportedRow[] = [];
+  const seen = new Set<string>(existingKeys);
+
+  for (const r of raw) {
+    // Words beat signs: a row the file called a credit is a credit, whatever
+    // the rest of the file signs its amounts.
+    const type: TxnType =
+      r.stated ?? (r.signed < 0 === outflowIsNegative ? "expense" : "income");
+
+    const key = `${r.date}|${Math.abs(r.signed).toFixed(2)}|${r.payee.toLowerCase()}`;
     const dup = seen.has(key);
     seen.add(key);
 
     const suggestion = suggestCategory(
-      payee,
-      desc,
-      note ?? "",
-      csvCategory,
+      r.payee,
+      r.desc,
+      r.note ?? "",
+      r.csvCategory,
       type,
       merchantRules,
       userCategories,
     );
     rows.push({
       id: rowId(),
-      date,
-      payee,
-      amount: Math.abs(Math.round(signed * 100) / 100),
+      date: r.date,
+      payee: r.payee,
+      amount: Math.abs(Math.round(r.signed * 100) / 100),
       type,
-      note,
+      note: r.note,
       sourceFile: fileName,
-      csvCategory,
+      csvCategory: r.csvCategory,
       category: suggestion.category,
       suggestedCategory: suggestion.category,
       confident: suggestion.confident,
       include: !dup,
       dup,
+      explicitType: r.stated !== null,
     });
   }
 
-  return { rows, skippedPayments, skippedInvalid };
+  return { rows, skippedPayments, skippedInvalid, signs };
 }
 
 /* ------------------------------------------------------------------ */
@@ -440,10 +757,11 @@ export function parseCsvRecords(
       rows: [],
       skippedPayments: 0,
       skippedInvalid: 0,
+      signs: null,
       error: "Unrecognized columns — expected an Amex-style export or transaction_date/merchant/amount format.",
     };
   }
-  const { rows, skippedPayments, skippedInvalid } = rowsFromRecords(
+  const { rows, skippedPayments, skippedInvalid, signs } = rowsFromRecords(
     fileName,
     format,
     records,
@@ -451,7 +769,7 @@ export function parseCsvRecords(
     merchantRules,
     userCategories,
   );
-  return { fileName, format, rows, skippedPayments, skippedInvalid };
+  return { fileName, format, rows, skippedPayments, skippedInvalid, signs };
 }
 
 export function parseCsvFile(
@@ -483,6 +801,7 @@ export function parseCsvFile(
           rows: [],
           skippedPayments: 0,
           skippedInvalid: 0,
+          signs: null,
           error: "Could not read file.",
         }),
     });

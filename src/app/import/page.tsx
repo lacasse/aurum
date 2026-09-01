@@ -24,7 +24,7 @@ import {
 } from "@/components/ui";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
-import { ImportedRow, suggestCategory, txnKey } from "@/lib/csv";
+import { ImportedRow, describeSigns, suggestCategory, txnKey } from "@/lib/csv";
 import {
   TradeRow,
   accumulatePositions,
@@ -39,6 +39,7 @@ import {
   describeAction,
 } from "@/lib/corporate-actions";
 import {
+  INCOME_CATEGORIES,
   REGISTRATION_LABELS,
   Registration,
   TRANSFER_CATEGORY,
@@ -108,9 +109,18 @@ export default function ImportPage() {
   const accountIdFor = (registration: Registration): string =>
     investmentAccounts.find((a) => a.registration === registration)?.id ?? "";
 
-  /** The account a file defaults to: the card for a statement, matching for the rest. */
-  const defaultAccountFor = (file: RoutedFile): string =>
-    file.kind === "card" ? cardAccountId || cashAccountId : MATCH_THE_FILE;
+  /**
+   * The account a file defaults to.
+   *
+   * A card statement is the credit card; a bank statement — one with debit and
+   * credit columns — is the everyday account, which is the opposite side of
+   * the ledger. Anything else names its own account row by row.
+   */
+  const defaultAccountFor = (file: RoutedFile): string => {
+    if (file.kind === "card") return cardAccountId || cashAccountId;
+    if (file.kind === "bank") return cashAccountId || cardAccountId;
+    return MATCH_THE_FILE;
+  };
   const accountForFile = (name: string): string => {
     const chosen = fileAccounts[name];
     if (chosen) return chosen;
@@ -228,7 +238,7 @@ export default function ImportPage() {
       row.csvCategory,
       type,
       merchantRules,
-      type === "expense" ? userCategories : undefined,
+      userCategories,
     );
     updateCash(row.id, {
       type,
@@ -446,6 +456,18 @@ export default function ImportPage() {
                             {f.cash.length === 1 ? "" : "s"}, {f.trades.length} security
                             row{f.trades.length === 1 ? "" : "s"}
                             {f.skipped.map((s) => `, ${s.count} ${s.reason} skipped`)}
+                            {/*
+                              * Said out loud, because it is a decision the app
+                              * made about the file rather than something the
+                              * file stated. If it read the signs the wrong way
+                              * round every row is inverted, and this line is
+                              * where that is visible before anything is saved.
+                              */}
+                            {f.signs ? (
+                              <span className="mt-0.5 block">
+                                {describeSigns(f.signs)}
+                              </span>
+                            ) : null}
                           </>
                         )}
                       </p>
@@ -648,8 +670,14 @@ export default function ImportPage() {
                               )}
                               aria-label={`Category for ${r.payee}`}
                             >
+                              {/*
+                                * The shared list, not a copy of it. The copy
+                                * that stood here had already drifted — it was
+                                * missing Freelance — so a row suggested as
+                                * Freelance could not have been left that way.
+                                */}
                               {(r.type === "income"
-                                ? ["Salary", "Additional Income", "RSP / Pension", "Dividends", "Interest", "Refund", "Loan Proceeds", "Gifts", "Other"]
+                                ? INCOME_CATEGORIES
                                 : userCategories
                               ).map((c) => (
                                 <option key={c} value={c}>
