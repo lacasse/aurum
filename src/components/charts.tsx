@@ -166,6 +166,27 @@ export function Sparkline({
   );
 }
 
+/**
+ * How present a series is at each point, eased so it arrives and leaves over a
+ * few points rather than one.
+ *
+ * Starts as one where the value is something and zero where it is not, then
+ * two passes of a three-point mean round the corners off. Two passes is what
+ * spreads the transition across roughly three points; a single pass ramps over
+ * one, which still reads as a cut.
+ */
+function presenceRamp(data: Record<string, unknown>[], key: string): number[] {
+  const present = data.map((d) => (Number(d[key]) > 0 ? 1 : 0));
+  const smooth = (xs: number[]) =>
+    xs.map((_, i) => {
+      const window = [xs[i - 1], xs[i], xs[i + 1]].filter(
+        (v): v is number => v !== undefined,
+      );
+      return window.reduce((sum, v) => sum + v, 0) / window.length;
+    });
+  return smooth(smooth(present));
+}
+
 /* ---------------- Area / Line trend ---------------- */
 
 export interface SeriesDef {
@@ -185,7 +206,7 @@ export function SeriesChart({
   xFmt,
   stacked = false,
   yDomain,
-  solid = false,
+  fadeAtZero = false,
 }: {
   data: Record<string, unknown>[];
   xKey: string;
@@ -204,16 +225,16 @@ export function SeriesChart({
    */
   yDomain?: [number, number];
   /**
-   * Draws stacked areas as opaque regions separated by a hairline, instead of
-   * translucent washes outlined in their own colour.
+   * Fades each line out over the stretches where its series is nothing.
    *
-   * The default suits a chart of two or three quantities laid over each other,
-   * where the gradient keeps what is behind visible. It fails a composition:
-   * every band carried a two-pixel stroke in its own colour, so a band worth
-   * one percent — under three pixels tall — was entirely outline, and a band
-   * worth nothing still drew a line straight across its neighbour.
+   * A band held in none of a month still has a position in a stack — the same
+   * one as the top of the band below it — so its line runs flat along its
+   * neighbour's edge for years it did not exist. Cutting the line at the first
+   * zero fixes that but reads as a glitch, a line that simply stops. Fading it
+   * says the same thing the way the eye expects: the holding tails off, and
+   * comes back when it comes back.
    */
-  solid?: boolean;
+  fadeAtZero?: boolean;
 }) {
   const gid = useId().replace(/[:]/g, "");
   const stackId = stacked ? "1" : undefined;
@@ -227,6 +248,32 @@ export function SeriesChart({
               <stop offset="100%" stopColor={s.color} stopOpacity={0.02} />
             </linearGradient>
           ))}
+          {/*
+            * A gradient along the x-axis rather than down it: one stop per
+            * point, opaque where the series has something and clear where it
+            * has nothing, so the stroke dissolves across the months either
+            * side instead of stopping dead at one of them.
+            */}
+          {fadeAtZero &&
+            series.map((s, i) => (
+              <linearGradient
+                key={`fade-${s.key}`}
+                id={`fade-${gid}-${i}`}
+                x1="0"
+                y1="0"
+                x2="1"
+                y2="0"
+              >
+                {presenceRamp(data, s.key).map((op, j, all) => (
+                  <stop
+                    key={j}
+                    offset={`${all.length > 1 ? (j / (all.length - 1)) * 100 : 0}%`}
+                    stopColor={s.color}
+                    stopOpacity={op}
+                  />
+                ))}
+              </linearGradient>
+            ))}
         </defs>
         <CartesianGrid {...GRID_PROPS} />
         <XAxis
@@ -269,12 +316,9 @@ export function SeriesChart({
               type="monotone"
               dataKey={s.key}
               name={s.name}
-              // A hairline in the page's own colour reads as a gap between
-              // bands rather than as a line belonging to one of them.
-              stroke={solid ? "var(--surface)" : s.color}
-              strokeWidth={solid ? 1 : 2}
-              fill={solid ? s.color : `url(#${gid}-${i})`}
-              fillOpacity={solid ? 0.9 : undefined}
+              stroke={fadeAtZero ? `url(#fade-${gid}-${i})` : s.color}
+              strokeWidth={2}
+              fill={`url(#${gid}-${i})`}
               stackId={stackId}
               activeDot={{ r: 3 }}
             />
