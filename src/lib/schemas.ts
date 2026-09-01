@@ -230,7 +230,14 @@ export const snapshotSchema = z
     month: z.string().regex(MONTH, "month must be YYYY-MM"),
     holdingId: requiredString,
     ticker: requiredString,
-    price: positiveNumber,
+    /*
+     * Zero is allowed here for the same reason it is allowed below: a position
+     * closed years ago has no price either, and one dormant placeholder was
+     * enough to have the whole month's snapshot rejected — sixty positions
+     * thrown away because one of them was worth nothing. A month is saved
+     * whole or the record silently stops.
+     */
+    price: zeroOrMore,
     // A snapshot of a closed position is legitimately zero.
     avgCost: zeroOrMore,
     shares: zeroOrMore,
