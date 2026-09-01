@@ -223,7 +223,7 @@ export function parseActivitiesCsv(
         hint,
         kind,
         merchantRules,
-        kind === "expense" ? userCategories : undefined,
+        userCategories,
       );
       cash.push({
         id: rowId("act"),
@@ -240,6 +240,9 @@ export function parseActivitiesCsv(
         confident: s.confident,
         include: !dup,
         dup,
+        // An activity export names each row — dividend, withholding tax, buy —
+        // so the direction never comes from reading its signs.
+        explicitType: true,
       });
     };
 
