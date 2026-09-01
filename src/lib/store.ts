@@ -74,9 +74,16 @@ interface FinanceStore extends FinanceData {
   updateTransaction: (id: string, input: TransactionInput) => void;
   deleteTransaction: (id: string) => void;
   addAccount: (input: AccountInput) => void;
-  updateAccount: (id: string, input: AccountInput) => void;
+  /**
+   * `month` decides which month the new balance is written against. It
+   * defaults to now, because editing a balance on the Accounts page is a
+   * statement about now — but the monthly checklist is closing the month that
+   * just ended, and its figures belong to that month rather than to the day
+   * the checklist happens to be done on.
+   */
+  updateAccount: (id: string, input: AccountInput, month?: string) => void;
   /** Fill in a month nobody entered, marked as the app's own working. */
-  recordEstimatedBalance: (id: string, value: number) => void;
+  recordEstimatedBalance: (id: string, value: number, month?: string) => void;
   deleteAccount: (id: string) => void;
   /**
    * Move an investment account's uninvested cash.
@@ -277,12 +284,21 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
     }
   },
 
+  /**
+   * Unlike the other writes here, this one rethrows.
+   *
+   * Everything else is fire-and-forget with an optimistic update, which is
+   * right for a single edit. A snapshot is the last act of closing a month and
+   * the caller needs to know whether it landed: swallowing the failure is how
+   * a rejected month came to look like a saved one.
+   */
   saveSnapshots: async (rows) => {
     try {
       await api.saveSnapshots(rows);
       set({ snapshots: rows });
     } catch (err) {
       report(err);
+      throw err;
     }
   },
 
@@ -338,21 +354,24 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
         api.createAccount(account).catch(report);
       },
 
-      updateAccount: (id, input) => {
+      updateAccount: (id, input, month) => {
         let updated: Account | undefined;
         set((s) => ({
           accounts: s.accounts.map((a) => {
             if (a.id !== id) return a;
-            updated = withBalanceRecorded({
-              ...a,
-              name: input.name,
-              institution: input.institution,
-              kind: input.kind,
-              balance: input.balance,
-              registration: input.registration,
-              pensionAnnual: input.pensionAnnual,
-              pensionService: input.pensionService,
-            });
+            updated = withBalanceRecorded(
+              {
+                ...a,
+                name: input.name,
+                institution: input.institution,
+                kind: input.kind,
+                balance: input.balance,
+                registration: input.registration,
+                pensionAnnual: input.pensionAnnual,
+                pensionService: input.pensionService,
+              },
+              month,
+            );
             return updated;
           }),
         }));
@@ -365,9 +384,9 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
        * Written like any other month so every chart simply works, and flagged
        * so nothing later mistakes it for a figure the plan reported.
        */
-      recordEstimatedBalance: (id, value) => {
+      recordEstimatedBalance: (id, value, forMonth) => {
         let updated: Account | undefined;
-        const month = currentMonthKey();
+        const month = forMonth ?? currentMonthKey();
         set((s) => ({
           accounts: s.accounts.map((a) => {
             if (a.id !== id) return a;

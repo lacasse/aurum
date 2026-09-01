@@ -279,6 +279,17 @@ describe("snapshotSchema", () => {
     assert.equal(ok(snapshotSchema.safeParse({ ...valid, value: 0 })).value, 0);
     assert.equal(snapshotSchema.safeParse({ ...valid, value: "abc" }).success, false);
   });
+
+  test("a closed position with no price is still a snapshot", () => {
+    // One dormant placeholder used to have the whole month's batch rejected.
+    const s = ok(snapshotSchema.safeParse({ ...valid, price: 0, shares: 0, value: 0 }));
+    assert.equal(s.price, 0);
+  });
+
+  test("a price that is not a number is still refused", () => {
+    assert.equal(snapshotSchema.safeParse({ ...valid, price: "abc" }).success, false);
+    assert.equal(snapshotSchema.safeParse({ ...valid, price: -5 }).success, false);
+  });
 });
 
 describe("smaller route bodies", () => {
