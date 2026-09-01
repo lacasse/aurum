@@ -26,6 +26,7 @@ import {
 import { advanceRule, dueOccurrences } from "@/lib/recurrence";
 import { todayISO } from "@/lib/format";
 import { addMoney } from "@/lib/money";
+import { SPEND_GROUPS, type SpendGroup } from "@/lib/expenses";
 import {
   DEMO_ACCOUNT_ID_PREFIX,
   DEMO_HOLDING_ID_PREFIX,
@@ -505,6 +506,63 @@ export async function setAllocationTargets(
       target: appMeta.key,
       set: { value: JSON.stringify(clean) },
     });
+}
+
+/* ------------------------------------------------------------------ */
+/* Expense page settings                                               */
+/* ------------------------------------------------------------------ */
+
+const EXPENSE_SETTINGS_KEY = "expense_settings";
+
+/**
+ * The two judgements the expenses page cannot make on its own: which
+ * categories count as necessities, and which of them belong to the car.
+ *
+ * Only the departures from the defaults are stored, so a category added later
+ * picks up the default rather than being silently frozen at whatever the map
+ * happened to say when it was written.
+ */
+export interface ExpenseSettings {
+  groups: Record<string, SpendGroup>;
+  car: { start: string; categories: string[] } | null;
+}
+
+export async function getExpenseSettings(): Promise<ExpenseSettings> {
+  const empty: ExpenseSettings = { groups: {}, car: null };
+  const [row] = await db
+    .select()
+    .from(appMeta)
+    .where(eq(appMeta.key, EXPENSE_SETTINGS_KEY));
+  if (!row) return empty;
+  try {
+    const parsed = JSON.parse(row.value) as Partial<ExpenseSettings>;
+    const groups: Record<string, SpendGroup> = {};
+    for (const [category, group] of Object.entries(parsed.groups ?? {})) {
+      if (SPEND_GROUPS.includes(group as SpendGroup)) {
+        groups[category] = group as SpendGroup;
+      }
+    }
+    const car =
+      parsed.car && /^\d{4}-\d{2}$/.test(parsed.car.start)
+        ? {
+            start: parsed.car.start,
+            categories: (parsed.car.categories ?? []).filter(
+              (c): c is string => typeof c === "string",
+            ),
+          }
+        : null;
+    return { groups, car };
+  } catch {
+    return empty;
+  }
+}
+
+export async function setExpenseSettings(s: ExpenseSettings): Promise<void> {
+  const value = JSON.stringify(s);
+  await db
+    .insert(appMeta)
+    .values({ key: EXPENSE_SETTINGS_KEY, value })
+    .onConflictDoUpdate({ target: appMeta.key, set: { value } });
 }
 
 /* ------------------------------------------------------------------ */

@@ -13,6 +13,7 @@ import {
   Menu,
   Moon,
   Receipt,
+  ReceiptText,
   Sun,
   Target,
   Trash2,
@@ -30,6 +31,7 @@ import { cn } from "./ui";
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
+  { href: "/expenses", label: "Expenses", icon: ReceiptText },
   { href: "/investments", label: "Investments", icon: TrendingUp },
   { href: "/budgets", label: "Budgets", icon: Target },
   { href: "/accounts", label: "Accounts", icon: Landmark },
