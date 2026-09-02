@@ -496,19 +496,19 @@ export function holdingExposure(holdings: Holding[]): ExposureSlice[] {
     }
   }
 
+  /*
+   * Largest to smallest, and nothing else.
+   *
+   * They used to be grouped by asset class first, because the colour was a
+   * shade of the class's hue and the groups had to sit together for that to
+   * read. Colour is now a step along one spectrum, so the ring is free to say
+   * the more useful thing: what the biggest position is, and how fast it falls
+   * away. Ties break on ticker so the order never wobbles between renders.
+   */
   const slices = [...pooled.values()];
-  const groupTotal = new Map<AssetClass, number>();
-  for (const s of slices) {
-    groupTotal.set(s.assetClass, (groupTotal.get(s.assetClass) ?? 0) + s.value);
-  }
-  slices.sort((a, b) => {
-    const ga = groupTotal.get(a.assetClass) ?? 0;
-    const gb = groupTotal.get(b.assetClass) ?? 0;
-    if (ga !== gb) return gb - ga;
-    if (a.assetClass !== b.assetClass) return a.assetClass.localeCompare(b.assetClass);
-    if (a.value !== b.value) return b.value - a.value;
-    return a.ticker.localeCompare(b.ticker);
-  });
+  slices.sort((a, b) =>
+    a.value !== b.value ? b.value - a.value : a.ticker.localeCompare(b.ticker),
+  );
   return slices;
 }
 
@@ -537,6 +537,8 @@ export interface HoldingRow {
   closed: boolean;
   ticker: string;
   name: string;
+  /** One per security, not per lot: `updateSecurity` keeps every lot in step. */
+  assetClass: AssetClass;
   currency: Currency;
   /** Combined across accounts. */
   shares: number;
@@ -856,6 +858,7 @@ export function consolidateHoldings(
       closed: shares <= 0,
       ticker: priced.ticker,
       name: priced.name,
+      assetClass: priced.assetClass,
       currency: priced.currency,
       shares: Math.round(shares * 1e8) / 1e8,
       avgCostCAD: shares > 0 ? costBasis / shares : 0,
@@ -886,6 +889,7 @@ export function holdingRows(holdings: Holding[]): HoldingRow[] {
 /** The columns the holdings table can be ordered by. */
 export type SortKey =
   | "name"
+  | "assetClass"
   | "shares"
   | "avgCostCAD"
   | "priceCAD"
@@ -920,13 +924,16 @@ export function sortHoldingRows(
       if (bv === null) return -1;
       return av !== bv ? (av - bv) * sign : b.marketValue - a.marketValue;
     }
-    if (key === "name") {
-      const cmp = (a.name || a.ticker).localeCompare(b.name || b.ticker, undefined, {
-        sensitivity: "base",
-      });
+    if (key === "name" || key === "assetClass") {
+      const av = key === "name" ? a.name || a.ticker : a.assetClass;
+      const bv = key === "name" ? b.name || b.ticker : b.assetClass;
+      const cmp = av.localeCompare(bv, undefined, { sensitivity: "base" });
+      // Ties fall through to market value, which is what makes sorting by
+      // class read as the classes in order and, inside each, largest first.
       return cmp !== 0 ? cmp * sign : b.marketValue - a.marketValue;
     }
-    const diff = a[key as Exclude<SortKey, "name" | "mwrr">] - b[key as Exclude<SortKey, "name" | "mwrr">];
+    const numeric = key as Exclude<SortKey, "name" | "assetClass" | "mwrr">;
+    const diff = a[numeric] - b[numeric];
     return diff !== 0 ? diff * sign : b.marketValue - a.marketValue;
   });
 }
