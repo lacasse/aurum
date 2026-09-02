@@ -104,10 +104,19 @@ const simple4 = parseCsvRecords("simple.csv", s.fields, s.data, new Set(), {
 }, custom);
 const nf4 = simple4.rows.find((r) => r.payee === "NETFLIX.COM");
 expect(nf4?.category === "Coffee" && nf4?.confident === true, "merchant rule honored within custom list");
+/*
+ * A refund is income, and income has its own list.
+ *
+ * This used to expect the custom *expense* categories, and a refund of a pair
+ * of shoes came back as "Shopping" — an expense heading on a row of income,
+ * which every income figure in the app then read as a category it does not
+ * have. The file's own word for it is ignored for the same reason: "shopping"
+ * describes what was bought, not what the money coming back is.
+ */
 const rf3 = simple3.rows.find((r) => r.payee === "REFUND FROM ACME");
 expect(
-  rf3?.type === "income" && rf3?.category === "Shopping",
-  "refund rows use custom categories (csv 'shopping' -> Shopping)",
+  rf3?.type === "income" && rf3?.category === "Refund",
+  "refund rows take an income category, not a custom expense one",
 );
 
 if (failures > 0) {
