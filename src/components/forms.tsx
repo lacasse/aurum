@@ -284,7 +284,7 @@ function TransactionFormInner({
       </div>
 
       {type === "transfer" ? (
-        <p className="mt-3 text-[11px] text-ink-faint">
+        <p className="mt-3 text-[0.6875rem] text-ink-faint">
           Transfers move money between your own accounts, so they are left out
           of income, spending and budgets.
         </p>
@@ -665,24 +665,24 @@ function HoldingFormInner({
                 <X size={14} className="text-negative" />
               )}
               {tickerStatus === "unknown" && ticker.trim() && (
-                <span className="text-[12px] text-ink-faint">?</span>
+                <span className="text-[0.75rem] text-ink-faint">?</span>
               )}
             </span>
           </div>
           {tickerStatus === "valid" && fetchedPrice != null && (
-            <p className="mt-1 text-[11px] text-positive">
+            <p className="mt-1 text-[0.6875rem] text-positive">
               Price: {currency === "USD"
                 ? `$${(fetchedPrice * usdCadRate).toLocaleString("en-CA", { minimumFractionDigits: 2 })} CAD`
                 : `$${fetchedPrice.toLocaleString("en-CA", { minimumFractionDigits: 2 })}`}
             </p>
           )}
           {tickerStatus === "invalid" && ticker.trim() && (
-            <p className="mt-1 text-[11px] text-negative">
+            <p className="mt-1 text-[0.6875rem] text-negative">
               Ticker not found — check the symbol and asset class
             </p>
           )}
           {tickerStatus === "unknown" && ticker.trim() && (
-            <p className="mt-1 text-[11px] text-ink-faint">
+            <p className="mt-1 text-[0.6875rem] text-ink-faint">
               Could not check right now — the daily lookup allowance is used up
             </p>
           )}
@@ -807,7 +807,7 @@ function HoldingFormInner({
         )}
       </div>
       {initial ? (
-        <p className="mt-3 text-[11px] text-ink-faint">
+        <p className="mt-3 text-[0.6875rem] text-ink-faint">
           {heldIn.length > 1
             ? `Saved for all ${heldIn.length} accounts holding ${initial.ticker}: ${heldIn.join(", ")}. `
             : ""}
@@ -815,7 +815,7 @@ function HoldingFormInner({
           <span className="text-ink-dim">Log trades</span> to change a position.
         </p>
       ) : (
-        <p className="mt-3 text-[11px] text-ink-faint">
+        <p className="mt-3 text-[0.6875rem] text-ink-faint">
           This records a position you already hold, so the account&rsquo;s cash
           balance is left alone. Use{" "}
           <span className="text-ink-dim">Import trades</span>
@@ -977,7 +977,7 @@ function TradeTickerInput({
         )}
         {status === "unknown" && row.ticker.trim() && (
           <span
-            className="text-[11px] text-ink-faint"
+            className="text-[0.6875rem] text-ink-faint"
             title="Could not check this ticker — the daily lookup allowance is used up. The trade will still record."
           >
             ?
@@ -1444,13 +1444,13 @@ export function TradeEntry({
 
       {/* USD CAD equivalent row */}
       {rows.some((r) => r.currency === "USD") && (
-        <p className="text-[11px] text-ink-faint">
+        <p className="text-[0.6875rem] text-ink-faint">
           USD trades use a {usdCadRate.toFixed(2)} CAD/USD rate. Enter the exact CAD amount if you know it.
         </p>
       )}
 
       {active.length > 0 && (bought > 0 || sold > 0 || received > 0) && (
-        <p className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-faint">
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-[0.6875rem] text-ink-faint">
           {bought > 0 && (
             <span>
               Bought{" "}

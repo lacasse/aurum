@@ -45,12 +45,12 @@ export function StatCard({
           </Badge>
         ) : null}
         {deltaValue ? (
-          <span className="text-[11px] font-medium tabular-nums text-ink-dim">
+          <span className="text-[0.6875rem] font-medium tabular-nums text-ink-dim">
             {deltaValue}
           </span>
         ) : null}
         {deltaLabel ? (
-          <span className="text-[11px] text-ink-faint">{deltaLabel}</span>
+          <span className="text-[0.6875rem] text-ink-faint">{deltaLabel}</span>
         ) : null}
       </div>
       {spark && spark.length > 1 && sparkKey ? (

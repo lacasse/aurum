@@ -136,19 +136,19 @@ export default function TransactionsPage() {
         {/* Summary chips */}
         <div className="grid grid-cols-3 gap-4">
           <Card className="p-4">
-            <p className="text-[11px] font-medium text-ink-dim">Money in</p>
+            <p className="text-[0.6875rem] font-medium text-ink-dim">Money in</p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-positive">
               +{fmtCAD(totals.income, 2)}
             </p>
           </Card>
           <Card className="p-4">
-            <p className="text-[11px] font-medium text-ink-dim">Money out</p>
+            <p className="text-[0.6875rem] font-medium text-ink-dim">Money out</p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-negative">
               −{fmtCAD(totals.expenses, 2)}
             </p>
           </Card>
           <Card className="p-4">
-            <p className="text-[11px] font-medium text-ink-dim">Net</p>
+            <p className="text-[0.6875rem] font-medium text-ink-dim">Net</p>
             <p
               className={cn(
                 "mt-1 text-lg font-semibold tabular-nums",
@@ -223,7 +223,7 @@ export default function TransactionsPage() {
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium">{r.payee}</span>
-                      <span className="block truncate text-[11px] text-ink-faint">
+                      <span className="block truncate text-[0.6875rem] text-ink-faint">
                         {RECURRENCE_LABELS[r.frequency]} · {from} → {to}
                         {r.active
                           ? ` · next ${labelDate(r.nextDate)}`
@@ -333,7 +333,7 @@ export default function TransactionsPage() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-sm">
                 <thead>
-                  <tr className="border-b border-line text-left text-[11px] uppercase tracking-wider text-ink-faint">
+                  <tr className="border-b border-line text-left text-[0.6875rem] uppercase tracking-wider text-ink-faint">
                     <th className="px-4 py-3 font-medium">Date</th>
                     <th className="px-4 py-3 font-medium">Payee</th>
                     <th className="px-4 py-3 font-medium">Category</th>
@@ -356,7 +356,7 @@ export default function TransactionsPage() {
                       <td className="max-w-[220px] px-4 py-3">
                         <span className="block truncate font-medium">{t.payee}</span>
                         {t.note ? (
-                          <span className="block truncate text-[11px] text-ink-faint">
+                          <span className="block truncate text-[0.6875rem] text-ink-faint">
                             {t.note}
                           </span>
                         ) : null}
