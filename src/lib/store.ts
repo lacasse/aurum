@@ -194,11 +194,6 @@ function synthHistory(ticker: string, price: number): number[] {
 
 const report = (err: unknown) => console.error("[sync]", err);
 
-/** Convert a value to CAD based on currency and current rate. */
-function toCad(value: number, currency: string, rate: number): number {
-  return currency === "USD" ? Math.round(value * rate * 100) / 100 : value;
-}
-
 /** Compute CAD fields for a holding given the current FX rate. */
 function computeCadFields(
   h: Pick<Holding, "price" | "avgCost" | "dividendsReceived" | "history" | "currency"> & {
