@@ -131,7 +131,7 @@ export default function TaxPage() {
             <div className="overflow-x-auto px-2 pb-3">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-[11px] uppercase tracking-wider text-ink-faint">
+                  <tr className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
                     <th className="px-3 py-2 text-left font-medium">Date</th>
                     <th className="px-3 py-2 text-left font-medium">Security</th>
                     <th className="px-3 py-2 text-right font-medium">Units</th>
@@ -183,7 +183,7 @@ export default function TaxPage() {
           <div className="overflow-x-auto px-2 pb-3">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wider text-ink-faint">
+                <tr className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
                   <th className="px-3 py-2 text-left font-medium">Year</th>
                   <th className="px-3 py-2 text-right font-medium">Proceeds</th>
                   <th className="px-3 py-2 text-right font-medium">Cost base</th>
