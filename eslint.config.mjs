@@ -15,6 +15,26 @@ const eslintConfig = defineConfig([
     // Compiled output of `npm test`.
     ".test-build/**",
   ]),
+  {
+    rules: {
+      /*
+       * A leading underscore is how this codebase says "named only to be left
+       * out" — the two CAD overrides pulled off a holding input so the rest can
+       * be spread as a Holding. Warning about them asks for the name to be
+       * removed, which is the one thing destructuring will not allow.
+       */
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+          ignoreRestSiblings: true,
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;
