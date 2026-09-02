@@ -130,7 +130,7 @@ function StepIndicator({
             >
               <span
                 className={cn(
-                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
+                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[0.6875rem] font-semibold",
                   done
                     ? "bg-positive/20 text-positive"
                     : here
@@ -198,7 +198,7 @@ function StepBody({
       <p className="mt-1 text-xs leading-relaxed text-ink-faint">{lead}</p>
       {children ? <div className="mt-4">{children}</div> : null}
       {note ? (
-        <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">{note}</p>
+        <p className="mt-3 text-[0.6875rem] leading-relaxed text-ink-faint">{note}</p>
       ) : null}
       <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
         {onBack ? (
@@ -404,7 +404,7 @@ function ImportStep({
           <p className="text-sm font-medium">
             {busy ? "Reading…" : "Drop CSV files here, or click to browse"}
           </p>
-          <p className="text-[11px] text-ink-faint">
+          <p className="text-[0.6875rem] text-ink-faint">
             Whichever way your bank signs its amounts, the sign is worked out
             from the file. For anything older than {label}, use{" "}
             <Link href="/import" className="text-brand underline-offset-2 hover:underline">
@@ -423,7 +423,7 @@ function ImportStep({
                 className="rounded-lg border border-line bg-elevated/40 px-3 py-2"
               >
                 <p className="truncate text-xs font-medium">{f.fileName}</p>
-                <p className="mt-0.5 text-[11px] text-ink-faint">
+                <p className="mt-0.5 text-[0.6875rem] text-ink-faint">
                   {f.error ? (
                     <span className="text-negative">{f.error}</span>
                   ) : (
@@ -614,7 +614,7 @@ function IncomeStep({
 
       {earned.length > 0 ? (
         <div className="mt-5">
-          <p className="mb-2 text-[11px] text-ink-faint">
+          <p className="mb-2 text-[0.6875rem] text-ink-faint">
             Rows the import read as income. Uncheck anything that is not income
             — a transfer between your own accounts looks much like pay — or
             move it to the right heading.
@@ -622,7 +622,7 @@ function IncomeStep({
           <div className="max-h-80 overflow-auto rounded-lg border border-line">
             <table className="w-full min-w-[520px] text-xs">
               <thead className="sticky top-0 bg-surface">
-                <tr className="border-b border-line text-left text-[10px] uppercase tracking-wider text-ink-faint">
+                <tr className="border-b border-line text-left text-[0.625rem] uppercase tracking-wider text-ink-faint">
                   <th className="w-8 px-2 py-1.5 font-medium">Keep</th>
                   <th className="px-2 py-1.5 font-medium">Date</th>
                   <th className="px-2 py-1.5 font-medium">Source</th>
@@ -667,7 +667,7 @@ function IncomeStep({
                         }
                         aria-label={`Category for ${r.payee}`}
                         className={cn(
-                          "h-7 w-auto py-0 text-[11px]",
+                          "h-7 w-auto py-0 text-[0.6875rem]",
                           !r.confident && "border-amber-500/50",
                         )}
                       >
@@ -788,7 +788,7 @@ function ExpensesStep({
         <div className="max-h-96 overflow-auto rounded-lg border border-line">
           <table className="w-full min-w-[520px] text-xs">
             <thead className="sticky top-0 bg-surface">
-              <tr className="border-b border-line text-left text-[10px] uppercase tracking-wider text-ink-faint">
+              <tr className="border-b border-line text-left text-[0.625rem] uppercase tracking-wider text-ink-faint">
                 <th className="w-8 px-2 py-1.5 font-medium">Keep</th>
                 <th className="px-2 py-1.5 font-medium">Date</th>
                 <th className="px-2 py-1.5 font-medium">Merchant</th>
@@ -829,7 +829,7 @@ function ExpensesStep({
                       onChange={(e) => patch(r.id, { category: e.target.value })}
                       aria-label={`Category for ${r.payee}`}
                       className={cn(
-                        "h-7 w-auto py-0 text-[11px]",
+                        "h-7 w-auto py-0 text-[0.6875rem]",
                         // Amber where the guess was weak, so the eye goes to
                         // the rows actually worth checking.
                         !r.confident && "border-amber-500/50",
@@ -849,7 +849,7 @@ function ExpensesStep({
                         }
                         aria-label={`Debt paid by ${r.payee}`}
                         className={cn(
-                          "mt-1 h-7 w-auto py-0 text-[11px]",
+                          "mt-1 h-7 w-auto py-0 text-[0.6875rem]",
                           !r.debtAccountId && "border-amber-500/50",
                         )}
                       >
@@ -1272,7 +1272,7 @@ function ReviewStep({
                 <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-positive" />
                 <div className="min-w-0">
                   <p className="text-xs font-medium">{p.label}</p>
-                  <p className="text-[11px] text-ink-faint">{p.detail}</p>
+                  <p className="text-[0.6875rem] text-ink-faint">{p.detail}</p>
                 </div>
               </li>
             ))}
@@ -1281,9 +1281,9 @@ function ReviewStep({
       </div>
 
       {error ? (
-        <p className="mt-3 text-[11px] text-negative">{error}</p>
+        <p className="mt-3 text-[0.6875rem] text-negative">{error}</p>
       ) : (
-        <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">
+        <p className="mt-3 text-[0.6875rem] leading-relaxed text-ink-faint">
           Closing this dialog before saving discards all of it, and nothing in
           the record changes.
         </p>

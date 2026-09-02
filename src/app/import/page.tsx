@@ -446,7 +446,7 @@ export default function ImportPage() {
                     <FileText size={15} className="mt-0.5 shrink-0 text-ink-faint" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-medium">{f.fileName}</p>
-                      <p className="mt-0.5 text-[11px] text-ink-faint">
+                      <p className="mt-0.5 text-[0.6875rem] text-ink-faint">
                         {f.error ? (
                           <span className="text-negative">{f.error}</span>
                         ) : (
@@ -502,7 +502,7 @@ export default function ImportPage() {
           <>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <Card className="p-3">
-                <p className="text-[11px] font-medium text-ink-dim">Money in</p>
+                <p className="text-[0.6875rem] font-medium text-ink-dim">Money in</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-positive">
                   {fmtCAD(
                     includedCash
@@ -512,7 +512,7 @@ export default function ImportPage() {
                 </p>
               </Card>
               <Card className="p-3">
-                <p className="text-[11px] font-medium text-ink-dim">Money out</p>
+                <p className="text-[0.6875rem] font-medium text-ink-dim">Money out</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-negative">
                   {fmtCAD(
                     includedCash
@@ -522,13 +522,13 @@ export default function ImportPage() {
                 </p>
               </Card>
               <Card className="p-3">
-                <p className="text-[11px] font-medium text-ink-dim">Trades</p>
+                <p className="text-[0.6875rem] font-medium text-ink-dim">Trades</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums">
                   {includedTrades.filter((r) => r.type === "buy" || r.type === "sell").length}
                 </p>
               </Card>
               <Card className="p-3">
-                <p className="text-[11px] font-medium text-ink-dim">Already known</p>
+                <p className="text-[0.6875rem] font-medium text-ink-dim">Already known</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-ink-faint">
                   {dupCash + dupTrades}
                 </p>
@@ -540,7 +540,7 @@ export default function ImportPage() {
                 <p className="flex items-center gap-2 text-xs font-medium text-amber-400">
                   <AlertTriangle size={14} /> Needs a person
                 </p>
-                <ul className="mt-2 space-y-1 text-[11px] text-ink-dim">
+                <ul className="mt-2 space-y-1 text-[0.6875rem] text-ink-dim">
                   {unmatchedRegistrations.map((r) => (
                     <li key={r}>
                       No account is marked {REGISTRATION_LABELS[r]} — those trades cannot
@@ -571,7 +571,7 @@ export default function ImportPage() {
                         <FileText size={14} className="shrink-0 text-ink-faint" />
                         <span className="min-w-0 flex-1 truncate text-xs">
                           {f.fileName}
-                          <span className="ml-2 text-[11px] text-ink-faint">
+                          <span className="ml-2 text-[0.6875rem] text-ink-faint">
                             {labelFor(f.kind)} · {f.cash.length} row
                             {f.cash.length === 1 ? "" : "s"}
                           </span>
@@ -611,7 +611,7 @@ export default function ImportPage() {
                 />
                 <div className="max-h-[28rem] overflow-auto px-3 pb-4">
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-surface text-[11px] uppercase tracking-wider text-ink-faint">
+                    <thead className="sticky top-0 bg-surface text-[0.6875rem] uppercase tracking-wider text-ink-faint">
                       <tr>
                         <th className="px-2 py-2 text-left">Include</th>
                         <th className="px-2 py-2 text-left">Date</th>
@@ -643,7 +643,7 @@ export default function ImportPage() {
                           <td className="max-w-[16rem] truncate px-2 py-1.5" title={r.payee}>
                             {r.payee}
                             {r.dup && (
-                              <Badge className="ml-2 text-[9px]">already have it</Badge>
+                              <Badge className="ml-2 text-[0.5625rem]">already have it</Badge>
                             )}
                           </td>
                           <td className="px-2 py-1.5">
@@ -652,7 +652,7 @@ export default function ImportPage() {
                               onChange={(e) =>
                                 changeType(r, e.target.value as ImportedRow["type"])
                               }
-                              className="h-7 w-auto py-0 text-[11px]"
+                              className="h-7 w-auto py-0 text-[0.6875rem]"
                               aria-label={`Type for ${r.payee}`}
                             >
                               <option value="expense">Expense</option>
@@ -664,7 +664,7 @@ export default function ImportPage() {
                               value={r.category}
                               onChange={(e) => updateCash(r.id, { category: e.target.value })}
                               className={cn(
-                                "h-7 w-auto py-0 text-[11px]",
+                                "h-7 w-auto py-0 text-[0.6875rem]",
                                 !r.confident && "border-amber-500/50",
                               )}
                               aria-label={`Category for ${r.payee}`}
@@ -686,7 +686,7 @@ export default function ImportPage() {
                               ))}
                             </Select>
                           </td>
-                          <td className="whitespace-nowrap px-2 py-1.5 text-[11px] text-ink-faint">
+                          <td className="whitespace-nowrap px-2 py-1.5 text-[0.6875rem] text-ink-faint">
                             {accounts.find((a) => a.id === accountForRow(r))?.name ?? "—"}
                           </td>
                           <td
@@ -736,13 +736,13 @@ export default function ImportPage() {
                           <span className="text-xs font-medium">
                             {a.date} · {a.from} → {a.to}
                           </span>
-                          <span className="text-[11px] text-ink-faint">
+                          <span className="text-[0.6875rem] text-ink-faint">
                             {a.registration
                               ? REGISTRATION_LABELS[a.registration]
                               : a.registrationRaw}
                           </span>
                           {a.kind === "demerger" && (
-                            <label className="ml-auto flex items-center gap-2 text-[11px] text-ink-dim">
+                            <label className="ml-auto flex items-center gap-2 text-[0.6875rem] text-ink-dim">
                               Cost basis moving
                               <Input
                                 type="number"
@@ -755,14 +755,14 @@ export default function ImportPage() {
                                     allocationPct: Number(e.target.value) || 0,
                                   })
                                 }
-                                className="h-7 w-20 py-0 text-right text-[11px]"
+                                className="h-7 w-20 py-0 text-right text-[0.6875rem]"
                                 aria-label={`Percentage of ${a.from} cost basis moving to ${a.to}`}
                               />
                               %
                             </label>
                           )}
                         </div>
-                        <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+                        <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
                           {parent
                             ? describeAction(a, applied?.movedBasis ?? 0)
                             : `No ${a.from} position in this account to divide — add it first, or leave this out.`}
@@ -782,7 +782,7 @@ export default function ImportPage() {
                 />
                 <div className="max-h-[28rem] overflow-auto px-3 pb-4">
                   <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-surface text-[11px] uppercase tracking-wider text-ink-faint">
+                    <thead className="sticky top-0 bg-surface text-[0.6875rem] uppercase tracking-wider text-ink-faint">
                       <tr>
                         <th className="px-2 py-2 text-left">Include</th>
                         <th className="px-2 py-2 text-left">Date</th>
@@ -814,7 +814,7 @@ export default function ImportPage() {
                             <span className="font-medium">{r.ticker}</span>{" "}
                             <span className="text-ink-faint">{r.type ?? r.typeRaw}</span>
                             {r.duplicate && (
-                              <Badge className="ml-2 text-[9px]">already have it</Badge>
+                              <Badge className="ml-2 text-[0.5625rem]">already have it</Badge>
                             )}
                           </td>
                           <td className="px-2 py-1.5 text-ink-dim">
@@ -828,7 +828,7 @@ export default function ImportPage() {
                           <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">
                             {fmtCAD(r.amountCad)}
                             {r.currency === "USD" && (
-                              <span className="ml-1 text-[10px] text-info">USD</span>
+                              <span className="ml-1 text-[0.625rem] text-info">USD</span>
                             )}
                           </td>
                         </tr>
@@ -889,7 +889,7 @@ export default function ImportPage() {
 
         {step === "upload" && files.length === 0 && (
           <Card className="p-4">
-            <p className="text-[11px] leading-relaxed text-ink-faint">
+            <p className="text-[0.6875rem] leading-relaxed text-ink-faint">
               <Trash2 size={11} className="mr-1 inline" />
               Nothing is written until you press Import on the review screen, and
               rows that match something already recorded arrive switched off.

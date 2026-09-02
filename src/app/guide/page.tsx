@@ -59,7 +59,7 @@ function Table({ children }: { children: ReactNode }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
-        <thead className="text-[11px] uppercase tracking-wider text-ink-faint">
+        <thead className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
           <tr>
             <th className="pb-1 pr-4 font-medium">Figure</th>
             <th className="pb-1 pr-4 font-medium">Where it comes from</th>
@@ -103,7 +103,7 @@ export default function GuidePage() {
             <strong className="text-ink">Your contributions</strong> are what
             came off your pay. The app already knows them — they arrive with
             every import as income in the{" "}
-            <code className="rounded bg-elevated px-1 py-0.5 text-[12px]">
+            <code className="rounded bg-elevated px-1 py-0.5 text-[0.75rem]">
               RSP / Pension
             </code>{" "}
             category — so nothing needs entering. The gap between the two is

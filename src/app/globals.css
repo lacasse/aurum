@@ -59,6 +59,19 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/*
+ * One notch up from the browser's 16px default.
+ *
+ * Every size in the app is set in rem — the Tailwind scale is, and the handful
+ * of one-off sizes were converted from px so they would move with this rather
+ * than stay behind while everything around them grew. So this is the only
+ * place the type scale is decided, and 6.25% is enough to read easier without
+ * reflowing a single layout.
+ */
+html {
+  font-size: 17px;
+}
+
 body {
   background: var(--background);
   color: var(--ink);

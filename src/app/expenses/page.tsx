@@ -195,7 +195,7 @@ export default function ExpensesPage() {
     >
       <div className="space-y-4">
         {selected !== latest && (
-          <p className="px-1 text-[11px] text-ink-faint">
+          <p className="px-1 text-[0.6875rem] text-ink-faint">
             Showing {labelMonth(selected)}. The record runs to {labelMonth(latest!)}.
           </p>
         )}
@@ -257,7 +257,7 @@ export default function ExpensesPage() {
           />
         </div>
 
-        <p className="px-1 text-[11px] leading-relaxed text-ink-faint">
+        <p className="px-1 text-[0.6875rem] leading-relaxed text-ink-faint">
           {summary.rank !== null && (
             <>
               {labelMonth(selected)} was the{" "}
@@ -320,7 +320,7 @@ export default function ExpensesPage() {
               />
             </div>
           </div>
-          <p className="px-5 pb-4 text-[11px] leading-relaxed text-ink-faint">
+          <p className="px-5 pb-4 text-[0.6875rem] leading-relaxed text-ink-faint">
             Debt repayment is left out of every total on this page. It is money
             moving from one side of the balance sheet to the other rather than
             money spent, and counting it makes a year of paying down a loan look
@@ -445,7 +445,7 @@ export default function ExpensesPage() {
             </div>
           )}
           {car && car.months > 0 && (
-            <p className="px-5 pb-4 text-[11px] leading-relaxed text-ink-faint">
+            <p className="px-5 pb-4 text-[0.6875rem] leading-relaxed text-ink-faint">
               Divided by every month of ownership, including the{" "}
               {car.months - car.monthsWithSpend} with no charge at all — a car
               costs what it costs in the months it is not filled up, and
@@ -463,7 +463,7 @@ export default function ExpensesPage() {
           <div className="overflow-x-auto px-2 pb-3">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wider text-ink-faint">
+                <tr className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
                   <th className="px-3 py-2 text-left font-medium">Category</th>
                   <th className="px-3 py-2 text-left font-medium">Kind</th>
                   <th className="px-3 py-2 text-right font-medium">This month</th>
@@ -530,7 +530,7 @@ export default function ExpensesPage() {
               </tbody>
             </table>
           </div>
-          <p className="px-5 pb-4 text-[11px] leading-relaxed text-ink-faint">
+          <p className="px-5 pb-4 text-[0.6875rem] leading-relaxed text-ink-faint">
             <strong className="text-ink-dim">Usual</strong> is the average over
             the months behind this one, which never includes the month being
             read — a month cannot be unusual against an average it is part of.{" "}
@@ -561,7 +561,7 @@ export default function ExpensesPage() {
                 </li>
               ))}
             </ul>
-            <p className="px-5 pb-4 text-[11px] leading-relaxed text-ink-faint">
+            <p className="px-5 pb-4 text-[0.6875rem] leading-relaxed text-ink-faint">
               The categories that turned up in all but at most one of the last{" "}
               {floor.window} months, each at its median month rather than its
               average — one bad vet bill is not a standing cost.{" "}
@@ -621,7 +621,7 @@ function Figure({
       >
         {value}
       </div>
-      <span className="text-[11px] text-ink-faint">{note}</span>
+      <span className="text-[0.6875rem] text-ink-faint">{note}</span>
     </div>
   );
 }
@@ -763,7 +763,7 @@ function CarModal({
             ))}
           </div>
         </Field>
-        <p className="text-[11px] leading-relaxed text-ink-faint">
+        <p className="text-[0.6875rem] leading-relaxed text-ink-faint">
           If the car shares a category with anything else — a transit pass under
           Transport, say — this figure carries that too. Splitting it out means
           giving the car its own category.

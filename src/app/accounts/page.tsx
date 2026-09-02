@@ -293,7 +293,7 @@ export default function AccountsPage() {
             />
             <div className="grid gap-4 px-5 pb-5 sm:grid-cols-2 lg:grid-cols-4">
               <div>
-                <p className="text-[11px] text-ink-faint">Transfer value</p>
+                <p className="text-[0.6875rem] text-ink-faint">Transfer value</p>
                 <p className="text-lg font-semibold tabular-nums">
                   {fmtCAD(summary.value)}
                 </p>
@@ -302,16 +302,16 @@ export default function AccountsPage() {
                 ) : null}
               </div>
               <div>
-                <p className="text-[11px] text-ink-faint">You have contributed</p>
+                <p className="text-[0.6875rem] text-ink-faint">You have contributed</p>
                 <p className="text-lg font-semibold tabular-nums">
                   {fmtCAD(summary.contributed)}
                 </p>
-                <p className="mt-1 text-[11px] text-ink-faint">
+                <p className="mt-1 text-[0.6875rem] text-ink-faint">
                   {fmtCAD(summary.monthly)} a month lately
                 </p>
               </div>
               <div>
-                <p className="text-[11px] text-ink-faint">Beyond contributions</p>
+                <p className="text-[0.6875rem] text-ink-faint">Beyond contributions</p>
                 <p
                   className={
                     "text-lg font-semibold tabular-nums " +
@@ -320,18 +320,18 @@ export default function AccountsPage() {
                 >
                   {fmtSignedCAD(summary.beyondContributions)}
                 </p>
-                <p className="mt-1 text-[11px] text-ink-faint">
+                <p className="mt-1 text-[0.6875rem] text-ink-faint">
                   employer’s side and growth
                 </p>
               </div>
               <div>
-                <p className="text-[11px] text-ink-faint">If you stay</p>
+                <p className="text-[0.6875rem] text-ink-faint">If you stay</p>
                 <p className="text-lg font-semibold tabular-nums">
                   {account.pensionAnnual
                     ? `${fmtCAD(account.pensionAnnual)}/yr`
                     : "—"}
                 </p>
-                <p className="mt-1 text-[11px] text-ink-faint">
+                <p className="mt-1 text-[0.6875rem] text-ink-faint">
                   {account.pensionService
                     ? `${account.pensionService} years of service`
                     : "Add it from your statement"}
@@ -392,7 +392,7 @@ export default function AccountsPage() {
                     </span>
                     <span>
                       <span className="block text-sm font-semibold">{acc.name}</span>
-                      <span className="block text-[11px] text-ink-faint">
+                      <span className="block text-[0.6875rem] text-ink-faint">
                         {acc.institution}
                         {acc.registration && acc.registration !== "non-registered"
                           ? ` · ${acc.registration}`
@@ -426,7 +426,7 @@ export default function AccountsPage() {
 
                 <div className="mt-3 flex items-end justify-between">
                   <div>
-                    <p className="text-[11px] uppercase tracking-wider text-ink-faint">
+                    <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
                       {liability ? "Owed" : "Balance"}
                     </p>
                     <p className="text-xl font-semibold tabular-nums">
@@ -436,7 +436,7 @@ export default function AccountsPage() {
                         above is converted at today's rate, which is not the
                         rate it will settle at. */}
                     {acc.balanceUSD ? (
-                      <p className="mt-0.5 text-[11px] tabular-nums text-ink-faint">
+                      <p className="mt-0.5 text-[0.6875rem] tabular-nums text-ink-faint">
                         {fmtCAD(acc.balance)} CAD · $
                         {acc.balanceUSD.toLocaleString("en-CA", {
                           minimumFractionDigits: 2,
@@ -463,7 +463,7 @@ export default function AccountsPage() {
                       color={liability ? "#fb7185" : "#8b5cf6"}
                       height={72}
                     />
-                    <div className="mt-1 flex justify-between text-[10px] text-ink-faint">
+                    <div className="mt-1 flex justify-between text-[0.625rem] text-ink-faint">
                       <span>{labelMonth(acc.history[0].month)}</span>
                       <span>{labelMonth(acc.history[acc.history.length - 1].month)}</span>
                     </div>
@@ -482,7 +482,7 @@ export default function AccountsPage() {
           >
             <Plus size={20} />
             <span className="text-sm font-medium">Add an account</span>
-            <span className="max-w-[220px] text-center text-[11px]">
+            <span className="max-w-[220px] text-center text-[0.6875rem]">
               Checking, savings, property, credit cards and loans all count toward net worth
             </span>
           </button>

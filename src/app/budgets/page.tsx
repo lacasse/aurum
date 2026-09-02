@@ -170,7 +170,7 @@ export default function BudgetsPage() {
             <p className="mt-2 text-2xl font-semibold tabular-nums">
               {fmtCAD(totalBudget)}
             </p>
-            <p className="mt-1 text-[11px] text-ink-faint">for this month</p>
+            <p className="mt-1 text-[0.6875rem] text-ink-faint">for this month</p>
           </Card>
           <Card className="p-5">
             <div className="flex items-center justify-between">
@@ -180,7 +180,7 @@ export default function BudgetsPage() {
             <p className="mt-2 text-2xl font-semibold tabular-nums">
               {fmtCAD(totalSpent)}
             </p>
-            <p className="mt-1 text-[11px] text-ink-faint">
+            <p className="mt-1 text-[0.6875rem] text-ink-faint">
               {fmtCAD(totals.expenses)} tracked expenses
             </p>
           </Card>
@@ -199,7 +199,7 @@ export default function BudgetsPage() {
             >
               {fmtCAD(remaining)}
             </p>
-            <p className="mt-1 text-[11px] text-ink-faint">
+            <p className="mt-1 text-[0.6875rem] text-ink-faint">
               {fmtCAD(Math.max(0, remaining))} left to spend
             </p>
           </Card>
@@ -211,7 +211,7 @@ export default function BudgetsPage() {
             <p className="mt-2 text-2xl font-semibold tabular-nums">
               {daysLeftInMonth()}
             </p>
-            <p className="mt-1 text-[11px] text-ink-faint">
+            <p className="mt-1 text-[0.6875rem] text-ink-faint">
               ≈ {fmtCAD(Math.max(0, remaining) / Math.max(1, daysLeftInMonth()))}/day pace
             </p>
           </Card>
@@ -290,7 +290,7 @@ export default function BudgetsPage() {
                   ) : (
                     <>
                       <p className="truncate text-sm font-medium">{r.name}</p>
-                      <p className="text-[11px] text-ink-faint">
+                      <p className="text-[0.6875rem] text-ink-faint">
                         {r.limit > 0 ? (
                           <>
                             {fmtCAD(r.spent, 0)} spent ·{" "}
