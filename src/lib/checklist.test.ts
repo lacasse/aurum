@@ -5,6 +5,7 @@ import {
   describeTrim,
   incomeBoxes,
   partitionByMonth,
+  previousMonthIncome,
   snapshotGaps,
 } from "./checklist";
 import type { ImportedRow } from "./csv";
@@ -86,7 +87,64 @@ describe("describeTrim", () => {
   });
 });
 
+describe("previousMonthIncome", () => {
+  const income = (date: string, amount: number, category: string) =>
+    ({
+      id: date + category,
+      date,
+      amount,
+      type: "income" as const,
+      category,
+      destinationAccountId: "a1",
+      payee: "x",
+    });
+
+  test("only the month before, and only the categories asked for", () => {
+    const rows = [
+      income("2026-07-31", 410, "RSP / Pension"),
+      income("2026-07-31", 5000, "Salary"),
+      income("2026-06-30", 400, "RSP / Pension"),
+    ];
+    assert.deepEqual(previousMonthIncome(rows, "2026-08", ["RSP / Pension"]), {
+      "RSP / Pension": 410,
+    });
+  });
+
+  test("nothing recorded is nothing carried", () => {
+    assert.deepEqual(previousMonthIncome([], "2026-08", ["RSP / Pension"]), {});
+  });
+
+  test("spending under the same heading is not income", () => {
+    const rows = [
+      { ...income("2026-07-31", 410, "RSP / Pension"), type: "expense" as const },
+    ];
+    assert.deepEqual(previousMonthIncome(rows, "2026-08", ["RSP / Pension"]), {});
+  });
+});
+
 describe("incomeBoxes", () => {
+  test("an empty box takes last month's figure when there is one", () => {
+    const boxes = incomeBoxes([], { "RSP / Pension": 410 });
+    const pension = boxes.find((b) => b.category === "RSP / Pension")!;
+    assert.equal(pension.carried, 410);
+    assert.equal(pension.detected, 0);
+  });
+
+  test("what the import found wins over what last month said", () => {
+    const boxes = incomeBoxes(
+      [row("2026-08-31", "income", 425, "RSP / Pension")],
+      { "RSP / Pension": 410 },
+    );
+    const pension = boxes.find((b) => b.category === "RSP / Pension")!;
+    assert.equal(pension.detected, 425);
+    assert.equal(pension.carried, undefined);
+  });
+
+  test("nothing to carry leaves the box empty", () => {
+    const boxes = incomeBoxes([], {});
+    assert.ok(boxes.every((b) => b.carried === undefined));
+  });
+
   test("the four standard boxes are always offered, detected or not", () => {
     const boxes = incomeBoxes([]);
     assert.deepEqual(
@@ -229,8 +287,8 @@ describe("describeGaps", () => {
       { month: "2026-03", kind: "missing", positions: 0, expected: 11 },
       { month: "2026-07", kind: "missing", positions: 0, expected: 11 },
     ]);
-    assert.ok(s.includes("Mar ’26"));
-    assert.ok(s.includes("Jul ’26"));
+    assert.ok(s.includes("Mar 2026"));
+    assert.ok(s.includes("Jul 2026"));
   });
 
   test("keeps the two kinds of hole apart", () => {

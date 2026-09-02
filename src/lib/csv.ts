@@ -33,6 +33,15 @@ export interface ImportedRow {
    * file as a whole.
    */
   explicitType: boolean;
+  /**
+   * For a repayment, the debt it pays off.
+   *
+   * A repayment is spending in the sense that the money is gone, but it is
+   * also the only kind of spending that changes what is owed — and nothing in
+   * a statement line says which debt it went to. Chosen by hand, and used as
+   * the far side of the transaction so the balance actually moves.
+   */
+  debtAccountId?: string;
 }
 
 export interface ParseResult {

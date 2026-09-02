@@ -6,7 +6,8 @@ import {
   parseCsvRecords,
 } from "./csv";
 import { TradeRow, parseTradeCsv } from "./trades";
-import { isActivityExport, parseActivitiesCsv } from "./activities";
+import { CHEQUING_HINT, isActivityExport, parseActivitiesCsv } from "./activities";
+import { isInvestmentAccount, type Account, type Registration } from "./types";
 import { CorporateAction } from "./corporate-actions";
 
 /**
@@ -57,6 +58,29 @@ function isTradeLog(fields: string[] | undefined): boolean {
 
 function readText(file: File): Promise<string> {
   return file.text();
+}
+
+/**
+ * The account a row belongs to, when the file itself said which.
+ *
+ * An activity export names the account on every line — the chequing account,
+ * the RRSP, the TFSA — so nothing downstream should be guessing. Null where
+ * the row said nothing, which is the case for a card statement: those are one
+ * account from top to bottom and the file decides, not the row.
+ */
+export function accountForHint(
+  hint: string | undefined,
+  accounts: Account[],
+): string | null {
+  if (!hint) return null;
+  if (hint === CHEQUING_HINT) {
+    return accounts.find((a) => a.kind === "checking")?.id ?? null;
+  }
+  return (
+    accounts.find(
+      (a) => isInvestmentAccount(a.kind) && a.registration === (hint as Registration),
+    )?.id ?? null
+  );
 }
 
 export async function routeFile(

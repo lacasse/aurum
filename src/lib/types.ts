@@ -357,6 +357,18 @@ export const INCOME_CATEGORIES = [
 /** Category given to transfers, which are not spending and not income. */
 export const TRANSFER_CATEGORY = "Transfer";
 
+/**
+ * The same categories, in the order a dropdown should show them.
+ *
+ * The lists themselves stay in their written order, because the first entry of
+ * each is the default a new transaction opens on — Housing and Salary, not
+ * whatever happens to sort first. Sorting is a display concern, so it happens
+ * here, at the point of display.
+ */
+export function alphabetical(categories: readonly string[]): string[] {
+  return [...categories].sort((a, b) => a.localeCompare(b));
+}
+
 export function categoriesFor(type: TxnType): readonly string[] {
   if (type === "transfer") return [TRANSFER_CATEGORY];
   return type === "income" ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;

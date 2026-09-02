@@ -1,8 +1,10 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
+  baseTicker,
   isBlankTrade,
   newPositionsNeeded,
+  resolveTicker,
   planTrades,
   type TradeInput,
 } from "./trade-batch";
@@ -74,6 +76,50 @@ describe("newPositionsNeeded", () => {
 
   test("one ticker across several rows is asked about once", () => {
     assert.equal(newPositionsNeeded([row(), row()], []).length, 1);
+  });
+});
+
+describe("resolveTicker", () => {
+  test("the venue is not part of the symbol", () => {
+    assert.equal(baseTicker("TSLA.NEO"), "TSLA");
+    assert.equal(baseTicker("xeqt.to"), "XEQT");
+    assert.equal(baseTicker("BTCX-B.TO"), "BTCX-B");
+  });
+
+  test("a symbol held without its venue is not a new position", () => {
+    const held = [holding({ ticker: "XEQT" })];
+    assert.equal(resolveTicker("XEQT.TO", held, "acct-1"), "XEQT");
+    assert.deepEqual(newPositionsNeeded([row()], held), []);
+  });
+
+  test("and the other way round", () => {
+    const held = [holding({ ticker: "TSLA.NEO" })];
+    assert.equal(resolveTicker("TSLA", held, "acct-1"), "TSLA.NEO");
+  });
+
+  test("an exact match wins over a venue-less one", () => {
+    const held = [holding({ id: "a", ticker: "MA" }), holding({ id: "b", ticker: "MA.NEO" })];
+    assert.equal(resolveTicker("MA.NEO", held, "acct-1"), "MA.NEO");
+  });
+
+  test("two spellings in different accounts are decided by the account", () => {
+    const held = [
+      holding({ id: "a", ticker: "CAGE", accountId: "acct-1" }),
+      holding({ id: "b", ticker: "CAGE.TO", accountId: "acct-2" }),
+    ];
+    assert.equal(resolveTicker("CAGE.V", held, "acct-2"), "CAGE.TO");
+  });
+
+  test("an ambiguous symbol is left alone rather than guessed", () => {
+    const held = [
+      holding({ id: "a", ticker: "CAGE", accountId: "acct-9" }),
+      holding({ id: "b", ticker: "CAGE.TO", accountId: "acct-9" }),
+    ];
+    assert.equal(resolveTicker("CAGE.V", held, "acct-1"), "CAGE.V");
+  });
+
+  test("a symbol nobody holds is still new", () => {
+    assert.equal(resolveTicker("NVDA", [holding()], "acct-1"), "NVDA");
   });
 });
 

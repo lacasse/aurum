@@ -90,7 +90,7 @@ function windowed<T>(rows: T[], range: RangeKey): T[] {
   return Number.isFinite(n) ? rows.slice(-n) : rows;
 }
 
-/** "since Feb ’22" for the full run, "last 6 months" for a window of it. */
+/** "since Feb 2022" for the full run, "last 6 months" for a window of it. */
 function rangeLabel(range: RangeKey, points: { label: string }[]): string {
   if (range !== "ALL") return `last ${points.length} months`;
   return points.length > 0 ? `since ${points[0].label}` : "all time";

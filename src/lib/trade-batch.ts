@@ -82,6 +82,48 @@ export function isBlankTrade(row: TradeInput): boolean {
  * ticker rather than guessed: the asset class picks the price feed, and a coin
  * routed as an equity comes back rejected.
  */
+/**
+ * The exchange suffix a Canadian broker puts on a symbol, which the app's own
+ * ticker may or may not carry.
+ */
+const EXCHANGE_SUFFIX = /\.(TO|TSX|NEO|NE|V|CN|CNQ|US)$/;
+
+/** "TSLA.NEO" -> "TSLA". The symbol without the venue it traded on. */
+export function baseTicker(ticker: string): string {
+  return ticker.trim().toUpperCase().replace(EXCHANGE_SUFFIX, "");
+}
+
+/**
+ * The ticker an imported row is really about, in the spelling already held.
+ *
+ * A broker's activity export writes the venue into the symbol — TSLA.NEO,
+ * XEQT.TO — and a position opened under the plain symbol then looks like an
+ * asset nobody owns, so a routine buy asked to describe a "new position" and
+ * opened a second holding beside the first. Matching on the symbol without its
+ * venue is what stops that.
+ *
+ * An exact match always wins. Where the venue-less symbol matches more than one
+ * holding, the one in the same account decides; failing that the row is left
+ * exactly as written, because guessing which of two positions a trade belongs
+ * to is worse than asking.
+ */
+export function resolveTicker(
+  raw: string,
+  holdings: Holding[],
+  accountId?: string,
+): string {
+  const t = raw.trim().toUpperCase();
+  if (holdings.some((h) => h.ticker.toUpperCase() === t)) return t;
+
+  const base = baseTicker(t);
+  const matches = holdings.filter((h) => baseTicker(h.ticker) === base);
+  if (matches.length === 0) return t;
+  if (matches.length === 1) return matches[0].ticker.toUpperCase();
+
+  const inAccount = matches.filter((h) => h.accountId === accountId);
+  return inAccount.length === 1 ? inAccount[0].ticker.toUpperCase() : t;
+}
+
 export function newPositionsNeeded(
   rows: TradeInput[],
   holdings: Holding[],
@@ -90,7 +132,7 @@ export function newPositionsNeeded(
   const seen = new Set<string>();
   for (const row of rows) {
     if (isBlankTrade(row)) continue;
-    const ticker = row.ticker.trim().toUpperCase();
+    const ticker = resolveTicker(row.ticker, holdings, row.accountId);
     if ((row.action !== "buy" && row.action !== "reward") || seen.has(ticker)) continue;
     if (holdings.some((h) => h.ticker.toUpperCase() === ticker)) continue;
     seen.add(ticker);
@@ -167,7 +209,7 @@ export function planTrades(
   };
 
   for (const row of active) {
-    const ticker = row.ticker.trim().toUpperCase();
+    const ticker = resolveTicker(row.ticker, holdings, row.accountId);
     const qty = Number(row.quantity);
     const px = Number(row.price);
     const isUsd = row.currency === "USD";

@@ -1,6 +1,12 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { isActivityExport, parseActivitiesCsv } from "./activities";
+import {
+  CHEQUING_HINT,
+  isActivityExport,
+  parseActivitiesCsv,
+} from "./activities";
+import { accountForHint } from "./import-router";
+import type { Account } from "./types";
 
 const HEADER =
   "effective_date,effective_time,settlement_date,account_id,account_type,activity_type,activity_sub_type,description,direction,symbol,name,currency,quantity,unit_price,commission,net_cash_amount";
@@ -26,6 +32,40 @@ describe("isActivityExport", () => {
       isActivityExport(["transaction_date", "merchant", "amount", "category"]),
       false,
     );
+  });
+});
+
+describe("the account a row names", () => {
+  const accounts = [
+    { id: "chq", name: "Main Account", kind: "checking" },
+    { id: "visa", name: "Visa", kind: "credit" },
+    { id: "rrsp", name: "RRSP", kind: "investment", registration: "RRSP" },
+    { id: "tfsa", name: "TFSA", kind: "investment", registration: "TFSA" },
+  ] as unknown as Account[];
+
+  test("a chequing row says so, rather than saying nothing", () => {
+    const res = parse(
+      '2026-08-12,22:31:55,,WK2,Chequing,MoneyMovement,AFT_OUT,Pre-authorized Debit,,,,CAD,-200,,,-200',
+    );
+    assert.equal(res.cash.length, 1);
+    assert.equal(res.cash[0].accountHint, CHEQUING_HINT);
+    assert.equal(accountForHint(res.cash[0].accountHint, accounts), "chq");
+  });
+
+  test("a withholding tax belongs to the plan that paid it", () => {
+    const res = parse(
+      '2026-08-05,00:00:00,,HQ0,RRSP,Tax,NRT,Non-resident tax,,,,USD,-1.28,,,-1.28',
+    );
+    assert.equal(res.cash[0].accountHint, "RRSP");
+    assert.equal(accountForHint(res.cash[0].accountHint, accounts), "rrsp");
+  });
+
+  test("a row that named no account is nobody's to guess", () => {
+    assert.equal(accountForHint(undefined, accounts), null);
+  });
+
+  test("a registration nobody holds does not fall back to the wrong account", () => {
+    assert.equal(accountForHint("FHSA", accounts), null);
   });
 });
 

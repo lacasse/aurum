@@ -54,6 +54,17 @@ function registrationOf(accountType: string): Registration | null {
   return null;
 }
 
+/**
+ * What `accountHint` says for a row from the everyday bank account.
+ *
+ * The other hints are registrations — TFSA, RRSP — which name an investment
+ * account. Chequing has no registration, so it had no hint at all and every
+ * row from it arrived anonymous: the monthly checklist, which files anything
+ * unattributed against the credit card, then recorded a month of pre-authorized
+ * debits and e-transfers as card spending.
+ */
+export const CHEQUING_HINT = "chequing";
+
 function isChequing(accountType: string): boolean {
   return accountType.trim().toLowerCase().includes("chequing");
 }
@@ -233,7 +244,8 @@ export function parseActivitiesCsv(
         type: kind,
         note,
         sourceFile: fileName,
-        accountHint: registration ?? undefined,
+        accountHint:
+          registration ?? (isChequing(accountType) ? CHEQUING_HINT : undefined),
         csvCategory: hint,
         category: s.category,
         suggestedCategory: s.category,
