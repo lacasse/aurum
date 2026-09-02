@@ -219,7 +219,7 @@ export function Modal({
    * `md`; a table of numbers is not, and squeezing one into a narrow dialog
    * only moves the problem into a horizontal scrollbar the reader has to find.
    */
-  size?: "md" | "lg" | "xl";
+  size?: "md" | "lg" | "xl" | "2xl";
 }) {
   useEffect(() => {
     if (!open) return;
@@ -244,7 +244,13 @@ export function Modal({
         aria-label={title}
         className={cn(
           "animate-fade-up w-full rounded-2xl border border-line bg-surface shadow-2xl",
-          size === "xl" ? "max-w-3xl" : size === "lg" ? "max-w-xl" : "max-w-md",
+          size === "2xl"
+            ? "max-w-6xl"
+            : size === "xl"
+              ? "max-w-3xl"
+              : size === "lg"
+                ? "max-w-xl"
+                : "max-w-md",
         )}
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-4">

@@ -1,11 +1,9 @@
 "use client";
 
-import { ReactNode, useMemo, useEffect, useRef, useState } from "react";
+import { ReactNode, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle,
   ArrowLeft,
-  Lock,
   ArrowRight,
   CheckCircle2,
   ChevronRight,
@@ -24,18 +22,22 @@ import {
 } from "@/lib/format";
 import { ImportedRow, describeSigns, txnKey } from "@/lib/csv";
 import { TradeRow, tradeKey } from "@/lib/trades";
-import { RoutedFile, labelFor, routeFile } from "@/lib/import-router";
+import { RoutedFile, accountForHint, labelFor, routeFile } from "@/lib/import-router";
 import {
-  describeGaps,
   incomeBoxes,
   describeTrim,
   partitionByMonth,
-  snapshotGaps,
+  previousMonthIncome,
   type IncomeBox,
-  type SnapshotGap,
 } from "@/lib/checklist";
-import type { SnapshotHistory } from "@/lib/analytics";
-import { isPension, sidesFor, type MonthlySnapshot } from "@/lib/types";
+import {
+  INCOME_CATEGORIES,
+  alphabetical,
+  isLiability,
+  isPension,
+  sidesFor,
+} from "@/lib/types";
+import { DEBT_CATEGORY } from "@/lib/expenses";
 import { contributionsByMonth, estimateValue } from "@/lib/pension";
 
 type Step =
@@ -44,7 +46,6 @@ type Step =
   | "expenses"
   | "trades"
   | "pension"
-  | "snapshot"
   | "review";
 
 /**
@@ -63,7 +64,6 @@ interface Draft {
   incomeBoxes: IncomeBox[];
   trades: { batch: TradeBatch; rows: TradeInput[] } | null;
   pension: { values: Record<string, string>; estimate: boolean } | null;
-  snapshot: MonthlySnapshot[] | null;
 }
 
 const EMPTY_DRAFT: Draft = {
@@ -71,7 +71,6 @@ const EMPTY_DRAFT: Draft = {
   incomeBoxes: [],
   trades: null,
   pension: null,
-  snapshot: null,
 };
 
 /**
@@ -201,14 +200,6 @@ function StepBody({
       {note ? (
         <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">{note}</p>
       ) : null}
-      {/*
-        * Said on every step, because the whole point of collecting first is
-        * lost if the reader cannot tell whether it has happened yet.
-        */}
-      <p className="mt-3 flex items-center gap-1.5 text-[11px] text-ink-faint">
-        <Lock size={11} className="shrink-0" />
-        Nothing is saved yet — everything is written on the last step.
-      </p>
       <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
         {onBack ? (
           <Button variant="ghost" onClick={onBack} className="mr-auto">
@@ -483,7 +474,8 @@ function ImportStep({
 /* ---------- Step 2: Income ---------- */
 
 /**
- * The month's income, taken from the file where the file had it.
+ * The month's income, taken from the file where the file had it — and shown
+ * row by row, because detection is a guess.
  *
  * Each box opens at what the import found under its category and stays
  * editable, because a statement is not always the whole story — a payment in
@@ -491,6 +483,12 @@ function ImportStep({
  * Categories that were found but are not among the four always asked for get
  * their own box, so nothing detected is quietly folded into "additional" or
  * dropped.
+ *
+ * Under the boxes sits every row the import read as income. A deposit filed
+ * under the wrong heading, or one that is not income at all — a transfer
+ * between your own accounts reads exactly like pay — can be recategorised or
+ * dropped here, and the boxes above follow. A box typed into by hand stops
+ * following, since a correction should not be undone by the next edit below.
  */
 function IncomeStep({
   number,
@@ -501,25 +499,51 @@ function IncomeStep({
   boxes,
   draft,
   onDraft,
+  rows,
+  onRows,
 }: StepProps & {
   boxes: IncomeBox[];
   draft: Record<string, string>;
   onDraft: (values: Record<string, string>, boxes: IncomeBox[]) => void;
+  rows: ImportedRow[];
+  onRows: (rows: ImportedRow[]) => void;
 }) {
-  const [values, setValues] = useState<Record<string, string>>(() =>
+  const detectedValue = (b: IncomeBox) => {
+    if (b.detected > 0) return b.detected.toFixed(2);
+    return b.carried !== undefined ? b.carried.toFixed(2) : "";
+  };
+
+  /*
+   * Only what was typed by hand is held here; everything else is read off the
+   * detection each render. That is what lets the boxes follow a row being
+   * re-filed below without a hand-typed correction being undone by it.
+   *
+   * On a return visit which is which cannot be known directly, so it is
+   * inferred: a saved figure that differs from what the import found was typed.
+   */
+  const [typed, setTyped] = useState<Record<string, string>>(() =>
     Object.fromEntries(
-      boxes.map((b) => [
-        b.key,
-        // What was typed on an earlier visit wins over what was detected: going
-        // back a step and returning should not undo a correction.
-        draft[b.key] ?? (b.detected > 0 ? b.detected.toFixed(2) : ""),
-      ]),
+      boxes
+        .filter(
+          (b) => draft[b.key] !== undefined && draft[b.key] !== detectedValue(b),
+        )
+        .map((b) => [b.key, draft[b.key]]),
     ),
+  );
+
+  const values: Record<string, string> = Object.fromEntries(
+    boxes.map((b) => [b.key, typed[b.key] ?? detectedValue(b)]),
   );
 
   const entered = boxes.reduce((sum, b) => sum + (Number(values[b.key]) || 0), 0);
   const detected = boxes.reduce((sum, b) => sum + b.detected, 0);
   const found = boxes.filter((b) => b.rows > 0);
+
+  const earned = rows.filter((r) => r.type === "income");
+  const kept = earned.filter((r) => r.include);
+
+  const patch = (id: string, change: Partial<ImportedRow>) =>
+    onRows(rows.map((r) => (r.id === id ? { ...r, ...change } : r)));
 
   const submit = () => {
     onDraft(values, boxes);
@@ -533,7 +557,7 @@ function IncomeStep({
       title={`Income for ${labelMonth(month)}`}
       lead={
         found.length > 0
-          ? "Filled in from the import. Change anything the file got wrong, or add what it never saw."
+          ? "Filled in from the import. Check the rows it read as income, then change anything the file got wrong or add what it never saw."
           : "Nothing was imported, so these are yours to enter. Each box with a figure in it becomes one income transaction."
       }
       onBack={onBack}
@@ -545,11 +569,11 @@ function IncomeStep({
           </span>
           , to be dated {monthEnd(month)} — the last day of the month being
           closed, whatever day the checklist is done on.
-          {found.length > 0 && (
+          {earned.length > 0 && (
             <>
               {" "}
-              The import found {fmtCAD(detected, 2)} across{" "}
-              {found.reduce((n, b) => n + b.rows, 0)} rows.
+              The import found {fmtCAD(detected, 2)} across {kept.length} of{" "}
+              {earned.length} rows.
             </>
           )}
         </>
@@ -568,7 +592,9 @@ function IncomeStep({
             hint={
               box.rows > 0
                 ? `${box.rows} row${box.rows === 1 ? "" : "s"} imported`
-                : undefined
+                : box.carried !== undefined
+                  ? `same as ${labelMonth(previousMonthKey(month))}`
+                  : undefined
             }
           >
             <Input
@@ -579,12 +605,89 @@ function IncomeStep({
               placeholder="0.00"
               value={values[box.key] ?? ""}
               onChange={(e) =>
-                setValues((prev) => ({ ...prev, [box.key]: e.target.value }))
+                setTyped((prev) => ({ ...prev, [box.key]: e.target.value }))
               }
             />
           </Field>
         ))}
       </div>
+
+      {earned.length > 0 ? (
+        <div className="mt-5">
+          <p className="mb-2 text-[11px] text-ink-faint">
+            Rows the import read as income. Uncheck anything that is not income
+            — a transfer between your own accounts looks much like pay — or
+            move it to the right heading.
+          </p>
+          <div className="max-h-80 overflow-auto rounded-lg border border-line">
+            <table className="w-full min-w-[520px] text-xs">
+              <thead className="sticky top-0 bg-surface">
+                <tr className="border-b border-line text-left text-[10px] uppercase tracking-wider text-ink-faint">
+                  <th className="w-8 px-2 py-1.5 font-medium">Keep</th>
+                  <th className="px-2 py-1.5 font-medium">Date</th>
+                  <th className="px-2 py-1.5 font-medium">Source</th>
+                  <th className="px-2 py-1.5 font-medium">Category</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {earned.map((r) => (
+                  <tr
+                    key={r.id}
+                    className={cn(
+                      "border-b border-line/40 last:border-0",
+                      !r.include && "opacity-40",
+                    )}
+                  >
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="checkbox"
+                        checked={r.include}
+                        aria-label={`Keep ${r.payee}`}
+                        onChange={(e) =>
+                          patch(r.id, { include: e.target.checked })
+                        }
+                        className="h-3.5 w-3.5 accent-[var(--brand-strong)]"
+                      />
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-1.5 tabular-nums">
+                      {r.date}
+                    </td>
+                    <td className="max-w-[170px] truncate px-2 py-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <span className="truncate">{r.payee}</span>
+                        {r.dup ? <Badge>seen before</Badge> : null}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <Select
+                        value={r.category}
+                        onChange={(e) =>
+                          patch(r.id, { category: e.target.value })
+                        }
+                        aria-label={`Category for ${r.payee}`}
+                        className={cn(
+                          "h-7 w-auto py-0 text-[11px]",
+                          !r.confident && "border-amber-500/50",
+                        )}
+                      >
+                        {alphabetical(INCOME_CATEGORIES).map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </Select>
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-positive">
+                      {fmtCAD(r.amount, 2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
     </StepBody>
   );
 }
@@ -613,8 +716,16 @@ function ExpensesStep({
   onRows: (rows: ImportedRow[]) => void;
 }) {
   const userCategories = useFinance((s) => s.categories);
+  const debts = useFinance((s) => s.accounts.filter((a) => isLiability(a.kind)));
 
   const spend = rows.filter((r) => r.type === "expense");
+  /*
+   * A repayment is the one row whose far side cannot be guessed. Every other
+   * expense ends at the merchant; this one ends at a debt, and which debt
+   * decides whose balance goes down.
+   */
+  const repayments = spend.filter((r) => r.include && r.category === DEBT_CATEGORY);
+  const unassigned = repayments.filter((r) => !r.debtAccountId);
   const included = spend.filter((r) => r.include);
   const totalSpend = included.reduce((sum, r) => sum + r.amount, 0);
   const willLearn = included.filter((r) => r.category !== r.suggestedCategory).length;
@@ -647,6 +758,18 @@ function ExpensesStep({
               </>
             ) : null}
             .
+            {unassigned.length > 0 && debts.length > 0 ? (
+              <>
+                {" "}
+                <span className="text-amber-500">
+                  {unassigned.length}{" "}
+                  {unassigned.length === 1 ? "repayment has" : "repayments have"}{" "}
+                  no debt chosen
+                </span>{" "}
+                — they will be recorded as spending, and no balance will go
+                down.
+              </>
+            ) : null}
           </>
         ) : undefined
       }
@@ -662,7 +785,7 @@ function ExpensesStep({
           from the Transactions page.
         </p>
       ) : (
-        <div className="max-h-72 overflow-auto rounded-lg border border-line">
+        <div className="max-h-96 overflow-auto rounded-lg border border-line">
           <table className="w-full min-w-[520px] text-xs">
             <thead className="sticky top-0 bg-surface">
               <tr className="border-b border-line text-left text-[10px] uppercase tracking-wider text-ink-faint">
@@ -712,12 +835,32 @@ function ExpensesStep({
                         !r.confident && "border-amber-500/50",
                       )}
                     >
-                      {userCategories.map((c) => (
+                      {alphabetical(userCategories).map((c) => (
                         <option key={c} value={c}>
                           {c}
                         </option>
                       ))}
                     </Select>
+                    {r.category === DEBT_CATEGORY && debts.length > 0 ? (
+                      <Select
+                        value={r.debtAccountId ?? ""}
+                        onChange={(e) =>
+                          patch(r.id, { debtAccountId: e.target.value })
+                        }
+                        aria-label={`Debt paid by ${r.payee}`}
+                        className={cn(
+                          "mt-1 h-7 w-auto py-0 text-[11px]",
+                          !r.debtAccountId && "border-amber-500/50",
+                        )}
+                      >
+                        <option value="">Which debt?</option>
+                        {debts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : null}
                   </td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">
                     {fmtCAD(r.amount, 2)}
@@ -750,6 +893,12 @@ function TradesStep({
   staged: { batch: TradeBatch; rows: TradeInput[] } | null;
   onStage: (staged: { batch: TradeBatch; rows: TradeInput[] } | null) => void;
 }) {
+  /*
+   * The form keeps its own validation and its own error line; only the button
+   * moves out, down to the step footer where every other step's is.
+   */
+  const submit = useRef<(() => void) | null>(null);
+
   return (
     <StepBody
       number={number}
@@ -775,10 +924,14 @@ function TradesStep({
             : undefined
       }
       actions={
-        <Button variant={staged ? "primary" : "ghost"} onClick={onNext}>
-          {staged ? "Next" : drafts.length > 0 ? "Skip" : "Nothing to add"}{" "}
-          <ArrowRight size={14} />
-        </Button>
+        <>
+          <Button variant="ghost" onClick={onNext}>
+            {staged ? "Next" : drafts.length > 0 ? "Skip" : "Nothing to add"}
+          </Button>
+          <Button onClick={() => submit.current?.()}>
+            {staged ? "Update these trades" : "Add these trades to the month"}
+          </Button>
+        </>
       }
     >
       {/*
@@ -789,7 +942,8 @@ function TradesStep({
       <TradeEntry
         key={drafts.length}
         initial={drafts}
-        submitLabel="Add these trades to the month"
+        hideSubmit
+        submitRef={submit}
         onStage={(batch, rows) => onStage({ batch, rows })}
       />
     </StepBody>
@@ -819,6 +973,7 @@ function ReviewStep({
   onDone,
   draft,
   cash,
+  files,
 }: {
   number: number;
   total: number;
@@ -827,6 +982,7 @@ function ReviewStep({
   onDone: () => void;
   draft: Draft;
   cash: ImportedRow[];
+  files: RoutedFile[];
 }) {
   const addTransaction = useFinance((s) => s.addTransaction);
   const setMerchantRule = useFinance((s) => s.setMerchantRule);
@@ -837,11 +993,33 @@ function ReviewStep({
   const recordEstimatedBalance = useFinance((s) => s.recordEstimatedBalance);
   const saveSnapshots = useFinance((s) => s.saveSnapshots);
   const accounts = useFinance((s) => s.accounts);
+  const holdings = useFinance((s) => s.holdings);
   const transactions = useFinance((s) => s.transactions);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const pensions = accounts.filter((a) => isPension(a.kind));
+
+  /**
+   * Which account a row of spending came out of.
+   *
+   * The row's own word first: an activity export names the account on every
+   * line, and a pre-authorized debit out of chequing is not card spending
+   * however the rest of the file was read. Then the file's kind — a card
+   * statement is one account from top to bottom. The everyday account is the
+   * last resort rather than the first: filing everything against the card is
+   * exactly the mistake this replaced.
+   */
+  const cardId =
+    accounts.find((a) => a.kind === "credit")?.id ?? accounts[0]?.id ?? "";
+  const cashId =
+    accounts.find((a) => a.kind === "checking")?.id ?? cardId;
+  const accountForRow = (r: ImportedRow): string => {
+    const named = accountForHint(r.accountHint, accounts);
+    if (named) return named;
+    const kind = files.find((f) => f.fileName === r.sourceFile)?.kind;
+    return kind === "card" ? cardId : cashId;
+  };
   const byMonth = useMemo(() => contributionsByMonth(transactions), [transactions]);
 
   const incomeRows = draft.incomeBoxes
@@ -870,12 +1048,42 @@ function ReviewStep({
     });
   }
   if (expenseRows.length > 0) {
+    /*
+     * Named by account, because they are not all one account. A file can carry
+     * chequing and brokerage rows together, and spending filed against the
+     * wrong side of the ledger is invisible once it is saved.
+     */
+    const byAccount = new Map<string, number>();
+    for (const r of expenseRows) {
+      const id = accountForRow(r);
+      byAccount.set(id, (byAccount.get(id) ?? 0) + r.amount);
+    }
+    const where = [...byAccount.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(
+        ([id, sum]) =>
+          `${accounts.find((a) => a.id === id)?.name ?? "an account"} ${fmtCAD(sum, 2)}`,
+      )
+      .join(", ");
     planned.push({
       label: "Spending",
       detail: `${fmtCAD(expenseTotal, 2)} across ${expenseRows.length} ${
         expenseRows.length === 1 ? "transaction" : "transactions"
-      }`,
+      } — ${where}`,
       count: expenseRows.length,
+    });
+  }
+  const repaid = expenseRows.filter((r) => r.debtAccountId);
+  if (repaid.length > 0) {
+    const owed = repaid.reduce((sum, r) => sum + r.amount, 0);
+    planned.push({
+      label: "Debt paid down",
+      detail: repaid
+        .map((r) => accounts.find((a) => a.id === r.debtAccountId)?.name)
+        .filter((name, i, all): name is string => !!name && all.indexOf(name) === i)
+        .join(", ")
+        .concat(`, ${fmtCAD(owed, 2)} off what is owed`),
+      count: repaid.length,
     });
   }
   if (rules.length > 0) {
@@ -910,12 +1118,11 @@ function ReviewStep({
       count: pensionValues.length,
     });
   }
-  if (draft.snapshot && draft.snapshot.length > 0) {
-    const value = draft.snapshot.reduce((sum, r) => sum + r.valueCAD, 0);
+  if (holdings.length > 0) {
     planned.push({
       label: "Portfolio snapshot",
-      detail: `${draft.snapshot.length} positions worth ${fmtCAD(value, 2)}, against ${labelMonth(month)}`,
-      count: draft.snapshot.length,
+      detail: `${holdings.length} positions valued as ${labelMonth(month)} closed, taken after the trades above land`,
+      count: holdings.length,
     });
   }
 
@@ -936,8 +1143,6 @@ function ReviewStep({
         });
       }
 
-      const cardId =
-        accounts.find((a) => a.kind === "credit")?.id ?? accounts[0]?.id ?? "";
       for (const r of expenseRows) {
         if (!r.payee.trim() || r.amount <= 0) continue;
         addTransaction({
@@ -945,7 +1150,13 @@ function ReviewStep({
           type: "expense",
           amount: r.amount,
           category: r.category,
-          ...sidesFor("expense", cardId),
+          ...sidesFor("expense", accountForRow(r)),
+          /*
+           * A repayment has a far side: the debt it paid off. Given one, the
+           * balance owed comes down by the amount — which is the whole reason
+           * the step asks which debt it was.
+           */
+          ...(r.debtAccountId ? { destinationAccountId: r.debtAccountId } : {}),
           payee: r.payee.trim(),
           note: r.note,
         });
@@ -1001,12 +1212,33 @@ function ReviewStep({
       }
 
       /*
-       * Last, and awaited, because it is the only step that goes to the server
-       * on its own rather than through the store's queue — and because a
-       * snapshot values a portfolio the trades above have just changed.
+       * Last, and awaited, because it is the only write here that goes to the
+       * server on its own rather than through the store's queue.
+       *
+       * Read out of the store rather than off the `holdings` this component
+       * rendered with: the trades above have just changed shares and cost, and
+       * may have opened positions that had no id until a moment ago. A
+       * snapshot taken from the stale list would record the portfolio as it
+       * was before the month it is supposed to close.
+       *
+       * This used to be a step of its own, a table of sixty prices to scroll
+       * past. Nobody edits a price they have no better source for than the app
+       * itself, so it asks nothing and simply records what is held.
        */
-      if (draft.snapshot && draft.snapshot.length > 0) {
-        await saveSnapshots(draft.snapshot);
+      const closing = useFinance.getState().holdings;
+      if (closing.length > 0) {
+        await saveSnapshots(
+          closing.map((h) => ({
+            month,
+            holdingId: h.id,
+            ticker: h.ticker,
+            price: h.price,
+            avgCost: h.avgCost,
+            shares: h.shares,
+            value: h.price * h.shares,
+            valueCAD: h.priceCAD * h.shares,
+          })),
+        );
       }
       onDone();
     } catch (e) {
@@ -1086,279 +1318,6 @@ function monthEnd(month: string): string {
 }
 
 /* ---------- Step 4: Portfolio Snapshot ---------- */
-
-/**
- * Which recent months the portfolio record never got.
- *
- * Fetched here rather than taken from the store: the store holds one month of
- * snapshots at a time, for the step to edit, and the question "which months
- * are missing" is about all of them at once.
- */
-function useSnapshotGaps(through: string): SnapshotGap[] {
-  const [months, setMonths] = useState<SnapshotHistory>({});
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/snapshots/history", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { months: SnapshotHistory }) => {
-        if (!cancelled) setMonths(d.months ?? {});
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return useMemo(
-    () =>
-      snapshotGaps(
-        Object.fromEntries(
-          Object.entries(months).map(([m, tickers]) => [m, Object.keys(tickers).length]),
-        ),
-        // The month being closed is not yet a gap — this step is about to fill
-        // it, and reporting it as missing while asking for it is nonsense.
-        previousMonthKey(through),
-      ),
-    [months, through],
-  );
-}
-
-function SnapshotStep({
-  number,
-  total,
-  month,
-  onNext,
-  onBack,
-  onDraft,
-}: {
-  number: number;
-  total: number;
-  month: string;
-  onNext: () => void;
-  onBack?: () => void;
-  onDraft: (rows: MonthlySnapshot[]) => void;
-}) {
-  const holdings = useFinance((s) => s.holdings);
-  const loadSnapshots = useFinance((s) => s.loadSnapshots);
-  const snapshots = useFinance((s) => s.snapshots);
-  const snapshotMonth = useFinance((s) => s.snapshotMonth);
-  const gaps = useSnapshotGaps(month);
-  const [editValues, setEditValues] = useState<Record<string, Partial<MonthlySnapshot>>>({});
-  const [showClosed, setShowClosed] = useState(false);
-
-  useEffect(() => {
-    loadSnapshots(month);
-  }, [month, loadSnapshots]);
-
-  const existing = useMemo(
-    () => new Map(snapshots.map((s) => [s.holdingId, s])),
-    [snapshots],
-  );
-
-  const rows = useMemo(() => {
-    return holdings.map((h) => {
-      const edit = editValues[h.id] ?? {};
-      const existingRow = existing.get(h.id);
-      const price = edit.price ?? existingRow?.price ?? h.price;
-      const shares = edit.shares ?? existingRow?.shares ?? h.shares;
-      const avgCost = edit.avgCost ?? existingRow?.avgCost ?? h.avgCost;
-      const value = price * shares;
-      return {
-        holdingId: h.id,
-        ticker: h.ticker,
-        name: h.name,
-        price,
-        shares,
-        avgCost,
-        value,
-      };
-    });
-  }, [holdings, editValues, existing]);
-
-  const totalValue = rows.reduce((s, r) => s + r.value, 0);
-  const hasExisting = snapshots.length > 0 && snapshotMonth === month;
-
-  /*
-   * Sorted by what each position is worth, and closed ones folded away.
-   *
-   * Forty-three of the sixty positions on this record are sold out and worth
-   * nothing, and unsorted they sit among the seventeen that matter — so the
-   * step opened on a wall of zeros with the real portfolio scattered through
-   * it. They are still snapshotted, because a month should record the shape of
-   * the portfolio rather than an edited version of it, and because a position
-   * reopened later needs the zero behind it. Hidden, not dropped: the toggle
-   * is there for the case where a closed position needs correcting.
-   */
-  const sorted = useMemo(() => [...rows].sort((a, b) => b.value - a.value), [rows]);
-  const closed = sorted.filter((r) => r.value === 0 && r.shares === 0);
-  const visible = showClosed ? sorted : sorted.filter((r) => !closed.includes(r));
-
-  const stage = () => {
-    onDraft(
-      rows.map((r) => ({
-        month,
-        holdingId: r.holdingId,
-        ticker: r.ticker,
-        price: r.price,
-        avgCost: r.avgCost,
-        shares: r.shares,
-        value: r.value,
-        valueCAD: r.value,
-      })),
-    );
-    onNext();
-  };
-
-  const updateField = (id: string, field: string, value: string) => {
-    const num = Number(value);
-    setEditValues((prev) => ({
-      ...prev,
-      [id]: { ...prev[id], [field]: Number.isFinite(num) ? num : 0 },
-    }));
-  };
-
-  return (
-    <StepBody
-      number={number}
-      total={total}
-      title={`Portfolio at the end of ${labelMonth(month)}`}
-      lead={
-        <>
-          What the portfolio closed {labelMonth(month)} at. Nothing records this
-          on its own — if this step is skipped, the month has no closing value
-          at all. The figures are pre-filled from today&apos;s prices, which is
-          close enough when the checklist is done in the first days of the new
-          month; adjust any that drifted.
-        </>
-      }
-      onBack={onBack}
-      note={
-        hasExisting
-          ? `A snapshot for ${labelMonth(month)} already exists; saving will update it.`
-          : `Nothing recorded for ${labelMonth(month)} yet.`
-      }
-      actions={
-        <Button onClick={stage} disabled={holdings.length === 0}>
-          Next <ArrowRight size={14} />
-        </Button>
-      }
-    >
-      {gaps.length > 0 && (
-        /*
-          * Shown here because this is the step that fixes it, and because the
-          * charts cannot: a month with no closing value is drawn as a straight
-          * line between the months either side, which looks like a quiet month
-          * rather than a missing one.
-          */
-        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5">
-          <p className="flex items-start gap-2 text-[11px] leading-relaxed text-ink-dim">
-            <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-500" />
-            <span>
-              {describeGaps(gaps)} Those months are drawn as a straight line
-              across the hole. Fill one in from{" "}
-              <Link
-                href="/investments"
-                className="text-brand underline-offset-2 hover:underline"
-              >
-                Investments
-              </Link>{" "}
-              if you have the statement.
-            </span>
-          </p>
-        </div>
-      )}
-      {holdings.length === 0 ? (
-        <p className="text-xs text-ink-faint">
-          No holdings yet — add investments first, then come back for the
-          snapshot.
-        </p>
-      ) : (
-        /*
-          * Capped and scrolled rather than allowed to run the full length of
-          * the portfolio: eleven rows of inputs pushed the save button past
-          * the bottom of a dialog that scrolls on its own, so the way out of
-          * the step was below two scrollbars.
-          */
-        <div className="max-h-72 overflow-auto rounded-lg border border-line">
-          <table className="w-full min-w-[420px] text-sm">
-            <thead className="sticky top-0 bg-surface">
-              <tr className="border-b border-line text-left text-[11px] uppercase tracking-wider text-ink-faint">
-                <th className="px-3 py-2 font-medium">Ticker</th>
-                <th className="px-2 py-2 text-right font-medium">Price</th>
-                <th className="px-2 py-2 text-right font-medium">Shares</th>
-                <th className="px-2 py-2 text-right font-medium">Avg cost</th>
-                <th className="px-3 py-2 text-right font-medium">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((r) => (
-                <tr key={r.holdingId} className="border-b border-line/40 last:border-0">
-                  <td className="px-3 py-1.5 text-xs font-medium">{r.ticker}</td>
-                  <td className="px-2 py-1.5">
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      aria-label={`${r.ticker} price`}
-                      value={r.price}
-                      onChange={(e) => updateField(r.holdingId, "price", e.target.value)}
-                      className="h-8 w-full min-w-0 px-2 py-1 text-right text-xs tabular-nums"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <Input
-                      type="number"
-                      step="any"
-                      min="0"
-                      aria-label={`${r.ticker} shares`}
-                      value={r.shares}
-                      onChange={(e) => updateField(r.holdingId, "shares", e.target.value)}
-                      className="h-8 w-full min-w-0 px-2 py-1 text-right text-xs tabular-nums"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      aria-label={`${r.ticker} average cost`}
-                      value={r.avgCost}
-                      onChange={(e) => updateField(r.holdingId, "avgCost", e.target.value)}
-                      className="h-8 w-full min-w-0 px-2 py-1 text-right text-xs tabular-nums"
-                    />
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-1.5 text-right text-xs font-semibold tabular-nums">
-                    {fmtCAD(r.value, 2)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot className="sticky bottom-0 bg-surface">
-              <tr className="border-t border-line">
-                <td colSpan={4} className="px-3 py-2 text-right text-xs font-semibold">
-                  Total
-                </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right text-sm font-bold tabular-nums">
-                  {fmtCAD(totalValue, 2)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-          {closed.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowClosed((v) => !v)}
-              className="w-full border-t border-line px-3 py-2 text-left text-[11px] text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
-            >
-              {showClosed ? "Hide" : "Show"} {closed.length} closed{" "}
-              {closed.length === 1 ? "position" : "positions"} worth nothing —
-              recorded either way
-            </button>
-          )}
-        </div>
-      )}
-    </StepBody>
-  );
-}
 
 /* ---------- Step 4: Pension ---------- */
 
@@ -1477,7 +1436,6 @@ const STEPS: { key: Step; label: string }[] = [
   { key: "expenses", label: "Expenses" },
   { key: "trades", label: "Trades" },
   { key: "pension", label: "Pension" },
-  { key: "snapshot", label: "Snapshot" },
   { key: "review", label: "Save" },
 ];
 
@@ -1533,14 +1491,16 @@ export function MonthlyChecklistModal({
  * The file comes first because everything after it is a review of what the
  * file said. Income is a total of it, spending is a list of it, trades are
  * read out of it — each editable, and each written only when its own step
- * says so. The two steps at the end are the ones no export can answer: what
- * the pension is worth, and what the portfolio closed at.
+ * says so. The step before the last is the one no export can answer: what the
+ * pension is worth. The portfolio's closing value is not asked for at all —
+ * saving the month records it.
  */
 function Checklist({ onClose }: { onClose: () => void }) {
   // No pension, no step: the checklist should only ask what applies.
   const hasPension = useFinance((s) => s.accounts.some((a) => isPension(a.kind)));
   const steps = hasPension ? STEPS : STEPS.filter((s) => s.key !== "pension");
   const accounts = useFinance((s) => s.accounts);
+  const transactions = useFinance((s) => s.transactions);
 
   /*
    * The month just finished, not the one running. A checklist done on the
@@ -1564,7 +1524,20 @@ function Checklist({ onClose }: { onClose: () => void }) {
     onBack: back,
   };
 
-  const boxes = useMemo(() => incomeBoxes(loaded.cash), [loaded.cash]);
+  /*
+   * A pension contribution is deducted at source and never appears on the
+   * statement the checklist reads, so its box came up empty every month and
+   * had to be typed from memory. Last month's figure is the answer nearly
+   * every time; the box says where it came from and stays editable.
+   */
+  const carried = useMemo(
+    () => previousMonthIncome(transactions, month, ["RSP / Pension"]),
+    [transactions, month],
+  );
+  const boxes = useMemo(
+    () => incomeBoxes(loaded.cash, carried),
+    [loaded.cash, carried],
+  );
 
   /*
    * Only the three kinds the trade form can record. A deposit or a withdrawal
@@ -1605,7 +1578,7 @@ function Checklist({ onClose }: { onClose: () => void }) {
       open
       onClose={onClose}
       title={`Monthly checklist · closing ${labelMonth(month)}`}
-      size="xl"
+      size="2xl"
     >
       <div className="mb-5 border-b border-line pb-4">
         <StepIndicator
@@ -1626,6 +1599,8 @@ function Checklist({ onClose }: { onClose: () => void }) {
           onDraft={(income, incomeBoxes) =>
             setDraft((d) => ({ ...d, income, incomeBoxes }))
           }
+          rows={loaded.cash}
+          onRows={(cash) => setLoaded((l) => ({ ...l, cash }))}
         />
       )}
       {step === "expenses" && (
@@ -1651,16 +1626,6 @@ function Checklist({ onClose }: { onClose: () => void }) {
           onDraft={(pension) => setDraft((d) => ({ ...d, pension }))}
         />
       )}
-      {step === "snapshot" && (
-        <SnapshotStep
-          number={shared.number}
-          total={shared.total}
-          month={month}
-          onNext={next}
-          onBack={back}
-          onDraft={(snapshot) => setDraft((d) => ({ ...d, snapshot }))}
-        />
-      )}
       {step === "review" && (
         <ReviewStep
           number={shared.number}
@@ -1670,6 +1635,7 @@ function Checklist({ onClose }: { onClose: () => void }) {
           onDone={onClose}
           draft={draft}
           cash={loaded.cash}
+          files={loaded.files}
         />
       )}
     </Modal>

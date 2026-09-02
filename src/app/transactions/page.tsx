@@ -33,6 +33,7 @@ import { PageSkeleton, useReady } from "@/lib/hooks";
 import { fmtCompact, fmtCAD, labelDate, labelMonth, lastMonthKeys, monthKeyOf } from "@/lib/format";
 import {
   INCOME_CATEGORIES,
+  alphabetical,
   RECURRENCE_LABELS,
   RecurringRule,
   TRANSFER_CATEGORY,
@@ -286,14 +287,14 @@ export default function TransactionsPage() {
             <Select value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="all">All categories</option>
               <optgroup label="Income">
-                {INCOME_CATEGORIES.map((c) => (
+                {alphabetical(INCOME_CATEGORIES).map((c) => (
                   <option key={`income-${c}`} value={c}>
                     {c}
                   </option>
                 ))}
               </optgroup>
               <optgroup label="Expense">
-                {userCategories.map((c) => (
+                {alphabetical(userCategories).map((c) => (
                   <option key={`expense-${c}`} value={c}>
                     {c}
                   </option>

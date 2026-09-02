@@ -32,7 +32,7 @@ import {
   positionToHolding,
   tradeKey,
 } from "@/lib/trades";
-import { RoutedFile, labelFor, routeFile } from "@/lib/import-router";
+import { RoutedFile, accountForHint, labelFor, routeFile } from "@/lib/import-router";
 import {
   CorporateAction,
   applyAction,
@@ -40,6 +40,7 @@ import {
 } from "@/lib/corporate-actions";
 import {
   INCOME_CATEGORIES,
+  alphabetical,
   REGISTRATION_LABELS,
   Registration,
   TRANSFER_CATEGORY,
@@ -135,11 +136,9 @@ export default function ImportPage() {
   const accountForRow = (row: ImportedRow): string => {
     const chosen = accountForFile(row.sourceFile);
     if (chosen !== MATCH_THE_FILE) return chosen;
-    if (row.accountHint) {
-      const matched = accountIdFor(row.accountHint as Registration);
-      if (matched) return matched;
-    }
-    return cashAccountId;
+    // The same rule the monthly checklist uses, so a row lands in the same
+    // account whichever door it came through.
+    return accountForHint(row.accountHint, accounts) ?? cashAccountId;
   };
 
   const existingTxnKeys = useMemo(
@@ -676,9 +675,10 @@ export default function ImportPage() {
                                 * missing Freelance — so a row suggested as
                                 * Freelance could not have been left that way.
                                 */}
-                              {(r.type === "income"
-                                ? INCOME_CATEGORIES
-                                : userCategories
+                              {alphabetical(
+                                r.type === "income"
+                                  ? INCOME_CATEGORIES
+                                  : userCategories,
                               ).map((c) => (
                                 <option key={c} value={c}>
                                   {c}

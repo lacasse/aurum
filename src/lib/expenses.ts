@@ -46,6 +46,9 @@ export const SPEND_GROUP_LABELS: Record<SpendGroup, string> = {
  * be reassigned per category. Anything not listed is treated as
  * discretionary, so a new category shows up on the side that gets scrutiny.
  */
+/** The category whose rows pay off a debt rather than buying anything. */
+export const DEBT_CATEGORY = "Debt Repayment";
+
 export const DEFAULT_SPEND_GROUPS: Record<string, SpendGroup> = {
   Housing: "necessity",
   Groceries: "necessity",
@@ -75,7 +78,7 @@ export const DEFAULT_SPEND_GROUPS: Record<string, SpendGroup> = {
    * costs and understates what was saved — on this record it is what turned
    * 2024 into a year that apparently spent $132k and saved nothing.
    */
-  "Debt Repayment": "excluded",
+  [DEBT_CATEGORY]: "excluded",
 };
 
 export function groupOf(
