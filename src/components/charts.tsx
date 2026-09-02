@@ -72,13 +72,18 @@ const GRID_PROPS = {
   vertical: false,
 } as const;
 
+/*
+ * Chart text is drawn into the SVG, where a rem means nothing, so these two
+ * are the one place a size is still stated in pixels. Kept a notch under the
+ * body scale — an axis label is a reference, not something to read.
+ */
 const AXIS_TICK = {
   fill: "var(--ink-faint)",
-  fontSize: 11,
+  fontSize: 12,
 } as const;
 
 const LEGEND_STYLE = {
-  fontSize: 12,
+  fontSize: 13,
   color: "var(--ink-dim)",
 } as const;
 
@@ -105,9 +110,9 @@ export function ChartTooltip({
   return (
     <div className="rounded-xl border border-line bg-surface px-3 py-2 shadow-xl">
       {title !== undefined ? (
-        <p className="mb-1 text-[11px] font-medium text-ink-faint">{title}</p>
+        <p className="mb-1 text-[0.6875rem] font-medium text-ink-faint">{title}</p>
       ) : label !== undefined && label !== "" ? (
-        <p className="mb-1 text-[11px] font-medium text-ink-faint">{label}</p>
+        <p className="mb-1 text-[0.6875rem] font-medium text-ink-faint">{label}</p>
       ) : null}
       <div className="space-y-0.5">
         {payload.map((item, i) => (
@@ -410,6 +415,20 @@ export function GroupedBars({
 
 /* ---------------- Donut ---------------- */
 
+/*
+ * Every ring in the app starts at the top and fills clockwise, which is how a
+ * clock face and every pie anybody has read work. Recharts starts at three
+ * o'clock and runs anticlockwise unless told otherwise, so the largest slice
+ * used to begin on the right-hand edge and grow the wrong way.
+ */
+const PIE_START = 90;
+const PIE_END = -270;
+
+/** Largest first, so the ring reads down from the biggest share. */
+function byValueDesc<T extends { value: number }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => b.value - a.value);
+}
+
 export function DonutChart({
   data,
   height = 260,
@@ -426,6 +445,11 @@ export function DonutChart({
   /** Colour per category name. Falls back to the palette in slice order. */
   colors?: Record<string, string>;
 }) {
+  /*
+   * Sorted here rather than trusted from the caller: the colour map is keyed
+   * by name, so ordering the ring cannot repaint anything.
+   */
+  const rows = byValueDesc(data);
   const colorOf = (name: string, i: number) =>
     colors?.[name] ?? PALETTE[i % PALETTE.length];
   return (
@@ -434,16 +458,18 @@ export function DonutChart({
         <ResponsiveContainer width="100%" height={height}>
           <PieChart>
             <Pie
-              data={data}
+              data={rows}
               dataKey="value"
               nameKey="name"
+              startAngle={PIE_START}
+              endAngle={PIE_END}
               innerRadius="62%"
               outerRadius="88%"
               paddingAngle={2}
               strokeWidth={0}
               isAnimationActive={false}
             >
-              {data.map((d, i) => (
+              {rows.map((d, i) => (
                 <Cell key={i} fill={colorOf(d.name, i)} />
               ))}
             </Pie>
@@ -452,13 +478,13 @@ export function DonutChart({
         </ResponsiveContainer>
         {centerValue ? (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-[11px] text-ink-faint">{centerLabel}</span>
+            <span className="text-[0.6875rem] text-ink-faint">{centerLabel}</span>
             <span className="text-lg font-semibold tabular-nums">{centerValue}</span>
           </div>
         ) : null}
       </div>
       <ul className="mt-2 space-y-1.5 px-1">
-        {data.slice(0, 7).map((d, i) => (
+        {rows.slice(0, 7).map((d, i) => (
           <li key={d.name} className="flex items-center gap-2 text-xs">
             <span
               className="h-2 w-2 shrink-0 rounded-full"
@@ -478,47 +504,68 @@ export function DonutChart({
 /* ---------------- Holdings exposure ---------------- */
 
 /**
- * One hue per asset class. Every holding of that class is drawn in a different
- * lightness of the same hue, so the arc reads as groups without needing a
- * legend to tell you which slices belong together.
+ * The spectrum every holding is coloured from.
  *
- * The hues are picked at a saturation and lightness that hold up on both
- * themes: mid-range lightness is legible against the light card and against
- * the dark one, which a near-white or near-black shade would not be.
+ * Fourteen anchors, sampled to however many positions there are. It replaced
+ * one hue per asset class with a ramp of shades inside it, which sounded
+ * tidier than it looked: a class with seven holdings had to fit seven
+ * distinguishable shades of one hue into the range both themes can show, and
+ * the small ones ended up as near-identical slivers of the same colour.
+ *
+ * Colour now says which holding, and nothing else — the class is a tag in the
+ * legend beside it. The honest trade is that neighbouring steps of any
+ * spectrum are close: this one's worst adjacent pair measures ΔE 8.2 with full
+ * colour vision and 0.6 under simulated protanopia, so colour alone does not
+ * identify a slice. That is what the legend and the tooltip are for, and why
+ * both name every position.
  */
-const ASSET_HUES: Record<string, { h: number; s: number }> = {
-  "US Equity": { h: 262, s: 70 }, // violet
-  "Intl Equity": { h: 187, s: 65 }, // teal
-  Bonds: { h: 214, s: 58 }, // blue
-  Crypto: { h: 33, s: 80 }, // amber
-};
+const SPECTRUM = [
+  "#0d3b52",
+  "#12657f",
+  "#2a7f8a",
+  "#2e8b6f",
+  "#43a047",
+  "#a8c93a",
+  "#e8c33a",
+  "#f4a12a",
+  "#f2762f",
+  "#ea5765",
+  "#d94f8c",
+  "#b0509f",
+  "#7b56ab",
+  "#3f5ea8",
+] as const;
 
-const FALLBACK_HUE = { h: 340, s: 60 };
+/** Step `i` of `n` along the spectrum, ends included. */
+export function spectrumAt(i: number, n: number): string {
+  if (n <= 1) return SPECTRUM[Math.floor(SPECTRUM.length / 2)];
+  const at = Math.round((i * (SPECTRUM.length - 1)) / (n - 1));
+  return SPECTRUM[Math.min(at, SPECTRUM.length - 1)];
+}
 
 /**
- * Shade `i` of `n` within a group.
+ * The colour that stands for a whole asset class.
  *
- * Two things keep neighbouring slices apart. The band is wide — a light end
- * that still reads on the light theme's white card, a dark end that still
- * separates from the dark one — and the rungs are handed out from alternating
- * halves of it rather than in order, so consecutive slices on the arc are
- * never consecutive steps of the ramp. With eight holdings in a class that is
- * the difference between a 5-point gap between neighbours and a 19-point one.
+ * Taken from the same spectrum at a slot fixed per class rather than by rank,
+ * so a class keeps its colour when the portfolio changes shape — the
+ * allocation donut is then the same palette as the exposure chart beside it
+ * without pretending the two are the same encoding.
  *
- * Saturation climbs as lightness falls, which stops the dark end going muddy.
+ * The four slots are the four that measure best against each other, not four
+ * even steps: even steps put two neighbouring hues on the two largest classes.
+ * These clear ΔE 23.8 with full colour vision and 7.9 under deuteranopia,
+ * which is a warning rather than a pass — legal here only because the donut
+ * carries a labelled legend, so no class is identified by its colour alone.
  */
-export function assetShade(assetClass: string, i: number, n: number): string {
-  const { h, s } = ASSET_HUES[assetClass] ?? FALLBACK_HUE;
-  if (n <= 1) return `hsl(${h} ${s}% 54%)`;
+const CLASS_SLOT: Record<string, number> = {
+  "Intl Equity": 4, // green
+  Crypto: 6, // gold
+  Bonds: 10, // magenta
+  "US Equity": 13, // blue
+};
 
-  const top = 68;
-  const bottom = 26;
-  // 0, ⌈n/2⌉, 1, ⌈n/2⌉+1, … — the first half interleaved with the second.
-  const half = Math.ceil(n / 2);
-  const rung = i % 2 === 0 ? i / 2 : half + (i - 1) / 2;
-  const t = rung / (n - 1);
-  const l = top - (top - bottom) * t;
-  return `hsl(${h} ${Math.round(s + t * 12)}% ${Math.round(l)}%)`;
+export function assetClassColor(assetClass: string): string {
+  return SPECTRUM[CLASS_SLOT[assetClass] ?? 12];
 }
 
 export type ExposureDatum = {
@@ -539,20 +586,15 @@ export function ExposurePie({
 }) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
 
-  // The slices arrive grouped, so counting each class up front is enough to
-  // know how many shades it needs and where each holding sits in the ramp.
-  const counts = new Map<string, number>();
-  for (const d of data) counts.set(d.assetClass, (counts.get(d.assetClass) ?? 0) + 1);
-  const seen = new Map<string, number>();
-  const colored = data.map((d) => {
-    const i = seen.get(d.assetClass) ?? 0;
-    seen.set(d.assetClass, i + 1);
-    return { ...d, color: assetShade(d.assetClass, i, counts.get(d.assetClass) ?? 1) };
-  });
-
-  const groups = [...counts.keys()].map((assetClass) => ({
-    assetClass,
-    rows: colored.filter((d) => d.assetClass === assetClass),
+  /*
+   * One step of the spectrum per holding, in the order they arrive — which is
+   * largest first. Colour is position in the ring, not asset class: the class
+   * is a tag on the legend row instead, which says the same thing without
+   * spending a whole hue family on a class that holds two positions.
+   */
+  const colored = byValueDesc(data).map((d, i) => ({
+    ...d,
+    color: spectrumAt(i, data.length),
   }));
 
   const pct = (v: number) => (total > 0 ? `${((v / total) * 100).toFixed(1)}%` : "—");
@@ -565,6 +607,8 @@ export function ExposurePie({
             data={colored}
             dataKey="value"
             nameKey="ticker"
+            startAngle={PIE_START}
+            endAngle={PIE_END}
             innerRadius="48%"
             outerRadius="86%"
             paddingAngle={1}
@@ -572,7 +616,7 @@ export function ExposurePie({
             strokeWidth={1}
           >
             {colored.map((d) => (
-              <Cell key={`${d.assetClass}-${d.ticker}`} fill={d.color} />
+              <Cell key={d.ticker} fill={d.color} />
             ))}
           </Pie>
           <Tooltip
@@ -582,61 +626,35 @@ export function ExposurePie({
       </ResponsiveContainer>
 
       {/*
-        One row per asset class rather than one line per holding: a flat list of
-        every ticker is as long as the table further down the page and says the
-        same thing. The bar carries the split within the class in the same
-        shades and the same order as the arc, so a segment can be found in the
-        pie by its width and its shade without a line of its own.
+        One row per holding, because that is now what a colour means. It used
+        to be one row per asset class with the holdings inside it as a bar; the
+        classes are still here, as a tag, but they no longer decide the colour
+        and so cannot organise the key.
       */}
-      <div className="mt-3 space-y-3 px-1">
-        {groups.map((g) => {
-          const groupValue = g.rows.reduce((sum, r) => sum + r.value, 0);
-          return (
-            <div key={g.assetClass}>
-              <div className="flex items-baseline gap-2 text-xs">
-                <span className="font-medium text-ink">{g.assetClass}</span>
-                <span className="text-ink-faint">
-                  {g.rows.length} position{g.rows.length === 1 ? "" : "s"}
-                </span>
-                <span className="ml-auto tabular-nums text-ink-dim">
-                  {fmt ? fmt(groupValue) : groupValue}
-                </span>
-                <span className="w-12 text-right font-medium tabular-nums text-ink">
-                  {pct(groupValue)}
-                </span>
-              </div>
-              <div className="mt-1 flex h-2 gap-px overflow-hidden rounded-full">
-                {g.rows.map((r) => (
-                  <span
-                    key={r.ticker}
-                    className="h-full"
-                    style={{
-                      background: r.color,
-                      width: groupValue > 0 ? `${(r.value / groupValue) * 100}%` : "0%",
-                    }}
-                    title={`${r.name} — ${fmt ? fmt(r.value) : r.value}`}
-                  />
-                ))}
-              </div>
-              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
-                {g.rows.map((r) => (
-                  <span
-                    key={r.ticker}
-                    className="inline-flex items-center gap-1.5 text-[11px] text-ink-dim"
-                    title={r.name}
-                  >
-                    <span
-                      className="h-1.5 w-1.5 shrink-0 rounded-full"
-                      style={{ background: r.color }}
-                    />
-                    {r.ticker}
-                    <span className="tabular-nums text-ink-faint">{pct(r.value)}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          );
-        })}
+      <div className="mt-3 space-y-px px-1">
+        {colored.map((r) => (
+          <div
+            key={r.ticker}
+            className="flex items-center gap-2 text-[0.6875rem] leading-5"
+            title={r.name}
+          >
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ background: r.color }}
+            />
+            <span className="shrink-0 font-medium text-ink">{r.ticker}</span>
+            <span className="truncate text-ink-faint">{r.name}</span>
+            <span className="ml-auto shrink-0 rounded bg-elevated px-1 py-px text-[0.5625rem] text-ink-faint">
+              {r.assetClass}
+            </span>
+            <span className="w-16 shrink-0 text-right tabular-nums text-ink-dim">
+              {fmt ? fmt(r.value) : r.value}
+            </span>
+            <span className="w-10 shrink-0 text-right font-medium tabular-nums text-ink">
+              {pct(r.value)}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -816,7 +834,7 @@ export function RadialGauge({
           {Math.round(pct)}%
         </span>
         <span className="text-xs text-ink-dim">{label}</span>
-        {sublabel ? <span className="text-[11px] text-ink-faint">{sublabel}</span> : null}
+        {sublabel ? <span className="text-[0.6875rem] text-ink-faint">{sublabel}</span> : null}
       </div>
     </div>
   );

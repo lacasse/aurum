@@ -904,15 +904,29 @@ describe("holdingExposure", () => {
     assert.equal(slices[0].name, "Global Equity");
   });
 
-  test("groups sit together, largest group and holding first", () => {
+  test("largest first, whatever class it is in", () => {
+    // The class no longer groups the ring: colour is a step along one
+    // spectrum, so a small holding does not ride on the back of a large class.
     const slices = holdingExposure([
-      lot({ id: "a", ticker: "BTC", assetClass: "Crypto", shares: 1, priceCAD: 100 }),
+      lot({ id: "a", ticker: "BTC", assetClass: "Crypto", shares: 1, priceCAD: 900 }),
       lot({ id: "b", ticker: "AAA", shares: 1, priceCAD: 300 }),
-      lot({ id: "c", ticker: "BBB", shares: 1, priceCAD: 500 }),
+      lot({ id: "c", ticker: "BBB", assetClass: "Crypto", shares: 1, priceCAD: 100 }),
+      lot({ id: "d", ticker: "CCC", shares: 1, priceCAD: 500 }),
     ]);
     assert.deepEqual(
       slices.map((s) => s.ticker),
-      ["BBB", "AAA", "BTC"],
+      ["BTC", "CCC", "AAA", "BBB"],
+    );
+  });
+
+  test("ties break on ticker, so the ring never reshuffles between renders", () => {
+    const slices = holdingExposure([
+      lot({ id: "a", ticker: "ZZZ", shares: 1, priceCAD: 100 }),
+      lot({ id: "b", ticker: "AAA", shares: 1, priceCAD: 100 }),
+    ]);
+    assert.deepEqual(
+      slices.map((s) => s.ticker),
+      ["AAA", "ZZZ"],
     );
   });
 });
@@ -960,6 +974,31 @@ describe("sortHoldingRows", () => {
     assert.deepEqual(
       sortHoldingRows(rows, "name", "asc").map((r) => r.name),
       ["Alpha Inc", "Midway Ltd", "Zulu Corp"],
+    );
+  });
+
+  test("sorting by class groups the classes, largest first inside each", () => {
+    const mixed = consolidateHoldings([
+      lot({ id: "a", ticker: "AAA", assetClass: "US Equity", shares: 1, priceCAD: 100 }),
+      lot({ id: "b", ticker: "BBB", assetClass: "Bonds", shares: 1, priceCAD: 50 }),
+      lot({ id: "c", ticker: "CCC", assetClass: "US Equity", shares: 1, priceCAD: 900 }),
+      lot({ id: "d", ticker: "DDD", assetClass: "Bonds", shares: 1, priceCAD: 500 }),
+    ]);
+    assert.deepEqual(
+      sortHoldingRows(mixed, "assetClass", "asc").map((r) => r.ticker),
+      ["DDD", "BBB", "CCC", "AAA"],
+    );
+  });
+
+  test("and the other way round, still largest first inside each", () => {
+    const mixed = consolidateHoldings([
+      lot({ id: "a", ticker: "AAA", assetClass: "US Equity", shares: 1, priceCAD: 100 }),
+      lot({ id: "b", ticker: "BBB", assetClass: "Bonds", shares: 1, priceCAD: 500 }),
+      lot({ id: "c", ticker: "CCC", assetClass: "US Equity", shares: 1, priceCAD: 900 }),
+    ]);
+    assert.deepEqual(
+      sortHoldingRows(mixed, "assetClass", "desc").map((r) => r.ticker),
+      ["CCC", "AAA", "BBB"],
     );
   });
 

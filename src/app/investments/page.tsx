@@ -24,6 +24,7 @@ import {
 } from "@/components/ui";
 import {
   DonutChart,
+  assetClassColor,
   ExposurePie,
   SeriesChart,
   SignedHBars,
@@ -32,7 +33,7 @@ import {
 import { HoldingForm, TradeEntry } from "@/components/forms";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
-import type { HoldingRow, SortKey } from "@/lib/analytics";
+import type { SortKey } from "@/lib/analytics";
 import {
   allTimeSeries,
   allocationByClass,
@@ -60,7 +61,6 @@ import {
 } from "@/lib/format";
 import type { Holding } from "@/lib/types";
 import { awaitingPrice, priceReward } from "@/lib/rewards";
-import { drift } from "@/lib/allocation";
 import { replayFlows } from "@/lib/analytics";
 
 const POLL_MS = 60 * 60_000;
@@ -233,201 +233,6 @@ function PendingRewards() {
   );
 }
 
-/**
- * What the portfolio is against what it is meant to be.
- *
- * Targets are per security and kept as one small map, because that is the
- * question actually being asked: two funds in the same class can be one you
- * are building and one you are leaving. The drift is shown in money as well as
- * in points — "eight points over" is a judgement, "$38,000 over" is an
- * instruction.
- */
-function TargetAllocation({ rows }: { rows: HoldingRow[] }) {
-  const [targets, setTargets] = useState<Record<string, number> | null>(null);
-  const [draft, setDraft] = useState<Record<string, string>>({});
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/targets", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { targets: Record<string, number> }) => {
-        if (!cancelled) setTargets(d.targets ?? {});
-      })
-      .catch(() => {
-        if (!cancelled) setTargets({});
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const open = useMemo(() => rows.filter((r) => !r.closed), [rows]);
-  const result = useMemo(
-    () =>
-      drift(
-        open.map((r) => ({ ticker: r.ticker, name: r.name, marketValue: r.marketValue })),
-        targets ?? {},
-      ),
-    [open, targets],
-  );
-
-  if (targets === null) return null;
-
-  const startEditing = () => {
-    const next: Record<string, string> = {};
-    for (const r of result.rows) {
-      next[r.ticker] = r.targetPct === null ? "" : String(r.targetPct);
-    }
-    setDraft(next);
-    setEditing(true);
-  };
-
-  const save = async () => {
-    setSaving(true);
-    const next: Record<string, number> = {};
-    // A box left empty removes the target rather than setting it to zero:
-    // "no plan for this" and "hold none of this" are different answers.
-    for (const [ticker, raw] of Object.entries(draft)) {
-      if (raw.trim() === "") continue;
-      const pct = Number(raw);
-      if (Number.isFinite(pct) && pct >= 0 && pct <= 100) next[ticker.toUpperCase()] = pct;
-    }
-    try {
-      const res = await fetch("/api/targets", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targets: next }),
-      });
-      const body: { targets?: Record<string, number> } = await res.json();
-      setTargets(body.targets ?? next);
-      setEditing(false);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const noTargets = Object.keys(targets).length === 0;
-
-  return (
-    <Card>
-      <CardHeader
-        title="Target allocation"
-        subtitle={
-          noTargets
-            ? "Set a share for each position and this will show how far off it has drifted"
-            : `Targets total ${result.targetTotal.toFixed(0)}%${
-                result.untargeted > 0
-                  ? ` · ${result.untargeted} position${result.untargeted === 1 ? "" : "s"} with no target`
-                  : ""
-              }`
-        }
-        action={
-          editing ? (
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-              <Button size="sm" onClick={save} disabled={saving}>
-                {saving ? "Saving…" : "Save targets"}
-              </Button>
-            </div>
-          ) : (
-            <Button variant="secondary" size="sm" onClick={startEditing}>
-              {noTargets ? "Set targets" : "Edit targets"}
-            </Button>
-          )
-        }
-      />
-      <div className="overflow-x-auto px-2 pb-3">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-[11px] uppercase tracking-wider text-ink-faint">
-              <th className="px-3 py-2 text-left font-medium">Security</th>
-              <th className="px-3 py-2 text-right font-medium">Value</th>
-              <th className="px-3 py-2 text-right font-medium">Actual</th>
-              <th className="px-3 py-2 text-right font-medium">Target</th>
-              <th className="px-3 py-2 text-right font-medium">Drift</th>
-              <th className="px-3 py-2 text-right font-medium">To rebalance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {result.rows.map((r) => (
-              <tr key={r.ticker} className="border-t border-line/60">
-                <td className="px-3 py-2.5">
-                  <span className="font-medium">{r.ticker}</span>
-                  <span className="ml-2 text-[11px] text-ink-faint">{r.name}</span>
-                </td>
-                <td className="px-3 py-2.5 text-right tabular-nums text-ink-dim">
-                  {fmtCAD(r.value)}
-                </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">
-                  {r.actualPct.toFixed(1)}%
-                </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">
-                  {editing ? (
-                    <Input
-                      type="number"
-                      step="any"
-                      min="0"
-                      max="100"
-                      className="ml-auto w-20 text-right"
-                      placeholder="—"
-                      value={draft[r.ticker] ?? ""}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                        setDraft((prev) => ({ ...prev, [r.ticker]: e.target.value }))
-                      }
-                    />
-                  ) : r.targetPct === null ? (
-                    <span className="text-ink-faint">—</span>
-                  ) : (
-                    `${r.targetPct.toFixed(1)}%`
-                  )}
-                </td>
-                <td
-                  className={cn(
-                    "px-3 py-2.5 text-right tabular-nums",
-                    r.driftPct === null
-                      ? "text-ink-faint"
-                      : Math.abs(r.driftPct) < 1
-                        ? "text-ink-dim"
-                        : r.driftPct > 0
-                          ? "text-amber-500"
-                          : "text-brand",
-                  )}
-                >
-                  {r.driftPct === null
-                    ? "—"
-                    : `${r.driftPct > 0 ? "+" : ""}${r.driftPct.toFixed(1)} pts`}
-                </td>
-                <td className="px-3 py-2.5 text-right font-medium tabular-nums">
-                  {r.driftValue === null ? (
-                    <span className="text-ink-faint">—</span>
-                  ) : (
-                    <span className={r.driftValue > 0 ? "text-amber-500" : "text-brand"}>
-                      {r.driftValue > 0 ? "sell " : "buy "}
-                      {fmtCAD(Math.abs(r.driftValue))}
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {!noTargets && result.targetTotal !== 100 && (
-        <p className="px-5 pb-4 text-xs text-ink-faint">
-          The targets add up to {result.targetTotal.toFixed(1)}%, not 100%. Every
-          drift is measured against the portfolio as it stands, so the figures
-          still hold — but a plan that does not add to all of it is missing a
-          piece.
-        </p>
-      )}
-    </Card>
-  );
-}
-
 export default function InvestmentsPage() {
   const ready = useReady();
   const holdings = useFinance((s) => s.holdings);
@@ -453,9 +258,14 @@ export default function InvestmentsPage() {
    * Sort order for the holdings table. Value descending matches how a portfolio
    * is usually read — biggest position first — so it stays the default.
    */
+  /*
+   * Class first, and value inside it — which is the shape of the portfolio
+   * rather than a ranking of twelve positions that happen to be held.
+   * Ordering by value alone put a small crypto holding between two equities.
+   */
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
-    key: "marketValue",
-    dir: "desc",
+    key: "assetClass",
+    dir: "asc",
   });
   const toggleSort = (key: SortKey) =>
     setSort((prev) =>
@@ -837,7 +647,7 @@ export default function InvestmentsPage() {
         <span className="flex items-center gap-2">
           <span>{holdings.length} holdings · values are manually tracked</span>
           {lastPriceUpdate && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-ink-faint">
+            <span className="inline-flex items-center gap-1 text-[0.6875rem] text-ink-faint">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-positive animate-pulse" />
               Prices live {lastPriceUpdate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </span>
@@ -941,7 +751,7 @@ export default function InvestmentsPage() {
                 yFmt={fmtCompact}
               />
               {allTime && allTime.unpriced.length > 0 && (
-                <p className="mt-2 text-center text-[11px] text-ink-faint">
+                <p className="mt-2 text-center text-[0.6875rem] text-ink-faint">
                   No price history for {allTime.unpriced.join(", ")} — valued at
                   book cost for the months held.
                 </p>
@@ -955,6 +765,11 @@ export default function InvestmentsPage() {
               {data.allocation.length > 0 ? (
                 <DonutChart
                   data={data.allocation}
+                  /* The same colour each class wears in the exposure chart
+                     below, so the two cards are one palette rather than two. */
+                  colors={Object.fromEntries(
+                    data.allocation.map((a) => [a.name, assetClassColor(a.name)]),
+                  )}
                   centerLabel="Invested"
                   centerValue={fmtCompact(data.totalValue)}
                   fmt={(n) => fmtCAD(n)}
@@ -988,7 +803,7 @@ export default function InvestmentsPage() {
               <p className="mt-2 text-xs leading-relaxed text-ink-dim">
                 Everything you put in against everything you got back and still hold.
               </p>
-              <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
                 {fmtCAD(returns.simple.contributed)} in · {fmtCAD(returns.simple.returned)}{" "}
                 back · {fmtCAD(returns.simple.held)} held. It ignores time entirely, so the
                 same figure could be one good year or five slow ones.
@@ -1010,7 +825,7 @@ export default function InvestmentsPage() {
               <p className="mt-2 text-xs leading-relaxed text-ink-dim">
                 What your actual dollars earned, counting when each one arrived.
               </p>
-              <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
                 Money added just before a fall drags this down; money added before a rise
                 lifts it. This is your return, and it is the one you cannot compare to an
                 index — the index never had your deposits.
@@ -1032,7 +847,7 @@ export default function InvestmentsPage() {
               <p className="mt-2 text-xs leading-relaxed text-ink-dim">
                 How the holdings performed, with deposits and withdrawals removed.
               </p>
-              <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
                 {returns.twrTotal === null
                   ? ""
                   : `${fmtPct(returns.twrTotal)} in total over ${returns.months} months, through ${returns.through}. `}
@@ -1145,7 +960,7 @@ export default function InvestmentsPage() {
           <Card>
             <CardHeader
               title="Holdings exposure"
-              subtitle="Every position, shaded by asset class"
+              subtitle="Every position, largest to smallest"
             />
             <div className="px-3 pb-4">
               {data.exposure.length > 0 ? (
@@ -1164,8 +979,6 @@ export default function InvestmentsPage() {
         </div>
 
         {/* Holdings table */}
-        <TargetAllocation rows={data.rows} />
-
         <Card>
           <CardHeader
             title="Holdings"
@@ -1183,8 +996,11 @@ export default function InvestmentsPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-line text-left text-[10px] uppercase tracking-wider text-ink-faint">
+                <tr className="border-b border-line text-left text-[0.625rem] uppercase tracking-wider text-ink-faint">
                   <SortHeader label="Position" sortKey="name" sort={sort} onSort={toggleSort} />
+                  {/* Sorting by class falls through to value, so it reads as
+                      the classes in turn and, inside each, largest first. */}
+                  <SortHeader label="Class" sortKey="assetClass" sort={sort} onSort={toggleSort} className="hidden sm:table-cell" />
                   <SortHeader label="Shares" sortKey="shares" sort={sort} onSort={toggleSort} align="right" className="hidden md:table-cell" />
                   <SortHeader label="Avg cost" unit="(CAD)" sortKey="avgCostCAD" sort={sort} onSort={toggleSort} align="right" className="hidden md:table-cell" />
                   <SortHeader label="Price" unit="(CAD)" sortKey="priceCAD" sort={sort} onSort={toggleSort} align="right" />
@@ -1223,7 +1039,7 @@ export default function InvestmentsPage() {
                   >
                     <td className="px-3 py-2.5">
                       <span className="flex items-center gap-2">
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-elevated text-[9px] font-bold tracking-wide text-brand">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-elevated text-[0.5625rem] font-bold tracking-wide text-brand">
                           {r.ticker.slice(0, 3)}
                         </span>
                         <span className="min-w-0">
@@ -1243,7 +1059,7 @@ export default function InvestmentsPage() {
                             <span className="truncate max-w-[100px]">{r.ticker}</span>
                             {r.closed && (
                               <span
-                                className="shrink-0 rounded bg-elevated px-1 py-px text-[8px] font-medium text-ink-faint"
+                                className="shrink-0 rounded bg-elevated px-1 py-px text-[0.5rem] font-medium text-ink-faint"
                                 title="Every share has been sold. Kept for the record of the realized gain and the dividends it paid."
                               >
                                 CLOSED
@@ -1253,14 +1069,14 @@ export default function InvestmentsPage() {
                             {r.accountIds.map((id) => (
                               <span
                                 key={id}
-                                className="shrink-0 rounded bg-elevated px-1 py-px text-[8px] font-medium text-ink-faint"
+                                className="shrink-0 rounded bg-elevated px-1 py-px text-[0.5rem] font-medium text-ink-faint"
                               >
                                 {accountLabel(id)}
                               </span>
                             ))}
                             {staleTickers.has(r.ticker) && (
                               <span
-                                className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[8px] font-medium text-amber-400"
+                                className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[0.5rem] font-medium text-amber-400"
                                 title="Last known price — the daily EODHD limit is used up, this updates automatically after 00:00 GMT"
                               >
                                 STALE
@@ -1270,12 +1086,21 @@ export default function InvestmentsPage() {
                               /* Not amber: that is what STALE uses, and a
                                  listing currency is a fact about the security,
                                  not a warning about its price. */
-                              <span className="shrink-0 rounded bg-info/15 px-1 py-px text-[8px] font-medium text-info">
+                              <span className="shrink-0 rounded bg-info/15 px-1 py-px text-[0.5rem] font-medium text-info">
                                 USD
                               </span>
                             )}
                           </span>
                         </span>
+                      </span>
+                    </td>
+                    <td className="hidden px-3 py-2.5 sm:table-cell">
+                      <span className="flex items-center gap-1.5 whitespace-nowrap text-ink-dim">
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: assetClassColor(r.assetClass) }}
+                        />
+                        {r.assetClass}
                       </span>
                     </td>
                     <td className="hidden px-3 py-2.5 text-right tabular-nums md:table-cell">
@@ -1328,7 +1153,7 @@ export default function InvestmentsPage() {
                     <td className="hidden px-3 py-2.5 xl:table-cell">
                       <div className="flex items-center gap-2">
                         <Progress value={r.weightPct} max={100} className="w-20" />
-                        <span className="w-10 text-right text-[11px] tabular-nums text-ink-faint">
+                        <span className="w-10 text-right text-[0.6875rem] tabular-nums text-ink-faint">
                           {r.weightPct.toFixed(1)}%
                         </span>
                       </div>
@@ -1358,15 +1183,17 @@ export default function InvestmentsPage() {
                     lots.map((lot) => (
                       <tr key={lot.id} className="border-b border-line/50 bg-elevated/30 last:border-0">
                         <td className="py-2 pl-12 pr-3">
-                          <span className="text-[11px] text-ink-dim">
+                          <span className="text-[0.6875rem] text-ink-dim">
                             {accountLabel(lot.accountId)}
                           </span>
                           {lot.shares <= 0 && (
-                            <span className="ml-1 rounded bg-elevated px-1 py-px text-[8px] font-medium text-ink-faint">
+                            <span className="ml-1 rounded bg-elevated px-1 py-px text-[0.5rem] font-medium text-ink-faint">
                               CLOSED
                             </span>
                           )}
                         </td>
+                        {/* The class belongs to the security, not the lot. */}
+                        <td className="hidden px-3 py-2 sm:table-cell" />
                         <td className="hidden px-3 py-2 text-right tabular-nums text-ink-dim md:table-cell">
                           {lot.shares.toLocaleString("en-US")}
                         </td>
@@ -1397,7 +1224,7 @@ export default function InvestmentsPage() {
                 })}
                 {data.rows.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="py-12 text-center text-xs text-ink-faint">
+                    <td colSpan={11} className="py-12 text-center text-xs text-ink-faint">
                       No holdings yet — log your first trade below.
                     </td>
                   </tr>
