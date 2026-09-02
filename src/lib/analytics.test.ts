@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   allTimeSeries,
   budgetRows,
+  incomeBySource,
   chainedReturns,
   netExternalFlows,
   annualized,
@@ -1725,5 +1726,79 @@ describe("simpleReturn", () => {
 
   test("nothing paid in has no percentage to give", () => {
     assert.equal(simpleReturn([], 500).pct, null);
+  });
+});
+
+describe("incomeBySource", () => {
+  const pay = (date: string, amount: number, category = "Salary") =>
+    txn({ date, amount, type: "income", category });
+
+  test("splits a month by where the money came from", () => {
+    const b = incomeBySource(
+      [pay("2026-08-31", 4000), pay("2026-08-31", 500, "Interest")],
+      1,
+      "2026-08",
+    );
+    assert.deepEqual(
+      b.sources.map((s) => [s.category, s.total]),
+      [["Salary", 4000], ["Interest", 500]],
+    );
+    assert.equal(b.total, 4500);
+  });
+
+  test("shares are of income, and add up", () => {
+    const b = incomeBySource([pay("2026-08-31", 3000), pay("2026-08-31", 1000, "Gifts")], 1, "2026-08");
+    assert.equal(Math.round(b.sources[0].share), 75);
+    assert.equal(Math.round(b.sources.reduce((n, s) => n + s.share, 0)), 100);
+  });
+
+  test("averages over the window, not over the months it arrived in", () => {
+    // One bonus in a twelve-month window is $100 a month, not $1,200.
+    const b = incomeBySource([pay("2026-08-31", 1200, "Additional Income")], 12, "2026-08");
+    assert.equal(b.sources[0].average, 100);
+    assert.equal(b.sources[0].months, 1);
+  });
+
+  test("the comparison is the window before, not the month before", () => {
+    const b = incomeBySource(
+      [pay("2026-08-31", 1000), pay("2025-08-31", 800)],
+      12,
+      "2026-08",
+    );
+    assert.equal(b.sources[0].previous, 800);
+    assert.equal(b.sources[0].change, 0.25);
+  });
+
+  test("a source that is new has no change, rather than a rise", () => {
+    const b = incomeBySource([pay("2026-08-31", 500, "Dividends")], 12, "2026-08");
+    assert.equal(b.sources[0].change, null);
+  });
+
+  test("a source that stopped is a fall, not an absence", () => {
+    const b = incomeBySource(
+      [pay("2026-08-31", 1000), pay("2025-08-31", 700, "Refund")],
+      12,
+      "2026-08",
+    );
+    const refund = b.sources.find((s) => s.category === "Refund");
+    assert.equal(refund, undefined);
+  });
+
+  test("every month of the window gets a row, empty ones included", () => {
+    const b = incomeBySource([pay("2026-08-31", 100)], 3, "2026-08");
+    assert.deepEqual(b.months.map((m) => m.key), ["2026-06", "2026-07", "2026-08"]);
+    assert.equal(b.months[0].Salary, 0);
+    assert.equal(b.months[2].Salary, 100);
+  });
+
+  test("spending is not income", () => {
+    const b = incomeBySource([txn({ amount: 900, type: "expense", date: "2026-08-31" })], 1, "2026-08");
+    assert.equal(b.total, 0);
+    assert.deepEqual(b.sources, []);
+  });
+
+  test("a pension contribution is income you cannot spend", () => {
+    const b = incomeBySource([pay("2026-08-31", 400, "RSP / Pension")], 1, "2026-08");
+    assert.equal(b.sources[0].spendable, false);
   });
 });

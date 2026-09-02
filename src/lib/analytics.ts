@@ -18,6 +18,7 @@ import {
   lastMonthKeys,
   lastCompleteMonthKey,
   monthKeyOf,
+  previousMonthKey,
   todayISO,
 } from "./format";
 import { DatedFlow, xirr } from "./xirr";
@@ -283,6 +284,120 @@ export function avgSpendByCategory(
   return [...totals.entries()]
     .map(([name, cents]) => ({ name, value: roundMoney(fromCents(cents) / n) }))
     .sort((a, b) => b.value - a.value);
+}
+
+export interface IncomeSource {
+  category: string;
+  /** Total over the window. */
+  total: number;
+  /** Per month of the window, not per month it arrived in. */
+  average: number;
+  /** Share of the window's income, as a percentage. */
+  share: number;
+  /** How many months of the window it arrived in at all. */
+  months: number;
+  /** The same total over the window before this one. */
+  previous: number;
+  /**
+   * Change against that window, as a fraction. Null where there is nothing to
+   * compare against — a source that is new is not "up 100%", it is new.
+   */
+  change: number | null;
+  /** Whether it lands somewhere you can spend from. */
+  spendable: boolean;
+}
+
+export interface IncomeBreakdown {
+  /** One row per month, with a column per source. Oldest first. */
+  months: Record<string, number | string>[];
+  /** Every source that appeared, largest first. */
+  sources: IncomeSource[];
+  total: number;
+  average: number;
+  windowMonths: number;
+}
+
+/**
+ * What income is made of, and which way each part is moving.
+ *
+ * Kept apart from `stackedSpend` because the two questions are not symmetrical.
+ * Spending is asked about as a share — a month is a whole, and what matters is
+ * how it divided. Income is asked about in dollars: a raise and a bonus both
+ * raise the total, and normalising them away would hide the only thing the
+ * chart is for.
+ *
+ * The sources are not a fixed list. Whatever categories the record actually
+ * holds are what come back, so a source that starts arriving appears on its
+ * own rather than waiting for someone to add it to a constant.
+ */
+export function incomeBySource(
+  transactions: Transaction[],
+  n = 12,
+  end = currentMonthKey(),
+): IncomeBreakdown {
+  const keys = lastMonthKeys(n, end);
+  const window = new Set(keys);
+  /* The n months before those, for the comparison. */
+  const before = new Set(lastMonthKeys(n, previousMonthKey(keys[0])));
+
+  const totals = new Map<string, number>();
+  const prior = new Map<string, number>();
+  const present = new Map<string, Set<string>>();
+  const perMonth = new Map<string, Map<string, number>>(
+    keys.map((k) => [k, new Map<string, number>()]),
+  );
+
+  for (const t of transactions) {
+    if (t.type !== "income") continue;
+    const key = monthKeyOf(t.date);
+    const cents = toCents(t.amount);
+    if (before.has(key)) {
+      prior.set(t.category, (prior.get(t.category) ?? 0) + cents);
+      continue;
+    }
+    if (!window.has(key)) continue;
+    totals.set(t.category, (totals.get(t.category) ?? 0) + cents);
+    const month = perMonth.get(key)!;
+    month.set(t.category, (month.get(t.category) ?? 0) + cents);
+    const seen = present.get(t.category) ?? new Set<string>();
+    seen.add(key);
+    present.set(t.category, seen);
+  }
+
+  const totalCents = [...totals.values()].reduce((sum, c) => sum + c, 0);
+
+  const sources: IncomeSource[] = [...totals.entries()]
+    .map(([category, cents]) => {
+      const previous = fromCents(prior.get(category) ?? 0);
+      const total = fromCents(cents);
+      return {
+        category,
+        total,
+        average: roundMoney(total / n),
+        share: totalCents > 0 ? (cents / totalCents) * 100 : 0,
+        months: present.get(category)?.size ?? 0,
+        previous,
+        change: previous > 0 ? (total - previous) / previous : null,
+        spendable: !NON_SPENDABLE_INCOME.has(category),
+      };
+    })
+    .sort((a, b) => b.total - a.total);
+
+  const months = keys.map((key) => {
+    const row: Record<string, number | string> = { key, label: labelMonth(key) };
+    for (const s of sources) {
+      row[s.category] = fromCents(perMonth.get(key)?.get(s.category) ?? 0);
+    }
+    return row;
+  });
+
+  return {
+    months,
+    sources,
+    total: fromCents(totalCents),
+    average: roundMoney(fromCents(totalCents) / n),
+    windowMonths: n,
+  };
 }
 
 /** Monthly totals for each of the given categories (top-N spending). */
