@@ -1,6 +1,12 @@
-import { labelMonth, lastMonthKeys, monthKeyOf } from "./format";
+import {
+  labelMonth,
+  lastMonthKeys,
+  monthKeyOf,
+  previousMonthKey,
+} from "./format";
 import { roundMoney } from "./money";
 import type { ImportedRow } from "./csv";
+import type { Transaction } from "./types";
 
 /**
  * What the monthly checklist knows that the general importer does not: it is
@@ -69,6 +75,29 @@ export const STANDARD_INCOME_BOXES = [
   { key: "interest", label: "Interest & cashback", category: "Interest" },
 ] as const;
 
+/**
+ * What the given categories came to in the month before this one.
+ *
+ * Only the month immediately before, and only where something was recorded:
+ * reaching further back would carry a figure from a job or a plan that may no
+ * longer exist, and the point is to repeat the last one, not to guess.
+ */
+export function previousMonthIncome(
+  transactions: Transaction[],
+  month: string,
+  categories: readonly string[],
+): Record<string, number> {
+  const want = new Set(categories);
+  const previous = previousMonthKey(month);
+  const out: Record<string, number> = {};
+  for (const t of transactions) {
+    if (t.type !== "income" || !want.has(t.category)) continue;
+    if (monthKeyOf(t.date) !== previous) continue;
+    out[t.category] = roundMoney((out[t.category] ?? 0) + t.amount);
+  }
+  return out;
+}
+
 export interface IncomeBox {
   key: string;
   label: string;
@@ -79,6 +108,12 @@ export interface IncomeBox {
   rows: number;
   /** True for a box the import added rather than one always asked for. */
   extra: boolean;
+  /**
+   * What the same category came to in the month before, when the import found
+   * nothing for it. Filled in as a starting figure, and said so in the UI —
+   * carried silently it would be a number nobody entered.
+   */
+  carried?: number;
 }
 
 /**
@@ -90,7 +125,17 @@ export interface IncomeBox {
  * dropping would lose it: these rows are not written anywhere else, since this
  * step is the only thing that records income.
  */
-export function incomeBoxes(rows: ImportedRow[]): IncomeBox[] {
+export function incomeBoxes(
+  rows: ImportedRow[],
+  /**
+   * The month before the one being closed, by category. A pension
+   * contribution is the same figure month after month and rarely appears on
+   * the statement the checklist reads — it is deducted at source — so a box
+   * left at zero is nearly always the previous month's figure repeated, not a
+   * month it was not paid.
+   */
+  carriedForward: Record<string, number> = {},
+): IncomeBox[] {
   const totals = new Map<string, { amount: number; rows: number }>();
   for (const r of rows) {
     if (r.type !== "income" || !r.include) continue;
@@ -106,6 +151,10 @@ export function incomeBoxes(rows: ImportedRow[]): IncomeBox[] {
     category: b.category,
     detected: roundMoney(totals.get(b.category)?.amount ?? 0),
     rows: totals.get(b.category)?.rows ?? 0,
+    carried:
+      (totals.get(b.category)?.amount ?? 0) === 0 && carriedForward[b.category] > 0
+        ? roundMoney(carriedForward[b.category])
+        : undefined,
     extra: false,
   }));
 

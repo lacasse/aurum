@@ -345,6 +345,7 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
           institution: input.institution,
           kind: input.kind,
           balance: input.balance,
+          balanceUSD: input.balanceUSD,
           history: [{ month: currentMonthKey(), value: input.balance }],
           registration: input.registration,
           pensionAnnual: input.pensionAnnual,
@@ -366,6 +367,13 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
                 institution: input.institution,
                 kind: input.kind,
                 balance: input.balance,
+                /*
+                 * Left out here once, which meant the US-dollar box on the
+                 * account form did nothing: the spread above carried the old
+                 * figure forward and the typed one was dropped on the way to
+                 * the server. Every other field on the form was copied.
+                 */
+                balanceUSD: input.balanceUSD,
                 registration: input.registration,
                 pensionAnnual: input.pensionAnnual,
                 pensionService: input.pensionService,

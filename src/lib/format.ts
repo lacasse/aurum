@@ -100,10 +100,10 @@ export function lastCompleteMonthKey(): string {
   return previousMonthKey(currentMonthKey());
 }
 
-/** "2026-08" -> "Aug ’26" */
+/** "2026-08" -> "Aug 2026" */
 export function labelMonth(key: string): string {
   const [y, m] = key.split("-").map(Number);
-  return `${MONTH_SHORT[m - 1]} ’${String(y).slice(2)}`;
+  return `${MONTH_SHORT[m - 1]} ${y}`;
 }
 
 /** "2026-08-25" -> "Aug 25, 2026" */
