@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type MutableRefObject, type ReactNode } from "react";
 import { Check, Loader2, X } from "lucide-react";
 import {
   ACCOUNT_KINDS,
@@ -18,6 +18,7 @@ import {
   Currency,
   Holding,
   INCOME_CATEGORIES,
+  alphabetical,
   RecurrenceFrequency,
   RecurringRule,
   Registration,
@@ -27,7 +28,7 @@ import {
   isPension,
   supportsRegistration,
 } from "@/lib/types";
-import { todayISO } from "@/lib/format";
+import { fmtCAD, todayISO } from "@/lib/format";
 import { useFinance } from "@/lib/store";
 import { useTickerValidation } from "@/lib/hooks";
 import { isCoinTicker } from "@/lib/market";
@@ -100,7 +101,7 @@ function TransactionFormInner({
   const firstCategory = (t: TxnType) =>
     t === "income" ? INCOME_CATEGORIES[0] : userCategories[0] ?? "Other";
   const optionsFor = (t: TxnType): readonly string[] =>
-    t === "income" ? INCOME_CATEGORIES : userCategories;
+    alphabetical(t === "income" ? INCOME_CATEGORIES : userCategories);
 
   const [type, setType] = useState<TxnType>(initial?.type ?? "expense");
   const [amount, setAmount] = useState(initial ? String(initial.amount) : "");
@@ -1091,6 +1092,8 @@ export function TradeEntry({
   initial,
   onStage,
   submitLabel,
+  hideSubmit,
+  submitRef,
 }: {
   onComplete?: () => void;
   /**
@@ -1103,6 +1106,15 @@ export function TradeEntry({
   onStage?: (batch: TradeBatch, rows: TradeInput[]) => void;
   /** Overrides the button's wording where "submit" would be a lie. */
   submitLabel?: string;
+  /**
+   * Drops the form's own submit button and hands the trigger out instead.
+   *
+   * The monthly checklist wants one row of buttons at the foot of the step,
+   * not a submit inside the form and a Next below it — two buttons a step
+   * apart, one of which quietly did nothing.
+   */
+  hideSubmit?: boolean;
+  submitRef?: MutableRefObject<(() => void) | null>;
   /**
    * Rows to open with, when something has already been read out of a file.
    * Read once, on mount: they are a starting point to be edited, and
@@ -1278,6 +1290,51 @@ export function TradeEntry({
     commit([]);
   };
 
+  /*
+   * Handed out after each render rather than during it: `process` closes over
+   * the current rows, and a trigger captured once would submit the form as it
+   * was on mount.
+   */
+  useEffect(() => {
+    if (!submitRef) return;
+    submitRef.current = process;
+    return () => {
+      submitRef.current = null;
+    };
+  });
+
+  /**
+   * What the row is worth, in CAD.
+   *
+   * A dividend is the one row where quantity is not a multiplier — it is
+   * pinned at 1 and the amount is typed into the price — so the arithmetic is
+   * the same, but showing it matters most there: "0.42" in a price box is not
+   * a figure anyone can check against a statement, and the total is.
+   */
+  const rowTotalCAD = (row: TradeRow): number => {
+    const qty = Number(row.quantity);
+    const px = Number(row.price);
+    if (!Number.isFinite(qty) || !Number.isFinite(px) || qty <= 0 || px <= 0) {
+      return 0;
+    }
+    if (row.currency === "USD") {
+      const typed = Number(row.cadAmount);
+      return Number.isFinite(typed) && typed > 0 ? typed : qty * px * usdCadRate;
+    }
+    return qty * px;
+  };
+
+  const active = rows.filter((r) => !isBlankRow(r));
+  const bought = active
+    .filter((r) => r.action === "buy")
+    .reduce((sum, r) => sum + rowTotalCAD(r), 0);
+  const sold = active
+    .filter((r) => r.action === "sell")
+    .reduce((sum, r) => sum + rowTotalCAD(r), 0);
+  const received = active
+    .filter((r) => r.action === "dividend" || r.action === "reward")
+    .reduce((sum, r) => sum + rowTotalCAD(r), 0);
+
   return (
     <div className="space-y-3">
       {rows.map((row, idx) => (
@@ -1286,7 +1343,7 @@ export function TradeEntry({
           className="grid items-end gap-2 rounded-lg border border-line bg-elevated/60 p-3"
           style={{
             gridTemplateColumns:
-              "minmax(110px,1fr) minmax(80px,100px) minmax(80px,110px) minmax(60px,80px) minmax(60px,90px) minmax(90px,120px) minmax(70px,90px)" +
+              "minmax(110px,1fr) minmax(80px,100px) minmax(80px,110px) minmax(60px,80px) minmax(60px,90px) minmax(90px,140px) minmax(70px,90px) minmax(80px,110px)" +
               (rows.length > 1 ? " 32px" : ""),
           }}
         >
@@ -1364,6 +1421,14 @@ export function TradeEntry({
               ))}
             </Select>
           </Field>
+          <Field label={idx === 0 ? "Total" : undefined}>
+            <p
+              className="flex h-9 items-center justify-end px-1 text-sm tabular-nums text-ink-dim"
+              aria-label="Row total"
+            >
+              {rowTotalCAD(row) > 0 ? fmtCAD(rowTotalCAD(row), 2) : "—"}
+            </p>
+          </Field>
           {rows.length > 1 && (
             <button
               type="button"
@@ -1384,14 +1449,45 @@ export function TradeEntry({
         </p>
       )}
 
+      {active.length > 0 && (bought > 0 || sold > 0 || received > 0) && (
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-faint">
+          {bought > 0 && (
+            <span>
+              Bought{" "}
+              <span className="font-semibold tabular-nums text-ink">
+                {fmtCAD(bought, 2)}
+              </span>
+            </span>
+          )}
+          {sold > 0 && (
+            <span>
+              Sold{" "}
+              <span className="font-semibold tabular-nums text-ink">
+                {fmtCAD(sold, 2)}
+              </span>
+            </span>
+          )}
+          {received > 0 && (
+            <span>
+              Received{" "}
+              <span className="font-semibold tabular-nums text-positive">
+                {fmtCAD(received, 2)}
+              </span>
+            </span>
+          )}
+        </p>
+      )}
+
       {error && <p className="text-xs text-negative">{error}</p>}
       {ok && <p className="text-xs text-positive">{ok}</p>}
 
-      <div className="flex items-center gap-2">
-        <Button type="button" onClick={process}>
-          {submitLabel ?? "Submit trades"}
-        </Button>
-      </div>
+      {!hideSubmit && (
+        <div className="flex items-center gap-2">
+          <Button type="button" onClick={process}>
+            {submitLabel ?? "Submit trades"}
+          </Button>
+        </div>
+      )}
 
       <Modal
         open={pending != null}
@@ -1459,7 +1555,7 @@ function RecurringFormInner({
   const firstCategory = (t: TxnType) =>
     t === "income" ? INCOME_CATEGORIES[0] : userCategories[0] ?? "Other";
   const optionsFor = (t: TxnType): readonly string[] =>
-    t === "income" ? INCOME_CATEGORIES : userCategories;
+    alphabetical(t === "income" ? INCOME_CATEGORIES : userCategories);
 
   const [type, setType] = useState<TxnType>(initial?.type ?? "expense");
   const [amount, setAmount] = useState(initial ? String(initial.amount) : "");
