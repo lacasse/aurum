@@ -135,7 +135,7 @@ function SectionHeading({ title, note }: { title: string; note: string }) {
       <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-dim">
         {title}
       </h2>
-      <span className="text-[11px] text-ink-faint">{note}</span>
+      <span className="text-[0.6875rem] text-ink-faint">{note}</span>
     </div>
   );
 }
@@ -376,7 +376,6 @@ export default function DashboardPage() {
   const nwPrev = nw[nw.length - 2] ?? nwLast;
   const nwDelta =
     nwPrev.net !== 0 ? ((nwLast.net - nwPrev.net) / Math.abs(nwPrev.net)) * 100 : 0;
-  const nwFirst = data.nwAll[0];
 
   const portLast = data.port[data.port.length - 1];
   const portPrev = data.port[data.port.length - 2] ?? portLast;
@@ -541,7 +540,7 @@ export default function DashboardPage() {
             * between them left for the reader to assemble. It is one idea:
             * what the money would pay you, against what you spend.
             */}
-          <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">
+          <p className="mt-3 text-[0.6875rem] leading-relaxed text-ink-faint">
             Drawing{" "}
             <span className="font-medium text-ink-dim">
               {(fi.rate * 100).toFixed(1)}% a year
@@ -668,11 +667,11 @@ export default function DashboardPage() {
                       className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
                       style={{ background: CLASS_COLORS[c] }}
                     />
-                    <span className="text-[11px] text-ink-faint">{c}</span>
+                    <span className="text-[0.6875rem] text-ink-faint">{c}</span>
                     <span className="text-sm font-semibold tabular-nums">
                       {fmtCompact(bandsLast[c])}
                     </span>
-                    <span className="text-[11px] tabular-nums text-ink-faint">
+                    <span className="text-[0.6875rem] tabular-nums text-ink-faint">
                       {owned > 0 ? `${Math.round((bandsLast[c] / owned) * 100)}%` : "—"}
                     </span>
                   </div>
@@ -681,7 +680,7 @@ export default function DashboardPage() {
               {bandsLast.liabilities > 0 && (
                 <div className="flex items-baseline gap-2">
                   <span className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full border border-negative" />
-                  <span className="text-[11px] text-ink-faint">Debt</span>
+                  <span className="text-[0.6875rem] text-ink-faint">Debt</span>
                   <span className="text-sm font-semibold tabular-nums text-negative">
                     −{fmtCompact(bandsLast.liabilities)}
                   </span>
@@ -858,7 +857,7 @@ export default function DashboardPage() {
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[560px] text-sm">
                   <thead>
-                    <tr className="border-y border-line text-left text-[10px] uppercase tracking-wider text-ink-faint">
+                    <tr className="border-y border-line text-left text-[0.625rem] uppercase tracking-wider text-ink-faint">
                       <th className="px-5 py-2 font-medium">Source</th>
                       <th className="px-3 py-2 text-right font-medium">
                         Per month
@@ -947,7 +946,7 @@ export default function DashboardPage() {
                 </table>
               </div>
               {data.income.sources.some((s) => !s.spendable) && (
-                <p className="px-5 pb-4 pt-3 text-[11px] leading-relaxed text-ink-faint">
+                <p className="px-5 pb-4 pt-3 text-[0.6875rem] leading-relaxed text-ink-faint">
                   * Counted as income, but it never reaches an account you can
                   spend from — a pension contribution, a dividend kept in the
                   brokerage that earned it, or money borrowed.
@@ -1022,11 +1021,11 @@ export default function DashboardPage() {
                         cat === OTHER_BAND ? "var(--ink-faint)" : data.catColors[cat],
                     }}
                   />
-                  <span className="text-[11px] text-ink-faint">{cat}</span>
+                  <span className="text-[0.6875rem] text-ink-faint">{cat}</span>
                   <span className="text-sm font-semibold tabular-nums">
                     {fmtCAD(avg)}
                   </span>
-                  <span className="text-[11px] tabular-nums text-ink-faint">
+                  <span className="text-[0.6875rem] tabular-nums text-ink-faint">
                     {totalSpend > 0 ? `${Math.round((avg / totalSpend) * 100)}%` : "—"}
                   </span>
                 </div>
@@ -1034,12 +1033,6 @@ export default function DashboardPage() {
             })}
           </div>
         </Card>
-
-        <p className="text-center text-[11px] text-ink-faint">
-          Net worth changed {fmtSignedCAD(nwLast.net - nwPrev.net)} ({fmtPct(nwDelta)})
-          over the last month · {fmtSignedCAD(nwLast.net - nwFirst.net)} since{" "}
-          {labelMonth(nwFirst.key)}
-        </p>
       </div>
 
       <MonthlyChecklistModal open={checklistOpen} onClose={() => setChecklistOpen(false)} />
