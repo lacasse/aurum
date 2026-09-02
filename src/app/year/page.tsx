@@ -129,7 +129,7 @@ export default function YearPage() {
     >
       <div className="space-y-4">
         {!selected.complete && (
-          <p className="px-1 text-[11px] text-ink-faint">
+          <p className="px-1 text-[0.6875rem] text-ink-faint">
             {selected.year} is still running — its totals are the year so far, and
             the comparison is against a full year.
           </p>
@@ -206,7 +206,7 @@ export default function YearPage() {
           <div className="overflow-x-auto px-2 pb-3">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wider text-ink-faint">
+                <tr className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
                   <th className="px-3 py-2 text-left font-medium">Year</th>
                   <th className="px-3 py-2 text-right font-medium">Income</th>
                   <th className="px-3 py-2 text-right font-medium">Expenses</th>
@@ -236,7 +236,7 @@ export default function YearPage() {
                     <td className="whitespace-nowrap px-3 py-2.5 font-medium tabular-nums">
                       {r.year}
                       {!r.complete && (
-                        <span className="ml-2 text-[10px] font-normal text-ink-faint">
+                        <span className="ml-2 text-[0.625rem] font-normal text-ink-faint">
                           so far
                         </span>
                       )}
@@ -314,7 +314,7 @@ export default function YearPage() {
               </tbody>
             </table>
           </div>
-          <p className="px-5 pb-4 text-[11px] leading-relaxed text-ink-faint">
+          <p className="px-5 pb-4 text-[0.6875rem] leading-relaxed text-ink-faint">
             <strong className="text-ink-dim">Kept</strong> is everything in less
             everything out, and <strong className="text-ink-dim">rate</strong> is
             that over what came in.{" "}

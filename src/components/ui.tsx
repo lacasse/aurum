@@ -116,7 +116,7 @@ export function Field({
         </span>
       ) : null}
       {children}
-      {hint ? <span className="mt-1 block text-[11px] text-ink-faint">{hint}</span> : null}
+      {hint ? <span className="mt-1 block text-[0.6875rem] text-ink-faint">{hint}</span> : null}
     </label>
   );
 }
@@ -154,7 +154,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+        "inline-flex items-center rounded-md px-1.5 py-0.5 text-[0.6875rem] font-medium",
         tone === "neutral" && "bg-elevated text-ink-dim",
         tone === "positive" && "bg-positive/10 text-positive",
         tone === "negative" && "bg-negative/10 text-negative",

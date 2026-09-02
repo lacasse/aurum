@@ -143,7 +143,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </span>
         <span>
           <span className="block text-sm font-semibold tracking-tight">Aurum</span>
-          <span className="block text-[11px] text-ink-faint">Personal Finance</span>
+          <span className="block text-[0.6875rem] text-ink-faint">Personal Finance</span>
         </span>
       </Link>
 
@@ -171,7 +171,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="space-y-1 border-t border-line pt-3">
         <div className="flex items-center justify-between px-3 pb-1">
-          <span className="text-[11px] uppercase tracking-wider text-ink-faint">
+          <span className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
             Theme
           </span>
           <ThemeToggle />
@@ -246,7 +246,7 @@ export function Shell({
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8">
           {children}
         </main>
-        <footer className="px-6 pb-6 pt-2 text-center text-[11px] text-ink-faint">
+        <footer className="px-6 pb-6 pt-2 text-center text-[0.6875rem] text-ink-faint">
           Aurum · data stored in PostgreSQL via Docker · not financial advice
         </footer>
       </div>
