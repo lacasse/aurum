@@ -25,43 +25,23 @@ import {
 import { cn } from "./ui";
 
 /**
- * Categorical colours, assigned in this order and never cycled into.
- *
- * The order is the safety mechanism rather than decoration. Categories are
- * coloured by rank and then stacked in that same rank, so slots that sit next
- * to each other in this list are the ones that touch on a chart — and touching
- * is where confusion happens. Cyan sat directly beside green here, a pair that
- * measures ΔE 12.1 for normal vision, under the 15 floor: full-colour readers
- * genuinely struggle to tell them apart, and they were the second and third
- * biggest categories on the spending stack.
- *
- * Re-ordered so every adjacent pair clears both floors — worst is ΔE 23.1 for
- * normal vision and 8.5 simulating deuteranopia. Moving a colour means
- * measuring again rather than assuming it still holds.
- */
-export const PALETTE = [
-  "#8b5cf6",
-  "#34d399",
-  "#f59e0b",
-  "#22d3ee",
-  "#f472b6",
-  "#a3e635",
-  "#60a5fa",
-  "#fb7185",
-];
-
-/**
  * One colour per category, assigned in the order given.
  *
  * Shared so that a category is the same colour wherever it is drawn: the
  * average-month donut and the stacked trend beside it are the same spending
  * seen two ways, and reading them together means matching Housing to Housing
  * by eye. Pass the categories in one ranking and both charts agree.
+ *
+ * Drawn from the same spectrum as the holdings exposure ring, so every ring in
+ * the app is one palette rather than a categorical set here and a spectrum
+ * there. Spread across however many categories there are, which is what keeps
+ * a five-slice donut from using five colours out of one corner of it.
  */
 export function categoryColors(names: readonly string[]): Record<string, string> {
+  const unique = [...new Set(names)];
   const out: Record<string, string> = {};
-  names.forEach((name, i) => {
-    if (out[name] === undefined) out[name] = PALETTE[i % PALETTE.length];
+  unique.forEach((name, i) => {
+    out[name] = spectrumAt(i, unique.length);
   });
   return out;
 }
@@ -450,8 +430,9 @@ export function DonutChart({
    * by name, so ordering the ring cannot repaint anything.
    */
   const rows = byValueDesc(data);
+  /* The exposure ring's spectrum, spread across the slices there are. */
   const colorOf = (name: string, i: number) =>
-    colors?.[name] ?? PALETTE[i % PALETTE.length];
+    colors?.[name] ?? spectrumAt(i, rows.length);
   return (
     <div>
       <div className="relative">

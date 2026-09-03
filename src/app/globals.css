@@ -9,19 +9,32 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #f6f6f7;
-  --surface: #ffffff;
-  --elevated: #f0f0f2;
-  --line: #e4e4e8;
-  --ink: #17171c;
-  --ink-dim: #565660;
-  --ink-faint: #8b8b95;
+  /*
+   * Cream rather than white, and warm all the way down.
+   *
+   * The page was #f6f6f7 with #ffffff cards — a cool grey holding pure white,
+   * which is what a browser does by default rather than a decision anybody
+   * made. These are the same steps at the same distances apart, rotated to a
+   * warm hue: paper instead of screen. The neutrals move with them, because a
+   * cool grey text on a warm ground is the one thing that reads as a mistake.
+   *
+   * The steps still separate — surface sits above background, elevated below
+   * it — and every text pair clears its WCAG bar on the new ground: ink 17.1:1,
+   * ink-dim 7.7:1, ink-faint 3.7:1 for the incidental sizes it is used at.
+   */
+  --background: #f7f3ea;
+  --surface: #fffdf7;
+  --elevated: #f1ece1;
+  --line: #e5ddcf;
+  --ink: #1b1a17;
+  --ink-dim: #56514a;
+  --ink-faint: #8a8278;
   --brand: #7c3aed;
   --brand-strong: #6d28d9;
   --positive: #059669;
   --negative: #e11d48;
   /* Neutral-informational, for tags that state a fact rather than warn. Dark
-     enough to read on the white card, where a mid-blue washes out. */
+     enough to read on the cream card, where a mid-blue washes out. */
   --info: #1d4ed8;
   color-scheme: light;
 }
