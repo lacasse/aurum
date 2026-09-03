@@ -48,7 +48,6 @@ import {
   simpleReturn,
   portfolioSeries,
   holdingExposure,
-  type SnapshotHistory,
 } from "@/lib/analytics";
 import {
   fmtCompact,
@@ -282,7 +281,6 @@ export default function InvestmentsPage() {
   const [showClosed, setShowClosed] = useState(false);
   const [growthRange, setGrowthRange] = useState<RangeKey>("ALL");
   const [twrRange, setTwrRange] = useState<RangeKey>("ALL");
-  const [snapshots, setSnapshots] = useState<SnapshotHistory>({});
 
   /* Tickers whose per-account lots are shown; only ever set for pooled rows. */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -427,23 +425,14 @@ export default function InvestmentsPage() {
   /*
    * Recorded month-end values — the best source there is for what the
    * portfolio was worth, and the only one that reaches months with no trade
-   * behind them. Fetched once: it is history, and history does not move.
+   * behind them. From the store: it is history, it does not move, and the
+   * three other pages that chart it share this one fetch.
    */
+  const snapshots = useFinance((s) => s.snapshotHistory);
+  const loadSnapshotHistory = useFinance((s) => s.loadSnapshotHistory);
   useEffect(() => {
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      fetch("/api/snapshots/history", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-        .then((d: { months: SnapshotHistory }) => {
-          if (!cancelled) setSnapshots(d.months ?? {});
-        })
-        .catch(() => {});
-    }, 0);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, []);
+    loadSnapshotHistory();
+  }, [loadSnapshotHistory]);
 
   /*
    * How far back the charts can go: the earlier of the first recorded trade

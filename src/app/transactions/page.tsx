@@ -42,6 +42,9 @@ import {
   transactionEndpoints,
 } from "@/lib/types";
 
+/** Rows drawn at once. Enough to fill a tall screen and then some. */
+const PAGE = 100;
+
 export default function TransactionsPage() {
   const ready = useReady();
   const accounts = useFinance((s) => s.accounts);
@@ -70,21 +73,47 @@ export default function TransactionsPage() {
     return [...seen].sort().reverse().slice(0, 24);
   }, [transactions]);
 
+  /*
+   * One pass rather than five chained filters, each of which allocated an
+   * array of up to fourteen hundred rows to hand to the next. The order of the
+   * tests is the order they are cheapest in: a string comparison before a
+   * date parse before three lowercased substring searches.
+   */
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return transactions
-      .filter((t) => type === "all" || t.type === type)
-      .filter((t) => category === "all" || t.category === category)
-      .filter((t) => accountId === "all" || touchesAccount(t, accountId))
-      .filter((t) => month === "all" || monthKeyOf(t.date) === month)
-      .filter(
-        (t) =>
-          needle === "" ||
-          t.payee.toLowerCase().includes(needle) ||
-          t.category.toLowerCase().includes(needle) ||
-          (t.note ?? "").toLowerCase().includes(needle),
+    return transactions.filter((t) => {
+      if (type !== "all" && t.type !== type) return false;
+      if (category !== "all" && t.category !== category) return false;
+      if (accountId !== "all" && !touchesAccount(t, accountId)) return false;
+      if (month !== "all" && monthKeyOf(t.date) !== month) return false;
+      if (needle === "") return true;
+      return (
+        t.payee.toLowerCase().includes(needle) ||
+        t.category.toLowerCase().includes(needle) ||
+        (t.note ?? "").toLowerCase().includes(needle)
       );
+    });
   }, [transactions, q, type, category, accountId, month]);
+
+  /*
+   * Rows are drawn a page at a time.
+   *
+   * The table used to render every match — fourteen hundred rows, some ten
+   * thousand elements and two buttons apiece — so every keystroke in the
+   * search box rebuilt the lot and the page stuttered as you typed. The
+   * totals above still count every match, so the figures are unaffected by
+   * where the list is cut.
+   */
+  const filterKey = `${q}|${type}|${category}|${accountId}|${month}`;
+  /*
+   * The page count is stored against the filters it belongs to, so changing a
+   * filter starts again at the first page without an effect to reset it —
+   * setting state from an effect costs a second render of the whole table,
+   * which is the thing being avoided here.
+   */
+  const [page, setPage] = useState({ key: filterKey, shown: PAGE });
+  const shown = page.key === filterKey ? page.shown : PAGE;
+  const visible = useMemo(() => filtered.slice(0, shown), [filtered, shown]);
 
   const totals = useMemo(() => {
     let income = 0;
@@ -345,7 +374,7 @@ export default function TransactionsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((t) => (
+                  {visible.map((t) => (
                     <tr
                       key={t.id}
                       className="border-b border-line/50 transition-colors last:border-0 hover:bg-elevated/60"
@@ -431,6 +460,19 @@ export default function TransactionsPage() {
                   ))}
                 </tbody>
               </table>
+              {filtered.length > visible.length && (
+                <div className="border-t border-line px-4 py-3 text-center">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setPage({ key: filterKey, shown: shown + PAGE })}
+                  >
+                    Show {Math.min(PAGE, filtered.length - visible.length)} more
+                    <span className="text-ink-faint">
+                      · {visible.length} of {filtered.length}
+                    </span>
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </Card>

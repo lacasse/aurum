@@ -18,6 +18,7 @@ import {
 import { generateSampleData } from "./sample";
 import { HISTORY_MONTHS } from "./types";
 import { currentMonthKey } from "./format";
+import type { SnapshotHistory } from "./analytics";
 import { api } from "./api";
 
 export function uid(): string {
@@ -139,6 +140,17 @@ interface FinanceStore extends FinanceData {
   snapshotMonth: string;
   loadSnapshots: (month: string) => Promise<void>;
   saveSnapshots: (snapshots: MonthlySnapshot[]) => Promise<void>;
+  /**
+   * Every recorded month-end value, by month and ticker.
+   *
+   * Four pages draw a chart from this and each used to fetch it and rebuild
+   * the series itself, so moving between them re-fetched history that cannot
+   * change without a checklist run. It lives here now and is fetched once.
+   */
+  snapshotHistory: SnapshotHistory;
+  /** True once the fetch has landed, so a page can tell empty from unloaded. */
+  snapshotHistoryReady: boolean;
+  loadSnapshotHistory: () => Promise<void>;
 }
 
 /**
@@ -194,6 +206,15 @@ function synthHistory(ticker: string, price: number): number[] {
 
 const report = (err: unknown) => console.error("[sync]", err);
 
+/**
+ * The in-flight snapshot-history request, so concurrent callers share one.
+ *
+ * Module scope rather than store state: it is a promise, not data, and four
+ * pages mounting at once must not each start a fetch because none of them has
+ * seen the flag flip yet.
+ */
+let historyInFlight: Promise<void> | null = null;
+
 /** Compute CAD fields for a holding given the current FX rate. */
 function computeCadFields(
   h: Pick<Holding, "price" | "avgCost" | "dividendsReceived" | "history" | "currency"> & {
@@ -240,6 +261,8 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
   categories: [...generateSampleData().categories],
   snapshots: [],
   snapshotMonth: "",
+  snapshotHistory: {},
+  snapshotHistoryReady: false,
 
   refreshFxRate: async () => {
     try {
@@ -279,6 +302,30 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
     }
   },
 
+  /*
+   * Fetched at most once, and shared.
+   *
+   * Every page that charts the whole record calls this on mount; the first one
+   * to arrive does the work and the rest await the same promise, so four pages
+   * make one request. It is history — nothing changes it but a checklist run,
+   * which clears the flag below.
+   */
+  loadSnapshotHistory: async () => {
+    if (get().snapshotHistoryReady) return;
+    if (historyInFlight) return historyInFlight;
+    historyInFlight = (async () => {
+      try {
+        const { months } = await api.getSnapshotHistory();
+        set({ snapshotHistory: months ?? {}, snapshotHistoryReady: true });
+      } catch (err) {
+        report(err);
+      } finally {
+        historyInFlight = null;
+      }
+    })();
+    return historyInFlight;
+  },
+
   /**
    * Unlike the other writes here, this one rethrows.
    *
@@ -290,7 +337,13 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
   saveSnapshots: async (rows) => {
     try {
       await api.saveSnapshots(rows);
-      set({ snapshots: rows });
+      /*
+       * The history is stale the moment a month lands in it, so it is dropped
+       * rather than patched: the server aggregates per ticker and prefers the
+       * sheet-imported figure where both exist, and reproducing that rule here
+       * would be a second implementation of it waiting to disagree.
+       */
+      set({ snapshots: rows, snapshotHistory: {}, snapshotHistoryReady: false });
     } catch (err) {
       report(err);
       throw err;

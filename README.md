@@ -1,10 +1,14 @@
 # Aurum · Personal Finance
 
-A dark-themed personal finance webapp for tracking **net worth**, **income & expenses**,
-**budgets**, and an **investment portfolio** — with charts everywhere. State lives in
-**PostgreSQL** (via Drizzle ORM) behind a small JSON API, and the whole stack ships as a
-set of **Docker containers**. CSV imports of credit-card exports get auto-categorized and
-reviewable before saving.
+A personal finance webapp for tracking **net worth**, **income & expenses**, **budgets**,
+and an **investment portfolio** — with charts everywhere. State lives in **PostgreSQL**
+(via Drizzle ORM) behind a small JSON API, and the whole stack ships as a set of **Docker
+containers**. CSV imports — card statements, bank exports, brokerage activity reports —
+are auto-categorized and reviewable before anything is saved, and a **monthly checklist**
+closes a finished month in one pass.
+
+Two themes: a warm cream light theme and a near-black dark one, both from the same set of
+semantic tokens, with a toggle in the sidebar.
 
 ## Run it (Docker)
 
@@ -123,12 +127,17 @@ skipped with console errors).
 
 | Page | What you get |
 | --- | --- |
-| **Dashboard** | Net worth / income / expenses / savings-rate KPI cards with sparklines, net-worth area chart (6–18M range toggle), expense donut, income-vs-expense bars, portfolio growth vs cost basis, stacked spending-by-category area, accounts overview, recent transactions |
-| **Transactions** | Full CRUD with filters (search, type, category, account, month), filtered summary chips, filtered cash-flow chart, balances adjust automatically (client and server agree). Every row records where the money came *from* and went *to*; transfers move money between your own accounts. Recurring rules (rent, salary, contributions) post themselves on schedule and can be paused |
-| **Investments** | Holdings CRUD with price updates, value-vs-cost-basis chart, asset-allocation donut, sector radar, gain/loss bars, per-position table with weights |
+| **Dashboard** | Net worth KPI cards with sparklines, an all-time net-worth line, what net worth is *made of* as a 100% stacked composition, a financial-independence tracker against your own spending, cash-flow averages, income vs expenses, **income by source** (every kind of income, its share, and which way it is moving), where the money went, and spending by category as a 100% stacked line |
+| **Transactions** | Full CRUD with filters (search, type, category, account, month), filtered summary chips, filtered cash-flow chart, balances adjust automatically (client and server agree). Every row records where the money came *from* and went *to*; transfers move money between your own accounts. Recurring rules (rent, salary, contributions) post themselves on schedule and can be paused. Rows are drawn a page at a time |
+| **Expenses** | One month against the twelve before it: category totals, necessities vs discretionary vs excluded, what moved against its usual cost, a recurring-cost floor, and a **cost-of-ownership card** (the car) averaged over every month owned rather than every month billed |
+| **Investments** | Holdings CRUD with price updates, all-time value vs cost basis, asset allocation, holdings exposure by position, three measures of return side by side (simple, money-weighted, time-weighted) against a benchmark, and a per-position table sortable by class, value, gain and MWRR |
 | **Budgets** | Monthly budgets per category, radial utilization gauge, budget-vs-actual bars, progress rows with inline limit editing, daily pace estimate — plus a category manager: create, rename, and delete categories (renames cascade to budgets and existing transactions; deleted categories move their transactions to "Other") |
-| **Accounts** | Assets/liabilities/net-worth KPIs, assets-vs-liabilities stacked area, account cards with history sparklines. Accounts carry a kind (chequing, savings, cash, investment, crypto, property, credit, loan) and a registration (non-registered, TFSA, RRSP, FHSA, Pension) |
-| **Import CSV** | Upload one or many credit-card CSV exports (Amex-style or `transaction_date/merchant/amount`), auto-detected format, auto-categorization against your budget-section categories, duplicate flagging, and a review step to edit/delete/include rows before anything is saved. Card payments are skipped; category corrections are remembered per merchant for future imports |
+| **Accounts** | Assets/liabilities/net-worth KPIs, assets-vs-liabilities stacked area, account cards with history sparklines, and a defined-benefit pension card (transfer value against what you contributed). Accounts carry a kind (chequing, savings, cash, investment, crypto, property, credit, loan, pension) and a registration (non-registered, TFSA, RRSP, FHSA, Pension) |
+| **Year** | Every year on record against the one before: income against spending, what it grew to, what the portfolio did with it, and the month each milestone was first passed |
+| **Tax** | Realized gains, dividends and interest by year — non-registered only, since that is the only place any of it is reportable |
+| **Import CSV** | Drop in one file or many and each is routed by what it *is*: a card statement, a bank export with debit/credit columns, a trade log, or a brokerage activity report that is all of those at once. Format, sign convention and account are detected per file, categories are suggested against your own list, duplicates are flagged, and every row is reviewable before anything is saved |
+| **Monthly checklist** | Closes the month that just ended in one pass: import → income → spending → trades → pension → save. Nothing is written until the last step |
+| **How this works** | The judgement calls the app makes and why — the pension, staking rewards, necessity vs choice, what the checklist covers, which months a chart shows |
 
 ## Stack
 
@@ -136,7 +145,7 @@ skipped with console errors).
 - [PostgreSQL](https://www.postgresql.org) 17 + [Drizzle ORM](https://orm.drizzle.team) (migrations in `drizzle/`, applied at startup)
 - [Zod](https://zod.dev) for request-body validation — schemas are declared once in `src/lib/schemas.ts` and shared by every route
 - Route Handlers under `src/app/api` expose the data (accounts, transactions, holdings, budgets, categories, merchant rules, recurring rules, demo-data deletion)
-- [Tailwind CSS](https://tailwindcss.com) v4 (semantic design tokens, dark theme by default with a light-mode toggle)
+- [Tailwind CSS](https://tailwindcss.com) v4 — semantic design tokens only (`--surface`, `--ink`, `--line`…), so both themes are one set of names with two sets of values, and the type scale is one declaration (`html { font-size }`)
 - [Recharts](https://recharts.org) for all charts
 - [Zustand](https://zustand.docs.pmnd.rs) as the client cache — optimistic updates with fire-and-forget persistence to the API
 - [Papa Parse](https://www.papaparse.com) for CSV import, [lucide-react](https://lucide.dev) icons, [next-themes](https://github.com/pacocoursey/next-themes) theming
@@ -203,15 +212,113 @@ moved.
 > cannot represent values like `0.10` exactly, and the error compounds across
 > the repeated sums and FX conversions this app performs.
 
+## The monthly checklist
+
+One pass that closes the month that has just **finished**, not the one running: import →
+income → spending → trades → pension → save.
+
+Everything imported is trimmed to that month. A statement downloaded on the third carries
+a few days of both months, and without the trim those days land silently in the wrong
+month's totals. The file is read first because every step after it is a review of what the
+file said — income is a total of it, spending is a list of it, trades are read out of it —
+and each is editable.
+
+**Nothing is written until the last step.** Every step collects; the final one lists
+exactly what is about to be recorded and saves the lot at once. Closing the dialog before
+then changes nothing. The steps used to save as you left them, which meant abandoning the
+checklist halfway left half a month behind — income recorded against a month whose
+spending was never reviewed, or trades posted before the snapshot meant to value them.
+
+Income is dated the last day of the month being closed, whatever day the checklist is
+actually done on, and the pension figure is recorded against that month too.
+
+**The portfolio snapshot is no longer a step.** It was a table of sixty prices to scroll
+past, and nobody edits a price they have no better source for than the app itself. Saving
+the month records what is held, read *after* the trades land so it reflects the month it
+closes and picks up positions that had no id a moment earlier. Nothing else takes a
+snapshot on its own: skip a month and it has no closing value, so the months that are
+missing — or that hold a fraction of the positions the months around them hold — are
+counted on the checklist button.
+
+## What an import works out for itself
+
+Three things are detected per file rather than asked for, because each one has a right
+answer written down in the file:
+
+- **What the file is.** A card statement, a bank export with debit/credit columns, a trade
+  log, or a brokerage activity report — which is a cash statement, a trade log and a
+  corporate-action feed at once. Format detection is per file, so a mixed drop works.
+- **Which sign means "out".** Some exports write spending negative, some positive, and
+  some carry an explicit Debit/Credit column. The parser reads every row first, decides
+  the convention for the file as a whole, and only then assigns directions — an explicit
+  column always beats an inferred sign.
+- **Which account a row belongs to.** An activity export names the account on every line.
+  That used to be read only for *registered* accounts, so chequing rows arrived
+  unattributed and the checklist filed them against the credit card: a month of
+  pre-authorized debits and e-transfers recorded as card spending. The row's own word wins
+  now, then the file's kind, and the everyday account is the last resort rather than the
+  first.
+
+Two smaller ones. A **ticker's exchange suffix is ignored when matching an existing
+position** — a broker writes `TSLA.NEO` where you hold `TSLA`, and treating those as
+different securities opened duplicate holdings. An exact match still wins, and where a
+venue-less symbol matches two holdings the account decides; if it is still ambiguous the
+row is left alone, because `MA` and `MA.NEO` in one account really are Mastercard and its
+CDR. And a **repayment is asked which debt it pays**, since that is the one row whose far
+side cannot be guessed — every other expense ends at the merchant.
+
+## Realized, unrealized, and the cost base
+
+Cost base is **average cost, per account**, and a partial sale disposes of a proportional
+slice of it. That is the Canadian treatment, and per-account is not a detail: a loss in a
+TFSA is not deductible and has no cost base worth tracking, while the same trade in a
+non-registered account does.
+
+The holdings table's gain column pools **unrealized + realized + dividends** across every
+account and every closed lot, which is worth knowing before reading it. Sell a position at
+a loss and buy back in two years later and the row shows the old loss, not how the new
+position is doing — both figures are correct, they answer different questions. Realized and
+unrealized are both on `HoldingRow` (`realizedGain`, `gain`) if you want them apart.
+
+Two rules the app does **not** implement, and would need to for tax filing: the
+**superficial loss** rule (a loss denied when the same security is bought back within 30
+days, and added to the new cost base instead), and any adjustment for return of capital.
+
+## Performance
+
+The client does all its own analysis, so the work that matters is a page's selectors
+rather than a query. Measured against a real record — 1,438 transactions, 60 holdings, 80
+months of history — the dashboard's analysis costs **24 ms**, down from 59 ms, after four
+fixes worth recording because each was a class of mistake rather than a slow line:
+
+- **Dates parsed inside a loop that never needed them again.** The money-weighted return
+  bisects ~44 times over the same flows, and each pass re-parsed every date: 188,000
+  `Date.parse` calls for one pass over the holdings table. Hoisting them out took
+  `consolidateHoldings` from 21 ms to 4.5 ms.
+- **The same walk done twice.** The all-time series and the by-class series both replay
+  every holding's flows month by month; the dashboard draws both. They now share one
+  cached walk, keyed on the holdings array and the month range.
+- **A linear scan behind a point lookup.** `accountValueAt` is asked for every month of
+  every chart and scanned the account's history each time. It is indexed now, in a
+  `WeakMap` on the history array — the store replaces those arrays rather than mutating
+  them, so a stale entry falls out by itself.
+- **String-keyed maps in the hot loop.** Ten thousand month-keyed `Map` writes per pass
+  became array offsets.
+
+The transactions table also draws a page at a time. It used to render every match — 1,438
+rows, some ten thousand elements — so every keystroke in the search box rebuilt the lot.
+
 ## Structure
 
 ```
 src/
-  app/            # routes: dashboard, transactions, investments, budgets, accounts, import
+  app/            # routes: dashboard, transactions, expenses, investments, budgets,
+                  #   accounts, year, tax, import, import-trades, guide, login
   app/api/        # JSON API (force-dynamic route handlers)
-  components/     # shell (sidebar/topbar), ui primitives, charts, forms, stat cards
+  components/     # shell (sidebar/logo/topbar), ui primitives, charts, forms,
+                  #   stat cards, the monthly checklist
   db/
-    schema.ts     # Drizzle schema (9 tables; money stored as exact `numeric`)
+    schema.ts     # Drizzle schema (11 tables; money stored as exact `numeric`)
     repo.ts       # queries, validation, balance side-effects, seed/reset
     init.ts       # one-shot migrate + first-run seed
   lib/
@@ -222,8 +329,26 @@ src/
     sample.ts     # deterministic 18-month sample data generator
     store.ts      # zustand store — optimistic updates + API sync
     api.ts        # typed fetch client for the API
-    analytics.ts  # pure selectors: series, allocations, budgets, totals
-    csv.ts        # CSV parsing, format detection, categorization engine
+    analytics.ts  # pure selectors: series, allocations, returns, totals
+    expenses.ts   # necessity/discretionary grouping, recurring floor, cost of ownership
+    year.ts       # year-over-year rollups and milestones
+    tax.ts        # realized gains, dividends and interest by year, non-registered only
+    xirr.ts       # money-weighted return over dated flows
+    pension.ts    # defined-benefit estimates from contributions
+    allocation.ts # drift against target weights
+    checklist.ts  # month partitioning, income detection, snapshot gaps
+    trade-batch.ts# plans a batch of trades without applying it
+    trades.ts     # trade-log parsing
+    activities.ts # brokerage activity exports (cash, trades and actions in one file)
+    corporate-actions.ts # splits, demergers, journalled listings
+    import-router.ts # decides what a dropped file is, and which account a row names
+    csv.ts        # CSV parsing, format and sign detection, categorization engine
+    market.ts     # provider routing by exchange suffix
+    benchmark.ts  # month-end benchmark series
+    eodhd-quota.ts / twelvedata-quota.ts # per-provider call ledgers
+    rewards.ts    # staking rewards awaiting a price
+    fx.ts         # CAD/USD rate
+    auth.ts / login-rate-limit.ts # session cookies, per-IP lockout
     format.ts     # currency/date/month formatting helpers
     hooks.tsx     # mounted/server-ready gates + page skeleton
 drizzle/          # generated SQL migrations (applied on startup)
@@ -232,7 +357,8 @@ drizzle/          # generated SQL migrations (applied on startup)
 ## Tests
 
 ```bash
-npm test            # unit tests (money, schemas, auth, rate limiting, analytics)
+npm test            # 592 unit tests (money, schemas, auth, rate limiting, analytics,
+                    #   csv, checklist, trades, expenses, tax, pension, xirr…)
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint
 npm run check:security
@@ -243,6 +369,12 @@ npm run test:db     # boots embedded PostgreSQL, tests migrations + repository e
 Unit tests live beside the code as `src/lib/*.test.ts` and run on Node's built-in
 test runner — `npm test` compiles them with `tsconfig.test.json` into `.test-build/`
 and runs `node --test`, so there is no extra test-framework dependency.
+
+`npm test` compiles with `--noCheck`, which is what makes it quick: skipping the type
+check is roughly half its wall clock, and `npm run typecheck` already covers every file
+including the tests. So **a type error does not fail `npm test`** — run `npm run
+test:checked` for both in one command. The two share `.test-build/`, so alternating
+between them invalidates the incremental cache and costs a full rebuild each way.
 
 Every one of the above runs in CI on push and pull request
 (`.github/workflows/ci.yml`), along with a Docker image build.
