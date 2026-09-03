@@ -91,4 +91,9 @@ export const api = {
     send<{ snapshots: MonthlySnapshot[] }>(`/api/snapshots?month=${encodeURIComponent(month)}`, "GET"),
   saveSnapshots: (snapshots: MonthlySnapshot[]) =>
     send("/api/snapshots", "POST", { snapshots }),
+  getSnapshotHistory: () =>
+    send<{ months: Record<string, Record<string, number>> }>(
+      "/api/snapshots/history",
+      "GET",
+    ),
 };

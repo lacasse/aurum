@@ -41,7 +41,6 @@ import {
   type NetWorthClass,
   portfolioSeries,
   stackedSpend,
-  type SnapshotHistory,
 } from "@/lib/analytics";
 import {
   fmtCompact,
@@ -148,26 +147,17 @@ export default function DashboardPage() {
   const usdCadRate = useFinance((s) => s.usdCadRate);
   const [range, setRange] = useState<Range>("all");
   const [checklistOpen, setChecklistOpen] = useState(false);
-  const [snapshots, setSnapshots] = useState<SnapshotHistory>({});
   const [rate, setRate] = useState("0.035");
 
   /*
-   * Recorded month-end portfolio values. They reach back years further than
-   * the eighteen months of prices carried on the holdings, which is what makes
-   * an all-time net worth line possible at all. Fetched once: it is history.
+   * Recorded month-end portfolio values, from the store: four pages draw a
+   * chart from this history and it is fetched once for all of them.
    */
+  const snapshots = useFinance((s) => s.snapshotHistory);
+  const loadSnapshotHistory = useFinance((s) => s.loadSnapshotHistory);
   useEffect(() => {
-    let cancelled = false;
-    fetch("/api/snapshots/history", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { months: SnapshotHistory }) => {
-        if (!cancelled) setSnapshots(d.months ?? {});
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    loadSnapshotHistory();
+  }, [loadSnapshotHistory]);
 
   const data = useMemo(() => {
     /*

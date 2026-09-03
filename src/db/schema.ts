@@ -2,6 +2,7 @@ import type { CashFlow } from "@/lib/types";
 import {
   boolean,
   date,
+  index,
   integer,
   jsonb,
   numeric,
@@ -51,20 +52,34 @@ export const accounts = pgTable("accounts", {
   }),
 });
 
-export const transactions = pgTable("transactions", {
-  id: text("id").primaryKey(),
-  date: date("date", { mode: "string" }).notNull(),
-  type: text("type").notNull(),
-  amount: money("amount").notNull(),
-  category: text("category").notNull(),
-  // Nullable on purpose: an expense has no destination account and income has
-  // no source account — that side of the transaction is the outside world.
-  sourceAccountId: text("source_account_id"),
-  destinationAccountId: text("destination_account_id"),
-  payee: text("payee").notNull(),
-  note: text("note"),
-  recurringId: text("recurring_id"),
-});
+export const transactions = pgTable(
+  "transactions",
+  {
+    id: text("id").primaryKey(),
+    date: date("date", { mode: "string" }).notNull(),
+    type: text("type").notNull(),
+    amount: money("amount").notNull(),
+    category: text("category").notNull(),
+    // Nullable on purpose: an expense has no destination account and income has
+    // no source account — that side of the transaction is the outside world.
+    sourceAccountId: text("source_account_id"),
+    destinationAccountId: text("destination_account_id"),
+    payee: text("payee").notNull(),
+    note: text("note"),
+    recurringId: text("recurring_id"),
+  },
+  (t) => [
+    /*
+     * Every read orders by date, newest first. Declared here so the schema and
+     * the migration agree; see 0022. Pre-emptive at this table's size — a
+     * couple of thousand rows sort in under a millisecond — and cheap to have
+     * before it is needed.
+     */
+    index("transactions_date_idx").on(t.date.desc(), t.id.desc()),
+    index("transactions_source_account_idx").on(t.sourceAccountId),
+    index("transactions_destination_account_idx").on(t.destinationAccountId),
+  ],
+);
 
 export const recurringTransactions = pgTable("recurring_transactions", {
   id: text("id").primaryKey(),

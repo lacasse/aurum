@@ -382,21 +382,28 @@ export default function GuidePage() {
             actually done on.
           </p>
           <p>
-            The last two steps close the same month. The pension figure and the
-            portfolio snapshot are both recorded against the month that ended,
-            not the day the checklist is done — a snapshot taken on the second
-            or third is near enough to the month-end it stands for, and the
+            The pension figure is recorded against the month that ended, not
+            the day the checklist is done — a figure entered on the second or
+            third is near enough to the month-end it stands for, and the
             alternative was a single run writing to two different months.
           </p>
           <p>
-            <strong className="text-ink">Nothing takes a snapshot on its
-            own.</strong> There is no scheduled job and no automatic capture:
-            if this step is skipped, that month simply has no closing value,
-            and every chart that reaches back through it draws a straight line
-            across the hole — which looks like a quiet month rather than a
-            missing one. So the months that are missing, or that hold a
-            fraction of the positions the months around them hold, are listed
-            on the snapshot step and counted on the checklist button.
+            <strong className="text-ink">The portfolio snapshot is not a step
+            any more.</strong> It was a table of sixty prices to scroll past,
+            and nobody edits a price they have no better source for than the
+            app itself. Saving the month records what is held, taken{" "}
+            <em>after</em> the trades land — so it values the portfolio the
+            month actually ended with, including a position opened in that very
+            save.
+          </p>
+          <p>
+            <strong className="text-ink">Nothing takes a snapshot outside the
+            checklist.</strong> There is no scheduled job: if you never close a
+            month, that month has no closing value, and every chart reaching
+            back through it draws a straight line across the hole — which looks
+            like a quiet month rather than a missing one. So the months that
+            are missing, or that hold a fraction of the positions the months
+            around them hold, are counted on the checklist button.
           </p>
           <p>
             For anything older, use{" "}
@@ -405,6 +412,83 @@ export default function GuidePage() {
             </Link>
             , which takes whatever you have and does not care what month it is
             from.
+          </p>
+        </Section>
+
+        <Section
+          id="imports"
+          title="What a statement is read for"
+          lead="Three things the file already says, and is no longer asked about"
+        >
+          <p>
+            <strong className="text-ink">Which account a row came out of.</strong>{" "}
+            A brokerage activity export names the account on every line. That
+            used to be read only when the line named a registered account, so
+            chequing rows arrived with no account at all — and anything
+            unattributed was filed against the credit card. A month of
+            pre-authorized debits and e-transfers was recorded as card
+            spending. The row&apos;s own word comes first now, then the
+            file&apos;s kind, since a card statement really is one account from
+            top to bottom.
+          </p>
+          <p>
+            <strong className="text-ink">Which sign means money leaving.</strong>{" "}
+            Some exports write spending as a negative number, some as a
+            positive one, and some carry an explicit Debit/Credit column. Every
+            row is read first, the convention is decided for the file as a
+            whole, and only then are directions assigned — so a card statement
+            is not read with a bank&apos;s rule. An explicit column always
+            beats an inferred sign.
+          </p>
+          <p>
+            <strong className="text-ink">Which position a trade belongs
+            to.</strong> A broker writes the venue into the symbol —{" "}
+            <code>TSLA.NEO</code>, <code>XEQT.TO</code> — and a position held
+            under the plain symbol looked like a security nobody owned, so a
+            routine buy opened a second holding beside the first. The venue is
+            ignored when matching now. An exact match still wins, and where a
+            venue-less symbol matches two holdings the account decides; if it
+            is still ambiguous the row is left alone, because{" "}
+            <code>MA</code> and <code>MA.NEO</code> in one account really are
+            two different securities — Mastercard and its CDR.
+          </p>
+          <p>
+            One thing it does ask: a repayment is the only kind of spending
+            whose far side cannot be guessed. Every other expense ends at the
+            merchant; a repayment ends at a debt, and which debt decides whose
+            balance comes down.
+          </p>
+        </Section>
+
+        <Section
+          id="gains"
+          title="Realized, unrealized, and the cost base"
+          lead="Why a closed position still shows in a row you have just reopened"
+        >
+          <p>
+            Cost base is <strong className="text-ink">average cost, per
+            account</strong>, and selling part of a position disposes of the
+            same fraction of its cost. Per-account matters: a loss in a TFSA is
+            not deductible and its cost base is not worth tracking, while the
+            same trade in a non-registered account is the one figure that is.
+          </p>
+          <p>
+            The gain column on the holdings table pools{" "}
+            <em>unrealized + realized + dividends</em> across every account and
+            every closed lot. So if you sold out of something at a loss and
+            bought back in two years later, the row shows the old loss rather
+            than how the new position is doing. Both are true; they answer
+            different questions. The open position&apos;s cost base is
+            unaffected by the closed one — the sale took the whole of its cost
+            with it.
+          </p>
+          <p>
+            Two rules this app does not apply, and which matter at filing time.
+            The <strong className="text-ink">superficial loss</strong> rule
+            denies a loss where the same security is bought back within 30 days
+            either side of the sale, and adds it to the cost base of the
+            repurchase instead. And a return of capital reduces cost base
+            without being a sale. Neither is worked out here.
           </p>
         </Section>
 

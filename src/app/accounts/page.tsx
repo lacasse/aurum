@@ -34,7 +34,6 @@ import {
   monthsSince,
   netWorthOver,
   portfolioSeries,
-  type SnapshotHistory,
 } from "@/lib/analytics";
 import { summarize as summarizePension } from "@/lib/pension";
 import { fmtCompact, fmtSignedCAD, fmtCAD, labelMonth, lastMonthKeys } from "@/lib/format";
@@ -77,25 +76,16 @@ export default function AccountsPage() {
   const [editing, setEditing] = useState<Account | null>(null);
   const [deleting, setDeleting] = useState<Account | null>(null);
   const [range, setRange] = useState<Range>("all");
-  const [snapshots, setSnapshots] = useState<SnapshotHistory>({});
 
   /*
-   * The recorded month-end portfolio values, as the dashboard reads them. The
-   * balance sheet has to be the same balance sheet on both pages, and only
-   * these reach back past the eighteen months of prices the holdings carry.
+   * Recorded month-end portfolio values, from the store: four pages draw a
+   * chart from this history and it is fetched once for all of them.
    */
+  const snapshots = useFinance((s) => s.snapshotHistory);
+  const loadSnapshotHistory = useFinance((s) => s.loadSnapshotHistory);
   useEffect(() => {
-    let cancelled = false;
-    fetch("/api/snapshots/history", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { months: SnapshotHistory }) => {
-        if (!cancelled) setSnapshots(d.months ?? {});
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    loadSnapshotHistory();
+  }, [loadSnapshotHistory]);
 
   const data = useMemo(() => {
     const starts = [
