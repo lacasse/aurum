@@ -34,7 +34,12 @@ export const config = {
      * Protect everything except:
      * - api/login, api/logout (auth endpoints)
      * - static files and assets
+     *
+     * icon.svg is the tab icon, which the login page itself asks for: behind
+     * the guard it redirected to /login and the tab fell back to the browser's
+     * blank page icon. It is a coloured circle — there is nothing in it to
+     * protect.
      */
-    "/((?!api/login|api/logout|_next/static|_next/image|favicon.ico).*)",
+    "/((?!api/login|api/logout|_next/static|_next/image|favicon.ico|icon.svg).*)",
   ],
 };

@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { Lock, Wallet } from "lucide-react";
+import { Lock } from "lucide-react";
 import { Button, Input, Field } from "@/components/ui";
 
 function LoginForm() {
@@ -52,9 +52,14 @@ function LoginForm() {
     <div className="flex min-h-dvh flex-col items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center text-center">
-          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-lg shadow-violet-500/20">
-            <Wallet size={22} />
-          </span>
+          {/* The same mark as the sidebar and the tab icon. */}
+          <span
+            className="h-12 w-12 rounded-full shadow-sm"
+            style={{
+              background:
+                "linear-gradient(135deg, #f6cb6e 0%, #e3aec4 34%, #a877e2 66%, #7c30e6 100%)",
+            }}
+          />
           <h1 className="mt-4 text-2xl font-semibold tracking-tight text-ink">
             Aurum
           </h1>
