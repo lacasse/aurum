@@ -28,14 +28,29 @@ function yearsBetween(from: string, to: string): number {
   return (b - a) / MS_PER_DAY / DAYS_PER_YEAR;
 }
 
+/**
+ * A flow reduced to what the search actually needs: how many years after the
+ * first one it lands, and how much it was.
+ *
+ * The dates are parsed once, here, rather than inside the loop below. The
+ * bisection evaluates the same flows forty-odd times, and parsing a date
+ * string is far and away the most expensive thing in that loop — on this
+ * record it was two `Date.parse` calls per flow per iteration, some 188,000
+ * of them for one pass over the holdings table.
+ */
+interface TimedFlow {
+  years: number;
+  amount: number;
+}
+
 /** Net present value of the flows at annual rate `rate`. */
-function npv(flows: DatedFlow[], start: string, rate: number): number {
+function npv(flows: TimedFlow[], rate: number): number {
   let total = 0;
+  const base = 1 + rate;
   for (const f of flows) {
-    const t = yearsBetween(start, f.date);
-    // (1 + rate) ** t is undefined for rate <= -1; the caller keeps the search
+    // base ** years is undefined for rate <= -1; the caller keeps the search
     // strictly above it.
-    total += f.amount / (1 + rate) ** t;
+    total += f.amount / base ** f.years;
   }
   return total;
 }
@@ -68,24 +83,35 @@ export function xirr(flows: DatedFlow[]): number | null {
   // Everything on one day has no time dimension to annualize over.
   if (span <= 0) return null;
 
+  const timed: TimedFlow[] = sorted.map((f) => ({
+    years: yearsBetween(start, f.date),
+    amount: f.amount,
+  }));
+
   // Bracket the root. Rates below -100% are meaningless; the upper bound is
   // generous enough for a position that multiplied many times over in months.
   let lo = -0.9999;
   let hi = 10;
-  let fLo = npv(sorted, start, lo);
-  let fHi = npv(sorted, start, hi);
+  let fLo = npv(timed, lo);
+  let fHi = npv(timed, hi);
 
   // Expand upward a few times for extreme returns before giving up.
   for (let i = 0; i < 8 && fLo * fHi > 0; i++) {
     hi *= 4;
-    fHi = npv(sorted, start, hi);
+    fHi = npv(timed, hi);
   }
   if (fLo * fHi > 0) return null; // no sign change: no bracketed root
 
   for (let i = 0; i < 200; i++) {
     const mid = (lo + hi) / 2;
-    const fMid = npv(sorted, start, mid);
-    if (fMid === 0 || (hi - lo) / 2 < 1e-9) return round(mid);
+    const fMid = npv(timed, mid);
+    /*
+     * A rate is reported to three decimals of a percent, so 1e-9 was
+     * bisecting well past anything that can show: the bracket starts about 11
+     * wide, and each halving is one pass over the flows. 1e-8 is still two
+     * orders of magnitude finer than the rounding and saves several passes.
+     */
+    if (fMid === 0 || (hi - lo) / 2 < 1e-8) return round(mid);
     if (fLo * fMid < 0) {
       hi = mid;
       fHi = fMid;
