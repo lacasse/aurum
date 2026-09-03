@@ -493,6 +493,38 @@ export default function GuidePage() {
         </Section>
 
         <Section
+          id="borrowing"
+          title="Borrowed money is not income"
+          lead="Why a drawdown shows in a balance but in no income figure"
+        >
+          <p>
+            Money borrowed arrives in an account and has to be recorded
+            somewhere, so it is entered as income under{" "}
+            <strong className="text-ink">Loan Proceeds</strong> for want of a
+            better type. It is not earnings: it is a debt appearing on the
+            other side of the ledger at the same moment, and counting it makes
+            a month of borrowing look like a month of earning. One drawdown on
+            this record was adding $541 a month to a five-year average.
+          </p>
+          <p>
+            So it is left out of every figure that answers{" "}
+            <em>what came in</em> — the income totals and averages, the
+            cash-flow charts, the savings rate, the year rollups and the income
+            page. The transaction itself is untouched and the money is still in
+            the balance it landed in, which is where a loan belongs: as cash on
+            one side and a liability on the other, netting to nothing in net
+            worth.
+          </p>
+          <p>
+            Repaying it is the mirror image, and is handled the same way: a
+            repayment is spending in the sense that the money is gone, but it
+            is the one kind that changes what is owed, so the checklist asks
+            which debt it pays and the expenses page leaves it out of
+            consumption.
+          </p>
+        </Section>
+
+        <Section
           id="months"
           title="Which months a chart shows"
           lead="Why the current month is on some charts and not others"

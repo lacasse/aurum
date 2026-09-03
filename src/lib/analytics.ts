@@ -263,7 +263,7 @@ export function cashflowSeries(
     const k = monthKeyOf(t.date);
     const slot = map.get(k);
     if (!slot) continue;
-    if (t.type === "income") slot.income += toCents(t.amount);
+    if (isIncome(t)) slot.income += toCents(t.amount);
     else if (t.type === "expense") slot.expenses += toCents(t.amount);
   }
   return keys.map((key) => {
@@ -386,7 +386,7 @@ export function incomeBySource(
   );
 
   for (const t of transactions) {
-    if (t.type !== "income") continue;
+    if (!isIncome(t)) continue;
     const key = monthKeyOf(t.date);
     const cents = toCents(t.amount);
     if (before.has(key)) {
@@ -1027,7 +1027,7 @@ export function monthTotals(
   let expenseCents = 0;
   for (const t of transactions) {
     if (monthKeyOf(t.date) !== monthKey) continue;
-    if (t.type === "income") incomeCents += toCents(t.amount);
+    if (isIncome(t)) incomeCents += toCents(t.amount);
     else if (t.type === "expense") expenseCents += toCents(t.amount);
   }
   const income = fromCents(incomeCents);
@@ -1062,11 +1062,28 @@ export const PASSIVE_INCOME_CATEGORIES = new Set(["Dividends", "Interest"]);
  * Interest is not here, and neither is cashback: both land in the account and
  * are recorded together under Interest.
  */
-export const NON_SPENDABLE_INCOME = new Set([
-  "RSP / Pension",
-  "Loan Proceeds",
-  "Dividends",
-]);
+export const NON_SPENDABLE_INCOME = new Set(["RSP / Pension", "Dividends"]);
+
+/**
+ * Recorded as income, but not income.
+ *
+ * Money borrowed arrives in an account and has to be recorded somewhere, so it
+ * is typed as income for want of a better type — but it is not earnings. It is
+ * a liability appearing on the other side of the ledger at the same moment,
+ * and counting it makes a month of borrowing look like a month of earning: on
+ * this record one drawdown added $541 a month to a five-year average.
+ *
+ * So it is excluded from every figure that answers "what came in" — the income
+ * totals, the averages, the cash-flow charts and the year rollups. The
+ * transaction is untouched, and the money is still in the balance it landed
+ * in, which is where a loan belongs.
+ */
+export const NOT_INCOME = new Set(["Loan Proceeds"]);
+
+/** True for a row that counts as money coming in. */
+export function isIncome(t: Pick<Transaction, "type" | "category">): boolean {
+  return t.type === "income" && !NOT_INCOME.has(t.category);
+}
 
 export interface AverageMonth {
   /** How many months were averaged; fewer than asked for when the record is short. */
@@ -1140,7 +1157,7 @@ export function monthlyAverages(
     for (const t of transactions) {
       if (monthKeyOf(t.date) !== key) continue;
       const cents = toCents(t.amount);
-      if (t.type === "income") {
+      if (isIncome(t)) {
         income += cents;
         if (PASSIVE_INCOME_CATEGORIES.has(t.category)) passive += cents;
         if (!NON_SPENDABLE_INCOME.has(t.category)) liquidIncome += cents;
@@ -1199,7 +1216,7 @@ function averageOver(transactions: Transaction[], keys: string[]): AverageMonth 
       byMonth.get(key) ??
       { income: 0, expenses: 0, passive: 0, uncommittedLiquid: 0 };
     const cents = toCents(t.amount);
-    if (t.type === "income") {
+    if (isIncome(t)) {
       slot.income += cents;
       if (PASSIVE_INCOME_CATEGORIES.has(t.category)) slot.passive += cents;
       if (!NON_SPENDABLE_INCOME.has(t.category)) slot.uncommittedLiquid += cents;
