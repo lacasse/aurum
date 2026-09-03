@@ -26,7 +26,6 @@ import {
   allTimeSeries,
   avgSpendByCategory,
   cashflowSeries,
-  incomeBySource,
   consolidateHoldings,
   firstFlowMonth,
   monthlyAverages,
@@ -44,7 +43,6 @@ import {
 } from "@/lib/analytics";
 import {
   fmtCompact,
-  fmtPct,
   fmtSignedCAD,
   fmtCAD,
   labelMonth,
@@ -208,16 +206,6 @@ export default function DashboardPage() {
      * so both take their categories from this one ranking: same order, same
      * colours, and the legend beside the donut serves the pair.
      */
-    /*
-     * Where the money came from, on the same twelve months as everything else
-     * in this section. In dollars rather than shares: a raise and a bonus both
-     * lift the total, and normalising them away would hide the only thing the
-     * chart is for.
-     */
-    const income = incomeBySource(transactions, 12, through);
-
-    const incomeColors = categoryColors(income.sources.map((s) => s.category));
-
     const spend = avgSpendByCategory(transactions, 12, through);
     const catColors = categoryColors(spend.map((c) => c.name));
     const topCats = spend.slice(0, 5).map((c) => c.name);
@@ -305,8 +293,6 @@ export default function DashboardPage() {
       through,
       snapshotGaps: gaps,
       spendMix,
-      income,
-      incomeColors,
       nwAll,
       cf,
       spend,
@@ -760,6 +746,13 @@ export default function DashboardPage() {
             <CardHeader
               title="Income vs expenses"
               subtitle={`Monthly cash flow · 12 months through ${monthName}`}
+              action={
+                <Link href="/income">
+                  <Button variant="ghost" size="sm">
+                    Income <ArrowRight size={13} />
+                  </Button>
+                </Link>
+              }
             />
             <div className="px-3 pb-4">
               <SeriesChart
@@ -798,153 +791,6 @@ export default function DashboardPage() {
             </div>
           </Card>
         </div>
-
-        {/* What income is made of, and which way each part is going */}
-        <Card>
-          <CardHeader
-            title="Income by source"
-            subtitle={`Every kind of income, month by month · 12 months through ${monthName}`}
-          />
-          {data.income.sources.length === 0 ? (
-            <p className="px-5 py-16 text-center text-xs text-ink-faint">
-              No income recorded in the last 12 months.
-            </p>
-          ) : (
-            <>
-              <div className="px-3 pb-2">
-                {/*
-                  * Stacked in dollars, not shares. The spending chart above is
-                  * a hundred percent stacked because a month's spending is a
-                  * whole to be divided; income is not — the question is how
-                  * much arrived as well as what it arrived as, and a share
-                  * would answer only half of it.
-                  */}
-                <SeriesChart
-                  data={data.income.months}
-                  xKey="label"
-                  series={data.income.sources.map((s) => ({
-                    key: s.category,
-                    name: s.category,
-                    color: data.incomeColors[s.category],
-                    kind: "area" as const,
-                  }))}
-                  stacked
-                  fadeAtZero
-                  height={260}
-                  yFmt={fmtCompact}
-                />
-              </div>
-
-              {/*
-                * The table is not a legend.
-                *
-                * Salary is fifty times interest on this record, so the small
-                * sources are a hairline in the chart however it is drawn —
-                * and they are the ones worth watching, because a source that
-                * is growing starts small. The figures say what the chart
-                * cannot resolve.
-                */}
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-sm">
-                  <thead>
-                    <tr className="border-y border-line text-left text-[0.625rem] uppercase tracking-wider text-ink-faint">
-                      <th className="px-5 py-2 font-medium">Source</th>
-                      <th className="px-3 py-2 text-right font-medium">
-                        Per month
-                      </th>
-                      <th className="px-3 py-2 text-right font-medium">
-                        12 months
-                      </th>
-                      <th className="px-3 py-2 text-right font-medium">Share</th>
-                      <th className="px-3 py-2 text-right font-medium">Months</th>
-                      <th className="px-5 py-2 text-right font-medium">
-                        vs the year before
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.income.sources.map((s) => (
-                      <tr
-                        key={s.category}
-                        className="border-b border-line/40 last:border-0"
-                      >
-                        <td className="px-5 py-2">
-                          <span className="flex items-center gap-2">
-                            <span
-                              className="h-2 w-2 shrink-0 rounded-full"
-                              style={{
-                                backgroundColor: data.incomeColors[s.category],
-                              }}
-                            />
-                            <span className="truncate">{s.category}</span>
-                            {!s.spendable && (
-                              <span
-                                title="Does not land in an account you can spend from"
-                                className="text-ink-faint"
-                              >
-                                *
-                              </span>
-                            )}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          {fmtCAD(s.average)}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
-                          {fmtCAD(s.total)}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
-                          {fmtPct(s.share, 0)}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-ink-faint">
-                          {s.months}/12
-                        </td>
-                        <td className="px-5 py-2 text-right tabular-nums">
-                          {s.change === null ? (
-                            <span
-                              className="text-ink-faint"
-                              title="Nothing under this heading in the twelve months before"
-                            >
-                              new
-                            </span>
-                          ) : (
-                            <span
-                              className={
-                                s.change >= 0 ? "text-positive" : "text-negative"
-                              }
-                            >
-                              {s.change >= 0 ? "+" : ""}
-                              {fmtPct(s.change * 100, 0)}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t border-line">
-                      <td className="px-5 py-2 font-semibold">All income</td>
-                      <td className="px-3 py-2 text-right font-semibold tabular-nums">
-                        {fmtCAD(data.income.average)}
-                      </td>
-                      <td className="px-3 py-2 text-right font-semibold tabular-nums">
-                        {fmtCAD(data.income.total)}
-                      </td>
-                      <td colSpan={3} />
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-              {data.income.sources.some((s) => !s.spendable) && (
-                <p className="px-5 pb-4 pt-3 text-[0.6875rem] leading-relaxed text-ink-faint">
-                  * Counted as income, but it never reaches an account you can
-                  spend from — a pension contribution, a dividend kept in the
-                  brokerage that earned it, or money borrowed.
-                </p>
-              )}
-            </>
-          )}
-        </Card>
 
         {/* Category trend */}
         <Card>

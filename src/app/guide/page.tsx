@@ -75,8 +75,8 @@ function Table({ children }: { children: ReactNode }) {
 export default function GuidePage() {
   return (
     <Shell
-      title="How this works"
-      subtitle="What the app works out for itself, and what it has to be told"
+      title="Guide"
+      subtitle="How each figure is arrived at — what the app works out for itself, and what it has to be told"
     >
       <div className="space-y-4">
         <Section

@@ -127,17 +127,17 @@ skipped with console errors).
 
 | Page | What you get |
 | --- | --- |
-| **Dashboard** | Net worth KPI cards with sparklines, an all-time net-worth line, what net worth is *made of* as a 100% stacked composition, a financial-independence tracker against your own spending, cash-flow averages, income vs expenses, **income by source** (every kind of income, its share, and which way it is moving), where the money went, and spending by category as a 100% stacked line |
+| **Dashboard** | Net worth KPI cards with sparklines, an all-time net-worth line, what net worth is *made of* as a 100% stacked composition, a financial-independence tracker against your own spending, cash-flow averages, income vs expenses, where the money went, and spending by category as a 100% stacked line |
+| **Income** | Every kind of income over 1, 2 or 5 years: what arrives a month, how much of it is spendable, how much is passive, and a per-source table with trends — averaged over the window rather than over the months a source turned up in |
 | **Transactions** | Full CRUD with filters (search, type, category, account, month), filtered summary chips, filtered cash-flow chart, balances adjust automatically (client and server agree). Every row records where the money came *from* and went *to*; transfers move money between your own accounts. Recurring rules (rent, salary, contributions) post themselves on schedule and can be paused. Rows are drawn a page at a time |
-| **Expenses** | One month against the twelve before it: category totals, necessities vs discretionary vs excluded, what moved against its usual cost, a recurring-cost floor, and a **cost-of-ownership card** (the car) averaged over every month owned rather than every month billed |
+| **Expenses** | One month against the twelve before it: category totals, necessities vs discretionary vs excluded, what moved against its usual cost, a recurring-cost floor, and a **cost-of-ownership card** (the car) averaged over every month owned rather than every month billed. **Budgets live here too** — a limit is an attribute of a category, so it is set beside what the category actually costs |
 | **Investments** | Holdings CRUD with price updates, all-time value vs cost basis, asset allocation, holdings exposure by position, three measures of return side by side (simple, money-weighted, time-weighted) against a benchmark, and a per-position table sortable by class, value, gain and MWRR |
-| **Budgets** | Monthly budgets per category, radial utilization gauge, budget-vs-actual bars, progress rows with inline limit editing, daily pace estimate — plus a category manager: create, rename, and delete categories (renames cascade to budgets and existing transactions; deleted categories move their transactions to "Other") |
 | **Accounts** | Assets/liabilities/net-worth KPIs, assets-vs-liabilities stacked area, account cards with history sparklines, and a defined-benefit pension card (transfer value against what you contributed). Accounts carry a kind (chequing, savings, cash, investment, crypto, property, credit, loan, pension) and a registration (non-registered, TFSA, RRSP, FHSA, Pension) |
 | **Year** | Every year on record against the one before: income against spending, what it grew to, what the portfolio did with it, and the month each milestone was first passed |
 | **Tax** | Realized gains, dividends and interest by year — non-registered only, since that is the only place any of it is reportable |
 | **Import CSV** | Drop in one file or many and each is routed by what it *is*: a card statement, a bank export with debit/credit columns, a trade log, or a brokerage activity report that is all of those at once. Format, sign convention and account are detected per file, categories are suggested against your own list, duplicates are flagged, and every row is reviewable before anything is saved |
 | **Monthly checklist** | Closes the month that just ended in one pass: import → income → spending → trades → pension → save. Nothing is written until the last step |
-| **How this works** | The judgement calls the app makes and why — the pension, staking rewards, necessity vs choice, what the checklist covers, which months a chart shows |
+| **Guide** | How each figure is arrived at: the pension, staking rewards, necessity vs choice, what a statement is read for, what the checklist covers, realized vs unrealized, and which months a chart shows |
 
 ## Stack
 
@@ -312,7 +312,7 @@ rows, some ten thousand elements — so every keystroke in the search box rebuil
 
 ```
 src/
-  app/            # routes: dashboard, transactions, expenses, investments, budgets,
+  app/            # routes: dashboard, income, transactions, expenses, investments,
                   #   accounts, year, tax, import, import-trades, guide, login
   app/api/        # JSON API (force-dynamic route handlers)
   components/     # shell (sidebar/logo/topbar), ui primitives, charts, forms,

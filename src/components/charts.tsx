@@ -524,31 +524,6 @@ export function spectrumAt(i: number, n: number): string {
   return SPECTRUM[Math.min(at, SPECTRUM.length - 1)];
 }
 
-/**
- * The colour that stands for a whole asset class.
- *
- * Taken from the same spectrum at a slot fixed per class rather than by rank,
- * so a class keeps its colour when the portfolio changes shape — the
- * allocation donut is then the same palette as the exposure chart beside it
- * without pretending the two are the same encoding.
- *
- * The four slots are the four that measure best against each other, not four
- * even steps: even steps put two neighbouring hues on the two largest classes.
- * These clear ΔE 23.8 with full colour vision and 7.9 under deuteranopia,
- * which is a warning rather than a pass — legal here only because the donut
- * carries a labelled legend, so no class is identified by its colour alone.
- */
-const CLASS_SLOT: Record<string, number> = {
-  "Intl Equity": 4, // green
-  Crypto: 6, // gold
-  Bonds: 10, // magenta
-  "US Equity": 13, // blue
-};
-
-export function assetClassColor(assetClass: string): string {
-  return SPECTRUM[CLASS_SLOT[assetClass] ?? 12];
-}
-
 export type ExposureDatum = {
   ticker: string;
   name: string;
