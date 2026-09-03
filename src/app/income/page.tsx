@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Banknote, Coins, HandCoins, Landmark } from "lucide-react";
+import { Banknote, Coins, HandCoins } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardHeader, EmptyState, Segmented, cn } from "@/components/ui";
-import { SeriesChart, Sparkline, categoryColors } from "@/components/charts";
+import { GroupedBars, Sparkline, categoryColors } from "@/components/charts";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import { incomeBySource, PASSIVE_INCOME_CATEGORIES } from "@/lib/analytics";
@@ -50,17 +50,51 @@ export default function IncomePage() {
     const spendable = breakdown.sources
       .filter((s) => s.spendable)
       .reduce((sum, s) => sum + s.average, 0);
-    const passive = breakdown.sources
-      .filter((s) => PASSIVE_INCOME_CATEGORIES.has(s.category))
-      .reduce((sum, s) => sum + s.average, 0);
+    /*
+     * Dividends and interest, month by month.
+     *
+     * On its own axis rather than as two bands of the chart above: passive
+     * income is a percent and a half of this record, so on a scale that fits
+     * a salary it is a line of pixels. Given its own chart the same figures
+     * are a shape you can read — which is the point, since this is the part
+     * that is supposed to grow.
+     */
+    const passiveSources = breakdown.sources.filter((s) =>
+      PASSIVE_INCOME_CATEGORIES.has(s.category),
+    );
+    const passive = passiveSources.reduce((sum, s) => sum + s.average, 0);
+    const passiveMonths = breakdown.months.map((m) => {
+      const row: Record<string, string | number> = {
+        key: String(m.key),
+        label: String(m.label),
+      };
+      for (const s of passiveSources) row[s.category] = Number(m[s.category] ?? 0);
+      return row;
+    });
+    const passiveBest = passiveMonths.reduce(
+      (best, m) =>
+        Math.max(
+          best,
+          passiveSources.reduce((sum, s) => sum + Number(m[s.category] ?? 0), 0),
+        ),
+      0,
+    );
 
-    return { breakdown, colors, series, spendable, passive };
+    return {
+      breakdown,
+      colors,
+      series,
+      spendable,
+      passive,
+      passiveSources,
+      passiveMonths,
+      passiveBest,
+    };
   }, [transactions, window, through]);
 
   if (!ready) return <PageSkeleton />;
 
   const { breakdown, colors, series } = data;
-  const largest = breakdown.sources[0];
 
   if (breakdown.sources.length === 0) {
     return (
@@ -91,9 +125,9 @@ export default function IncomePage() {
       }
     >
       <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <StatCard
-            label="Income a month"
+            label="Income per month"
             value={fmtCAD(breakdown.average)}
             deltaValue={fmtCAD(breakdown.total)}
             deltaLabel={`over ${breakdown.windowMonths} months`}
@@ -108,7 +142,7 @@ export default function IncomePage() {
             sparkColor="#34d399"
           />
           <StatCard
-            label="Spendable a month"
+            label="Spendable per month"
             value={fmtCAD(data.spendable)}
             deltaValue={
               breakdown.average > 0
@@ -119,24 +153,28 @@ export default function IncomePage() {
             icon={<HandCoins size={16} />}
           />
           <StatCard
-            label="Passive a month"
+            label="Passive income per month"
             value={fmtCAD(data.passive)}
             deltaValue={
               breakdown.average > 0
-                ? `${Math.round((data.passive / breakdown.average) * 100)}%`
+                ? `${((data.passive / breakdown.average) * 100).toFixed(1)}%`
                 : undefined
             }
-            deltaLabel="dividends and interest"
+            /*
+             * A decimal: passive income is a small share of a large number,
+             * and "1%" rounded from 1.4 hides the only movement there is to
+             * see in it.
+             */
+            deltaLabel="of all income"
             icon={<Coins size={16} />}
-          />
-          <StatCard
-            label="Largest source"
-            value={largest?.category ?? "—"}
-            deltaValue={
-              largest ? `${fmtCAD(largest.average)}/mo` : undefined
-            }
-            deltaLabel={largest ? `${largest.share.toFixed(0)}% of everything` : ""}
-            icon={<Landmark size={16} />}
+            spark={data.passiveMonths.map((m) => ({
+              v: data.passiveSources.reduce(
+                (sum, s) => sum + Number(m[s.category] ?? 0),
+                0,
+              ),
+            }))}
+            sparkKey="v"
+            sparkColor="#e8c33a"
           />
         </div>
 
@@ -147,28 +185,69 @@ export default function IncomePage() {
           />
           <div className="px-3 pb-4">
             {/*
+              * Bars, because income arrives in discrete lumps rather than
+              * flowing: a month is paid or it is not, and an area chart
+              * interpolates between two months as though the money were
+              * accruing across the gap. A bar per month says what that month
+              * brought in and nothing about the space between.
+              *
               * Stacked in dollars, not shares. The spending page draws its
               * mix as a hundred percent because a month's spending is a whole
               * to be divided; income is not — the question is how much
               * arrived as well as what it arrived as, and a share would answer
               * only half of it.
               */}
-            <SeriesChart
+            <GroupedBars
               data={breakdown.months}
               xKey="label"
-              series={breakdown.sources.map((s) => ({
+              bars={breakdown.sources.map((s) => ({
                 key: s.category,
                 name: s.category,
                 color: colors[s.category],
-                kind: "area" as const,
               }))}
               stacked
-              fadeAtZero
               height={300}
               yFmt={fmtCompact}
             />
           </div>
         </Card>
+
+        {data.passiveSources.length > 0 && (
+          <Card>
+            <CardHeader
+              title="Passive income"
+              subtitle={`Dividends and interest · ${breakdown.windowMonths} months through ${labelMonth(through)}`}
+            />
+            <div className="px-3 pb-4">
+              <GroupedBars
+                data={data.passiveMonths}
+                xKey="label"
+                bars={data.passiveSources.map((s) => ({
+                  key: s.category,
+                  name: s.category,
+                  color: colors[s.category],
+                }))}
+                stacked
+                height={220}
+                yFmt={fmtCompact}
+              />
+            </div>
+            <p className="px-5 pb-5 text-[0.6875rem] leading-relaxed text-ink-faint">
+              {fmtCAD(data.passive)} a month on average, which is{" "}
+              <strong className="text-ink-dim">
+                {breakdown.average > 0
+                  ? `${((data.passive / breakdown.average) * 100).toFixed(1)}%`
+                  : "—"}
+              </strong>{" "}
+              of everything that came in
+              {data.passiveBest > 0 && (
+                <> · best month {fmtCAD(data.passiveBest)}</>
+              )}
+              . This is the part that does not need you to work for it, so what
+              matters is the slope rather than the height.
+            </p>
+          </Card>
+        )}
 
         <Card>
           <CardHeader
@@ -289,8 +368,10 @@ export default function IncomePage() {
               <>
                 {" "}
                 An asterisk marks income that never reaches an account you can
-                spend from — a pension contribution, a dividend kept in the
-                brokerage that earned it, or money borrowed.
+                spend from — a pension contribution, or a dividend kept in the
+                brokerage that earned it. Money borrowed is not here at all:
+                it arrives, but it is a debt appearing at the same moment
+                rather than something earned.
               </>
             )}
           </p>

@@ -1768,6 +1768,42 @@ describe("simpleReturn", () => {
   });
 });
 
+describe("borrowed money is not income", () => {
+  const loan = (date: string, amount: number) =>
+    txn({ date, amount, type: "income" as const, category: "Loan Proceeds" });
+  const pay = (date: string, amount: number) =>
+    txn({ date, amount, type: "income" as const, category: "Salary" });
+
+  test("it is left out of the income totals", () => {
+    const only = monthTotals([loan(DAY, 20000)], MONTH);
+    assert.equal(only.income, 0);
+    const both = monthTotals([loan(DAY, 20000), pay(DAY, 5000)], MONTH);
+    assert.equal(both.income, 5000);
+  });
+
+  test("and out of the monthly averages, so the savings rate is not flattered", () => {
+    // One month of data, so the average is that month: the pay and not the
+    // drawdown, which would otherwise quadruple it.
+    const rows = [loan(DAY, 12000), pay(DAY, 4000)];
+    assert.equal(monthlyAverages(rows, 12, MONTH).income, 4000);
+  });
+
+  test("and it is not a source on the income page", () => {
+    const b = incomeBySource([loan(DAY, 9000), pay(DAY, 3000)], 1, MONTH);
+    assert.deepEqual(
+      b.sources.map((s) => s.category),
+      ["Salary"],
+    );
+    assert.equal(b.total, 3000);
+  });
+
+  test("but spending is still spending", () => {
+    // The mirror image is a repayment, which is an expense and stays one.
+    const rows = [txn({ amount: 500, type: "expense", category: "Debt Repayment", date: DAY })];
+    assert.equal(monthTotals(rows, MONTH).expenses, 500);
+  });
+});
+
 describe("incomeBySource", () => {
   const pay = (date: string, amount: number, category = "Salary") =>
     txn({ date, amount, type: "income", category });

@@ -1,4 +1,4 @@
-import { NON_SPENDABLE_INCOME, chainedReturns } from "./analytics";
+import { NON_SPENDABLE_INCOME, chainedReturns, isIncome } from "./analytics";
 import type { NetWorthPoint, PortfolioPoint } from "./analytics";
 import { Transaction } from "./types";
 import { fromCents, roundMoney, toCents } from "./money";
@@ -71,7 +71,7 @@ export function yearRows(
     const key = t.date.slice(0, 4);
     const slot = cents.get(key) ?? { income: 0, expenses: 0, spendable: 0 };
     const amount = toCents(t.amount);
-    if (t.type === "income") {
+    if (isIncome(t)) {
       slot.income += amount;
       if (!NON_SPENDABLE_INCOME.has(t.category)) slot.spendable += amount;
     } else if (t.type === "expense") {
