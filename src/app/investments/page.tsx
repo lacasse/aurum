@@ -24,7 +24,7 @@ import {
 } from "@/components/ui";
 import {
   DonutChart,
-  assetClassColor,
+  spectrumAt,
   ExposurePie,
   SeriesChart,
   SignedHBars,
@@ -477,6 +477,20 @@ export default function InvestmentsPage() {
     const open = all.filter((r) => !r.closed);
     const series = portfolioSeries(holdings, 18);
     const allocation = allocationByClass(holdings).sort((a, b) => b.value - a.value);
+    /*
+     * The same rule every other ring in the app uses: the spectrum spread
+     * across however many slices there are, in the order they are drawn.
+     *
+     * The classes used to take four fixed points of it instead, so that a
+     * class kept its colour as the portfolio changed shape. That is the
+     * textbook answer and it made this the one chart that did not match the
+     * others — four widely spaced hues beside a rainbow. One palette, one
+     * rule; the table below reads its class dots from this same map, so the
+     * two cannot drift apart.
+     */
+    const classColors = Object.fromEntries(
+      allocation.map((a, i) => [a.name, spectrumAt(i, allocation.length)]),
+    );
     const exposure = holdingExposure(holdings);
     const totalValue = open.reduce((s, r) => s + r.marketValue, 0);
     const totalCost = open.reduce((s, r) => s + r.costBasis, 0);
@@ -498,6 +512,7 @@ export default function InvestmentsPage() {
       closedCount,
       series,
       allocation,
+      classColors,
       exposure,
       totalValue,
       totalCost,
@@ -754,11 +769,7 @@ export default function InvestmentsPage() {
               {data.allocation.length > 0 ? (
                 <DonutChart
                   data={data.allocation}
-                  /* The same colour each class wears in the exposure chart
-                     below, so the two cards are one palette rather than two. */
-                  colors={Object.fromEntries(
-                    data.allocation.map((a) => [a.name, assetClassColor(a.name)]),
-                  )}
+                  colors={data.classColors}
                   centerLabel="Invested"
                   centerValue={fmtCompact(data.totalValue)}
                   fmt={(n) => fmtCAD(n)}
@@ -1087,7 +1098,10 @@ export default function InvestmentsPage() {
                       <span className="flex items-center gap-1.5 whitespace-nowrap text-ink-dim">
                         <span
                           className="h-2 w-2 shrink-0 rounded-full"
-                          style={{ backgroundColor: assetClassColor(r.assetClass) }}
+                          style={{
+                            backgroundColor:
+                              data.classColors[r.assetClass] ?? "var(--ink-faint)",
+                          }}
                         />
                         {r.assetClass}
                       </span>

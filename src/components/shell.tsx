@@ -8,6 +8,7 @@ import {
   ArrowLeftRight,
   BookOpen,
   CalendarRange,
+  HandCoins,
   Landmark,
   LayoutDashboard,
   Menu,
@@ -15,7 +16,6 @@ import {
   Receipt,
   ReceiptText,
   Sun,
-  Target,
   Trash2,
   TrendingUp,
   Upload,
@@ -27,17 +27,27 @@ import { useFinance } from "@/lib/store";
 import { useMounted } from "@/lib/hooks";
 import { cn } from "./ui";
 
+/*
+ * Ordered by how the money is read rather than how it is entered: the summary
+ * first, then the three questions it raises — what came in, what went out,
+ * what it bought — and then the ledger those are all derived from. The
+ * transaction list is the raw material, so it sits under the pages that
+ * interpret it rather than above them.
+ *
+ * Import and the guide sit at the foot, below the pages that answer something:
+ * one is a thing you do a few times a month, the other a thing you read once.
+ */
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
+  { href: "/income", label: "Income", icon: HandCoins },
   { href: "/expenses", label: "Expenses", icon: ReceiptText },
   { href: "/investments", label: "Investments", icon: TrendingUp },
-  { href: "/budgets", label: "Budgets", icon: Target },
+  { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/accounts", label: "Accounts", icon: Landmark },
-  { href: "/import", label: "Import", icon: Upload },
   { href: "/year", label: "Year", icon: CalendarRange },
   { href: "/tax", label: "Tax", icon: Receipt },
-  { href: "/guide", label: "How this works", icon: BookOpen },
+  { href: "/import", label: "Import", icon: Upload },
+  { href: "/guide", label: "Guide", icon: BookOpen },
 ] as const;
 
 /**

@@ -276,7 +276,7 @@ export default function AccountsPage() {
               action={
                 <Link href="/guide#pension">
                   <Button variant="ghost" size="sm">
-                    How this works <ArrowRight size={13} />
+                    Guide <ArrowRight size={13} />
                   </Button>
                 </Link>
               }
