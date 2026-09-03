@@ -19,7 +19,6 @@ import {
   Trash2,
   TrendingUp,
   Upload,
-  Wallet,
   X,
   LogOut,
 } from "lucide-react";
@@ -40,6 +39,66 @@ const NAV = [
   { href: "/tax", label: "Tax", icon: Receipt },
   { href: "/guide", label: "How this works", icon: BookOpen },
 ] as const;
+
+/**
+ * The whole lockup, drawn rather than loaded.
+ *
+ * As one SVG it stays sharp at any size and costs no request.
+ *
+ * The disc keeps the logo's gradient exactly: gold at the top left through to
+ * the brand violet at the bottom right, which is where the app's two colours
+ * come from.
+ */
+
+function AurumLogo() {
+  return (
+    <svg
+      viewBox="0 0 208 58"
+      /*
+       * Visible, not clipped: the wordmark is live text in whatever font the
+       * page loaded, and a fallback face with wider glyphs would otherwise be
+       * cut off at the edge of the box rather than simply overhanging it.
+       */
+      overflow="visible"
+      /*
+       * The logo's own cream on the dark card, where it measures 12.0:1 and
+       * looks exactly like the artwork. On the light card that same cream is
+       * 1.5:1 against the cream ground — a watermark rather than a name — so
+       * there the wordmark takes the theme's ink. The mark never changes.
+       */
+      className="h-auto w-[11.5rem] text-ink dark:text-[#e2caba]"
+      role="img"
+      aria-label="Aurum · Personal Finance"
+    >
+      <defs>
+        <linearGradient id="aurum-mark" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#f6cb6e" />
+          <stop offset="0.34" stopColor="#e3aec4" />
+          <stop offset="0.66" stopColor="#a877e2" />
+          <stop offset="1" stopColor="#7c30e6" />
+        </linearGradient>
+      </defs>
+      <circle cx="26" cy="29" r="24" fill="url(#aurum-mark)" />
+      <text
+        x="62"
+        y="31"
+        fill="currentColor"
+        fontSize="30"
+      >
+        Aurum
+      </text>
+      <text
+        x="62"
+        y="50"
+        fill="currentColor"
+        fillOpacity="0.78"
+        fontSize="14"
+      >
+        Personal Finance
+      </text>
+    </svg>
+  );
+}
 
 function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
@@ -136,15 +195,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <Link
         href="/"
         onClick={onNavigate}
-        className="flex items-center gap-2.5 px-3 py-1"
+        className="block px-3 py-1"
       >
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-lg shadow-violet-500/20">
-          <Wallet size={18} />
-        </span>
-        <span>
-          <span className="block text-sm font-semibold tracking-tight">Aurum</span>
-          <span className="block text-[0.6875rem] text-ink-faint">Personal Finance</span>
-        </span>
+        <AurumLogo />
       </Link>
 
       <nav className="mt-6 flex-1 space-y-1">
