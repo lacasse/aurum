@@ -9,6 +9,7 @@ import {
   Holding,
   isLiability,
   isPension,
+  MonthlyPoint,
   Transaction,
   withBalanceRecorded,
 } from "./types";
@@ -57,10 +58,45 @@ export function accountCadBalance(acc: Account, usdCadRate: number): number {
   return roundMoney(acc.balance + (acc.balanceUSD ?? 0) * usdCadRate);
 }
 
+/**
+ * An account's recorded history, indexed for repeated lookup.
+ *
+ * Every month of every chart asks this question, and the answer used to be a
+ * linear scan of the history — twice, since a miss then walked the whole
+ * array again to find the last figure before the gap. Eighty months against
+ * ten accounts of eighteen points is fourteen thousand comparisons per series,
+ * and three functions ask for it.
+ *
+ * Keyed on the history array itself rather than the account, and in a WeakMap
+ * so it cannot hold an account alive: the store never mutates a history in
+ * place — `withBalanceRecorded` builds a new array — so a new array means
+ * stale entries fall out on their own.
+ */
+const historyIndex = new WeakMap<
+  MonthlyPoint[],
+  { exact: Map<string, number>; months: string[]; values: number[] }
+>();
+
+function indexHistory(history: MonthlyPoint[]) {
+  let found = historyIndex.get(history);
+  if (found) return found;
+  const ordered = [...history].sort((a, b) => a.month.localeCompare(b.month));
+  found = {
+    exact: new Map(ordered.map((p) => [p.month, p.value])),
+    months: ordered.map((p) => p.month),
+    values: ordered.map((p) => p.value),
+  };
+  historyIndex.set(history, found);
+  return found;
+}
+
 export function accountValueAt(acc: Account, monthKey: string): number {
-  const pt = acc.history.find((p) => p.month === monthKey);
-  if (pt) return pt.value;
   if (acc.history.length === 0) return acc.balance;
+
+  const { exact, months, values } = indexHistory(acc.history);
+  const hit = exact.get(monthKey);
+  if (hit !== undefined) return hit;
+
   /*
    * Off either end of the recorded history, hold the nearest value rather than
    * always reaching for the first one. A month after the last recorded point is
@@ -68,21 +104,23 @@ export function accountValueAt(acc: Account, monthKey: string): number {
    * at the right edge of every chart the moment a history stopped one month
    * short of today.
    */
-  const first = acc.history[0];
-  const lastPoint = acc.history[acc.history.length - 1];
-  if (monthKey < first.month) return first.value;
-  if (monthKey > lastPoint.month) return acc.balance;
+  if (monthKey < months[0]) return values[0];
+  if (monthKey > months[months.length - 1]) return acc.balance;
+
   /*
    * A gap in the middle holds the last figure recorded *before* it, which is
    * what the balance was until something changed it. Reaching for the end of
    * the history instead read a later month's balance back into an earlier one.
+   * Found by bisection now rather than by walking: same answer, no scan.
    */
-  let carried = first.value;
-  for (const p of acc.history) {
-    if (p.month > monthKey) break;
-    carried = p.value;
+  let lo = 0;
+  let hi = months.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (months[mid] <= monthKey) lo = mid;
+    else hi = mid - 1;
   }
-  return carried;
+  return values[lo];
 }
 
 function portfolioValueAt(holdings: Holding[], monthsAgoFromEnd: number): number {
@@ -1215,10 +1253,18 @@ export function monthsSince(start: string, end = currentMonthKey()): string[] {
   return lastMonthKeys(count, end);
 }
 
+/**
+ * Shares held at the end of each month, and the book cost of them.
+ *
+ * Indexed by position in the month list rather than keyed by the month string.
+ * Sixty holdings across eighty months is ten thousand entries, and a plain
+ * array reads and writes them by offset where a `Map` hashed a string every
+ * time. The caller owns the month list, so the offsets mean nothing without
+ * it — which is why these never leave this file.
+ */
 interface MonthlyPosition {
-  /** Shares held at the end of each month, and the book cost of them. */
-  shares: Map<string, number>;
-  cost: Map<string, number>;
+  shares: number[];
+  cost: number[];
 }
 
 /**
@@ -1230,14 +1276,58 @@ interface MonthlyPosition {
  * neither. Kept beside it rather than folded into it because the two answer
  * different questions — one totals a position, this one traces it.
  */
+/**
+ * Every holding's shares and book cost, month by month, pooled per ticker.
+ *
+ * Both the all-time portfolio series and the net-worth-by-class series need
+ * exactly this, and the dashboard draws both — so it was computed twice per
+ * load, sixty holdings walked across eighty months each time. Cached on the
+ * arrays that went into it: within one render the holdings array is the same
+ * object, and the month list is identified by its length and its two ends,
+ * which is enough since `monthsSince` always produces a contiguous run.
+ */
+type PooledPositions = Map<string, MonthlyPosition>;
+
+let pooledCache: {
+  holdings: Holding[];
+  key: string;
+  value: PooledPositions;
+} | null = null;
+
+function pooledPositions(holdings: Holding[], months: string[]): PooledPositions {
+  const key = `${months.length}|${months[0] ?? ""}|${months[months.length - 1] ?? ""}`;
+  if (pooledCache && pooledCache.holdings === holdings && pooledCache.key === key) {
+    return pooledCache.value;
+  }
+
+  const pooled: PooledPositions = new Map();
+  for (const h of holdings) {
+    const ticker = h.ticker.toUpperCase();
+    const walked = walkPositionByMonth(h.flows, months);
+    const entry = pooled.get(ticker);
+    if (!entry) {
+      pooled.set(ticker, walked);
+      continue;
+    }
+    for (let m = 0; m < months.length; m++) {
+      entry.shares[m] += walked.shares[m];
+      entry.cost[m] += walked.cost[m];
+    }
+  }
+
+  pooledCache = { holdings, key, value: pooled };
+  return pooled;
+}
+
 function walkPositionByMonth(flows: CashFlow[], months: string[]): MonthlyPosition {
   const ordered = [...flows].sort((a, b) => a.date.localeCompare(b.date));
-  const shares = new Map<string, number>();
-  const cost = new Map<string, number>();
+  const shares = new Array<number>(months.length);
+  const cost = new Array<number>(months.length);
   let held = 0;
   let basis = 0;
   let i = 0;
-  for (const month of months) {
+  for (let m = 0; m < months.length; m++) {
+    const month = months[m];
     while (i < ordered.length && monthKeyOf(ordered[i].date) <= month) {
       const f = ordered[i++];
       if (f.kind === "buy") {
@@ -1250,8 +1340,8 @@ function walkPositionByMonth(flows: CashFlow[], months: string[]): MonthlyPositi
       }
     }
     // Floating dust: a position sold out should read as exactly empty.
-    shares.set(month, held < 1e-9 ? 0 : held);
-    cost.set(month, held < 1e-9 ? 0 : basis);
+    shares[m] = held < 1e-9 ? 0 : held;
+    cost[m] = held < 1e-9 ? 0 : basis;
   }
   return { shares, cost };
 }
@@ -1330,7 +1420,7 @@ export function allTimeSeries(
   }));
 
   // Pool the lots: one share count and one book cost per ticker per month.
-  const byTicker = new Map<string, { shares: Map<string, number>; cost: Map<string, number> }>();
+  const byTicker: PooledPositions = new Map();
   const currentPrice = new Map<string, number>();
   const lastMonth = months[months.length - 1];
   /*
@@ -1351,18 +1441,8 @@ export function allTimeSeries(
     if (!currentPrice.has(ticker)) currentPrice.set(ticker, px);
   }
 
-  for (const h of holdings) {
-    const ticker = h.ticker.toUpperCase();
-    const walked = walkPositionByMonth(h.flows, months);
-    const entry = byTicker.get(ticker);
-    if (!entry) {
-      byTicker.set(ticker, walked);
-      continue;
-    }
-    for (const month of months) {
-      entry.shares.set(month, (entry.shares.get(month) ?? 0) + (walked.shares.get(month) ?? 0));
-      entry.cost.set(month, (entry.cost.get(month) ?? 0) + (walked.cost.get(month) ?? 0));
-    }
+  for (const [ticker, walked] of pooledPositions(holdings, months)) {
+    byTicker.set(ticker, walked);
   }
 
   let snapshotMonths = 0;
@@ -1377,9 +1457,9 @@ export function allTimeSeries(
     for (const value of Object.values(recorded)) fromSnapshot += value;
 
     for (const [ticker, { shares, cost }] of byTicker) {
-      points[i].cost += cost.get(month) ?? 0;
+      points[i].cost += cost[i];
       if (recorded[ticker] !== undefined) continue; // already counted
-      const held = shares.get(month) ?? 0;
+      const held = shares[i];
       if (held <= 0) continue;
       const px =
         month === lastMonth
@@ -1387,7 +1467,7 @@ export function allTimeSeries(
           : closeFor(closes[ticker], month);
       if (px === null) {
         unpriced.add(ticker);
-        fromPrice += cost.get(month) ?? 0; // book cost: nothing better exists
+        fromPrice += cost[i]; // book cost: nothing better exists
       } else {
         fromPrice += held * px;
       }
@@ -1568,16 +1648,9 @@ export function netWorthByClass(
       if (h.shares > 0) currentPrice.set(ticker, px);
       else if (!closedPrice.has(ticker)) closedPrice.set(ticker, px);
     }
-    const position = walkPositionByMonth(h.flows, months);
-    const existing = walked.get(ticker);
-    if (!existing) {
-      walked.set(ticker, position);
-      continue;
-    }
-    for (const month of months) {
-      existing.shares.set(month, (existing.shares.get(month) ?? 0) + (position.shares.get(month) ?? 0));
-      existing.cost.set(month, (existing.cost.get(month) ?? 0) + (position.cost.get(month) ?? 0));
-    }
+  }
+  for (const [ticker, position] of pooledPositions(holdings, months)) {
+    walked.set(ticker, position);
   }
   for (const [ticker, px] of closedPrice) {
     if (!currentPrice.has(ticker)) currentPrice.set(ticker, px);
@@ -1585,7 +1658,7 @@ export function netWorthByClass(
 
   const lastMonth = months[months.length - 1];
 
-  return months.map((month) => {
+  return months.map((month, m) => {
     const bands: Record<NetWorthClass, number> = {
       Cash: 0,
       Bonds: 0,
@@ -1611,7 +1684,7 @@ export function netWorthByClass(
     }
     for (const [ticker, position] of walked) {
       if (recorded[ticker] !== undefined) continue; // already counted
-      const held = position.shares.get(month) ?? 0;
+      const held = position.shares[m];
       if (held <= 0) continue;
       const px =
         month === lastMonth
@@ -1619,7 +1692,7 @@ export function netWorthByClass(
           : closeFor(closes[ticker], month);
       const band = classOf.get(ticker) ?? "Stocks";
       // Book cost when nothing better exists, as the all-time series does.
-      bands[band] += px === null ? (position.cost.get(month) ?? 0) : held * px;
+      bands[band] += px === null ? position.cost[m] : held * px;
     }
 
     const liabilities = fromCents(liabilityCents);

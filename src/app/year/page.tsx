@@ -15,7 +15,6 @@ import {
   netExternalFlows,
   netWorthOver,
   portfolioSeries,
-  type SnapshotHistory,
 } from "@/lib/analytics";
 import { milestones, yearRows } from "@/lib/year";
 import { fmtCAD, fmtCompact, fmtPct, fmtSignedCAD, labelMonth } from "@/lib/format";
@@ -34,21 +33,17 @@ export default function YearPage() {
   const holdings = useFinance((s) => s.holdings);
   const transactions = useFinance((s) => s.transactions);
   const usdCadRate = useFinance((s) => s.usdCadRate);
-  const [snapshots, setSnapshots] = useState<SnapshotHistory>({});
   const [year, setYear] = useState<string | null>(null);
 
+  /*
+   * Recorded month-end portfolio values, from the store: four pages draw a
+   * chart from this history and it is fetched once for all of them.
+   */
+  const snapshots = useFinance((s) => s.snapshotHistory);
+  const loadSnapshotHistory = useFinance((s) => s.loadSnapshotHistory);
   useEffect(() => {
-    let cancelled = false;
-    fetch("/api/snapshots/history", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { months: SnapshotHistory }) => {
-        if (!cancelled) setSnapshots(d.months ?? {});
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    loadSnapshotHistory();
+  }, [loadSnapshotHistory]);
 
   const data = useMemo(() => {
     const starts = [Object.keys(snapshots).sort()[0] ?? null, firstFlowMonth(holdings)].filter(
