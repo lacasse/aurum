@@ -358,6 +358,17 @@ export function GroupedBars({
   stacked?: boolean;
 }) {
   const stackId = stacked ? "a" : undefined;
+  /*
+   * Only the top of a stack is rounded. Every bar carried the same rounded
+   * corners, so a stacked column read as a pile of separate capsules with a
+   * curve cutting into the segment above each one. Side-by-side bars all get
+   * it, since each of those is its own column with its own top.
+   *
+   * "Top" is the last series, not whichever segment happens to be the highest
+   * that month: a series that is zero in one month leaves the corners on a
+   * band nobody can see, which is invisible rather than wrong.
+   */
+  const last = bars.length - 1;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
@@ -377,13 +388,13 @@ export function GroupedBars({
         {bars.length > 1 ? (
           <Legend wrapperStyle={LEGEND_STYLE} iconType="circle" iconSize={8} />
         ) : null}
-        {bars.map((b) => (
+        {bars.map((b, i) => (
           <Bar
             key={b.key}
             dataKey={b.key}
             name={b.name}
             fill={b.color}
-            radius={[4, 4, 0, 0]}
+            radius={!stacked || i === last ? [4, 4, 0, 0] : [0, 0, 0, 0]}
             maxBarSize={26}
             stackId={stackId}
           />
