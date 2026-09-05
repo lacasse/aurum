@@ -218,6 +218,7 @@ export function generateSampleData(): FinanceData {
     name: string;
     assetClass: Holding["assetClass"];
     shares: number;
+    /** Unused: every cost base is replayed from the trades built below. */
     avgCost: number;
     price: number;
     drift: number; // total growth factor over window
@@ -226,27 +227,32 @@ export function generateSampleData(): FinanceData {
   }
   const FX = 1.37; // sample USD/CAD rate
   /*
-   * Invented securities, not real ones.
+   * Invented securities, not real ones — and a deliberately ordinary shape.
    *
-   * The sample is a fiction from end to end and none of it is read from
-   * anybody's records, but real tickers still invite the wrong reading: a
-   * demo portfolio holding the same names as the real one is hard to tell
-   * apart at a glance, and a screenshot of it looks like a statement. These
-   * are made up — the ticker, the company, the price — while keeping the
-   * shape a real portfolio has: a couple of broad funds, a bond fund, some
-   * single names of varying luck, and one small crypto position.
+   * The sample is a fiction from end to end and reads nobody's records, but a
+   * demo that happens to *look* like the real portfolio is nearly as bad as
+   * one that copies it: a screenshot is then hard to tell from a statement.
+   * So the names are made up and the composition is chosen to be the textbook
+   * one rather than anyone's in particular — an index fund at the centre, a
+   * bond fund beside it, a handful of single names, and crypto as a rounding
+   * error rather than the largest thing owned.
    */
   const seeds: (Seed & { currency: "CAD" | "USD" })[] = [
-    { ticker: "MTMX", name: "Meridian Total Market Index", assetClass: "US Equity", shares: 62, avgCost: 228.4, price: 292.15, drift: 1.28, vol: 0.05, dividends: 184.42, currency: "USD" },
-    { ticker: "NGIX", name: "Northgate International Index", assetClass: "Intl Equity", shares: 48, avgCost: 52.1, price: 66.84, drift: 1.24, vol: 0.06, dividends: 94.56, currency: "USD" },
-    { ticker: "KCBF", name: "Kestrel Core Bond Fund", assetClass: "Bonds", shares: 90, avgCost: 74.3, price: 72.92, drift: 0.99, vol: 0.02, dividends: 243.90, currency: "USD" },
-    { ticker: "HLCN", name: "Halcyon Systems", assetClass: "US Equity", shares: 40, avgCost: 148.2, price: 231.44, drift: 1.52, vol: 0.08, dividends: 37.60, currency: "USD" },
-    { ticker: "VNTR", name: "Vantara Software", assetClass: "US Equity", shares: 25, avgCost: 262.5, price: 418.92, drift: 1.55, vol: 0.07, dividends: 47.50, currency: "USD" },
-    { ticker: "ORBS", name: "Orbital Semiconductor", assetClass: "US Equity", shares: 30, avgCost: 68.4, price: 174.22, drift: 2.3, vol: 0.14, dividends: 4.50, currency: "USD" },
-    { ticker: "RVBD", name: "Riverbend Retail Group", assetClass: "US Equity", shares: 22, avgCost: 118.9, price: 186.53, drift: 1.5, vol: 0.09, dividends: 0, currency: "USD" },
-    { ticker: "LMNH", name: "Lumen Media Holdings", assetClass: "US Equity", shares: 18, avgCost: 121.7, price: 191.34, drift: 1.47, vol: 0.08, dividends: 0, currency: "USD" },
-    { ticker: "ARDM", name: "Ardent Motors", assetClass: "US Equity", shares: 12, avgCost: 244.8, price: 232.11, drift: 1.02, vol: 0.16, dividends: 0, currency: "USD" },
-    { ticker: "NMBT", name: "Nimbus Token", assetClass: "Crypto", shares: 0.35, avgCost: 38250, price: 91400, drift: 2.1, vol: 0.18, dividends: 0, currency: "USD" },
+    { ticker: "MTMX", name: "Meridian Total Market Index", assetClass: "US Equity", shares: 148, avgCost: 0, price: 292.15, drift: 1.22, vol: 0.045, dividends: 402.10, currency: "USD" },
+    { ticker: "NGIX", name: "Northgate International Index", assetClass: "Intl Equity", shares: 210, avgCost: 0, price: 66.84, drift: 1.16, vol: 0.055, dividends: 288.40, currency: "USD" },
+    { ticker: "KCBF", name: "Kestrel Core Bond Fund", assetClass: "Bonds", shares: 165, avgCost: 0, price: 72.92, drift: 1.01, vol: 0.018, dividends: 431.75, currency: "USD" },
+    { ticker: "HLCN", name: "Halcyon Systems", assetClass: "US Equity", shares: 24, avgCost: 0, price: 231.44, drift: 1.34, vol: 0.075, dividends: 61.20, currency: "USD" },
+    { ticker: "VNTR", name: "Vantara Software", assetClass: "US Equity", shares: 11, avgCost: 0, price: 418.92, drift: 1.41, vol: 0.07, dividends: 39.60, currency: "USD" },
+    { ticker: "ORBS", name: "Orbital Semiconductor", assetClass: "US Equity", shares: 14, avgCost: 0, price: 174.22, drift: 1.62, vol: 0.12, dividends: 8.40, currency: "USD" },
+    { ticker: "RVBD", name: "Riverbend Retail Group", assetClass: "US Equity", shares: 16, avgCost: 0, price: 186.53, drift: 1.28, vol: 0.085, dividends: 0, currency: "USD" },
+    { ticker: "LMNH", name: "Lumen Media Holdings", assetClass: "US Equity", shares: 13, avgCost: 0, price: 191.34, drift: 1.19, vol: 0.08, dividends: 0, currency: "USD" },
+    { ticker: "ARDM", name: "Ardent Motors", assetClass: "US Equity", shares: 9, avgCost: 0, price: 232.11, drift: 0.94, vol: 0.13, dividends: 0, currency: "USD" },
+    /*
+     * A deliberately small position. Crypto is the whole story in some real
+     * portfolios; making it the whole story here too would mean the demo and
+     * the real thing had the same silhouette, which is what this is avoiding.
+     */
+    { ticker: "NMBT", name: "Nimbus Token", assetClass: "Crypto", shares: 0.06, avgCost: 0, price: 91400, drift: 1.55, vol: 0.16, dividends: 0, currency: "USD" },
   ];
 
   /*
@@ -295,6 +301,8 @@ export function generateSampleData(): FinanceData {
    */
   const buildFlows = (
     s: Seed & { currency: "CAD" | "USD" },
+    /** The security's own monthly price series, in its listing currency. */
+    prices: number[],
     monthsBack: number,
     closeAt: number | null,
   ): CashFlow[] => {
@@ -320,7 +328,15 @@ export function generateSampleData(): FinanceData {
           : round2((target / buyCount) * rand(rng, 0.8, 1.2));
       if (qty <= 0) continue;
       bought = round2(bought + qty);
-      const px = (s.price / s.drift) * (1 + (at / n) * (s.drift - 1));
+      /*
+       * Priced from the security's own history, not from a line drawn between
+       * its first and last price. Those were two independent series: a buy
+       * could be booked at 337 in a month the chart drew at 386, so the cost
+       * base belonged to a price the security never had — and for a volatile
+       * position it put cost above value for most of the window, which is a
+       * portfolio nobody would recognise.
+       */
+      const px = prices[at];
       flows.push({
         date: iso(months[at], randInt(rng, 3, 26)),
         kind: "buy",
@@ -346,16 +362,15 @@ export function generateSampleData(): FinanceData {
       flows.push({
         date: iso(months[at], randInt(rng, 5, 24)),
         kind: "sell",
-        amount: round2(extra * s.price * rand(rng, 0.9, 1.0) * fx),
+        amount: round2(extra * prices[at] * fx),
         shares: -extra,
       });
     }
     if (closeAt !== null) {
-      const px = s.price * rand(rng, 0.94, 1.06);
       flows.push({
         date: iso(months[closeAt], randInt(rng, 5, 24)),
         kind: "sell",
-        amount: round2(bought * px * fx),
+        amount: round2(bought * prices[closeAt] * fx),
         shares: -bought,
       });
     }
@@ -364,14 +379,7 @@ export function generateSampleData(): FinanceData {
 
   const holdings: Holding[] = [...seeds, CLOSED].map((s, idx) => {
     const closed = s === CLOSED;
-    const flows = buildFlows(s, closed ? 14 : randInt(rng, 12, 18), closed ? n - 4 : null);
-    /*
-     * The position read back off its own trades, which is what makes the two
-     * agree: the holdings table, the exposure ring and the trade rows on the
-     * transactions page are then three views of one record rather than three
-     * numbers that happen to be near each other.
-     */
-    const replayed = replayFlows(flows);
+    /* The price series comes first: the trades below are priced from it. */
     const history: number[] = [];
     let p = s.price / s.drift;
     for (let i = 0; i < n; i++) {
@@ -384,6 +392,19 @@ export function generateSampleData(): FinanceData {
     const norm = history.map((v, i) =>
       i === n - 1 ? s.price : round2(v * scale),
     );
+    const flows = buildFlows(
+      s,
+      norm,
+      closed ? 14 : randInt(rng, 12, 18),
+      closed ? n - 4 : null,
+    );
+    /*
+     * The position read back off its own trades, which is what makes the two
+     * agree: the holdings table, the exposure ring and the trade rows on the
+     * transactions page are then three views of one record rather than three
+     * numbers that happen to be near each other.
+     */
+    const replayed = replayFlows(flows);
     const isUSD = s.currency === "USD";
     /*
      * The replay works in the currency the flows are stated in, which is CAD.

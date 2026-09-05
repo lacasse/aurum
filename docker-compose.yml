@@ -53,7 +53,12 @@ services:
       TWELVEDATA_API_KEY: ${TWELVEDATA_API_KEY:?set TWELVEDATA_API_KEY in .env}
       EODHD_API_KEY: ${EODHD_API_KEY:?set EODHD_API_KEY in .env}
       AUTH_USERNAME: ${AUTH_USERNAME:?set AUTH_USERNAME in .env}
-      AUTH_PASSWORD: ${AUTH_PASSWORD:?set AUTH_PASSWORD in .env}
+      # One of these two must be set; auth.ts refuses to start without a
+      # password and prefers the hash when both are present. Neither is
+      # required by Compose, because requiring the plaintext one made the
+      # hashed path — the one the README recommends — impossible to use here.
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-}
+      AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:-}
       AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env}
       TWELVEDATA_MINUTE_LIMIT: ${TWELVEDATA_MINUTE_LIMIT:-8}
       TWELVEDATA_DAY_LIMIT: ${TWELVEDATA_DAY_LIMIT:-800}
