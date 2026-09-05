@@ -11,6 +11,7 @@ import {
   categoryColors,
   spectrumAt,
 } from "@/components/charts";
+import { accent } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import { incomeBySource, PASSIVE_INCOME_CATEGORIES } from "@/lib/analytics";
@@ -145,15 +146,15 @@ export default function IncomePage() {
             }))}
             sparkKey="v"
             /*
-             * The palette's own single colour — what `spectrumAt` gives a
-             * series of one. The green here before came from a categorical set
-             * that no longer exists anywhere else in the app, so the two cards
-             * were drawn in colours the charts below could never produce.
+             * Green: the app's colour for money arriving, wherever it is
+             * drawn. This is the total of every source rather than any one of
+             * them, so it has no slot on the spectrum to take — that ramp
+             * says *which* source, and the answer here is all of them.
              */
-            sparkColor={spectrumAt(0, 1)}
+            sparkColor={accent("positive")}
           />
           <StatCard
-            label="Spendable per month"
+            label="Spendable income per month"
             value={fmtCAD(data.spendable)}
             deltaValue={
               breakdown.average > 0
@@ -196,78 +197,7 @@ export default function IncomePage() {
 
         <Card>
           <CardHeader
-            title="Income month by month"
-            subtitle={`Every kind of income · ${breakdown.windowMonths} months through ${labelMonth(through)}`}
-          />
-          <div className="px-3 pb-4">
-            {/*
-              * Bars, because income arrives in discrete lumps rather than
-              * flowing: a month is paid or it is not, and an area chart
-              * interpolates between two months as though the money were
-              * accruing across the gap. A bar per month says what that month
-              * brought in and nothing about the space between.
-              *
-              * Stacked in dollars, not shares. The spending page draws its
-              * mix as a hundred percent because a month's spending is a whole
-              * to be divided; income is not — the question is how much
-              * arrived as well as what it arrived as, and a share would answer
-              * only half of it.
-              */}
-            <GroupedBars
-              data={breakdown.months}
-              xKey="label"
-              bars={breakdown.sources.map((s) => ({
-                key: s.category,
-                name: s.category,
-                color: colors[s.category],
-              }))}
-              stacked
-              height={300}
-              yFmt={fmtCompact}
-            />
-          </div>
-        </Card>
-
-        {data.passiveSources.length > 0 && (
-          <Card>
-            <CardHeader
-              title="Passive income"
-              subtitle={`Dividends and interest · ${breakdown.windowMonths} months through ${labelMonth(through)}`}
-            />
-            <div className="px-3 pb-4">
-              <GroupedBars
-                data={data.passiveMonths}
-                xKey="label"
-                bars={data.passiveSources.map((s) => ({
-                  key: s.category,
-                  name: s.category,
-                  color: colors[s.category],
-                }))}
-                stacked
-                height={220}
-                yFmt={fmtCompact}
-              />
-            </div>
-            <p className="px-5 pb-5 text-[0.6875rem] leading-relaxed text-ink-faint">
-              {fmtCAD(data.passive)} a month on average, which is{" "}
-              <strong className="text-ink-dim">
-                {breakdown.average > 0
-                  ? `${((data.passive / breakdown.average) * 100).toFixed(1)}%`
-                  : "—"}
-              </strong>{" "}
-              of everything that came in
-              {data.passiveBest > 0 && (
-                <> · best month {fmtCAD(data.passiveBest)}</>
-              )}
-              . This is the part that does not need you to work for it, so what
-              matters is the slope rather than the height.
-            </p>
-          </Card>
-        )}
-
-        <Card>
-          <CardHeader
-            title="Every source"
+            title="Income from every source"
             subtitle={`Against the ${breakdown.windowMonths} months before these`}
           />
           {/*
@@ -392,6 +322,77 @@ export default function IncomePage() {
             )}
           </p>
         </Card>
+
+        <Card>
+          <CardHeader
+            title="Income month by month"
+            subtitle={`Every kind of income · ${breakdown.windowMonths} months through ${labelMonth(through)}`}
+          />
+          <div className="px-3 pb-4">
+            {/*
+              * Bars, because income arrives in discrete lumps rather than
+              * flowing: a month is paid or it is not, and an area chart
+              * interpolates between two months as though the money were
+              * accruing across the gap. A bar per month says what that month
+              * brought in and nothing about the space between.
+              *
+              * Stacked in dollars, not shares. The spending page draws its
+              * mix as a hundred percent because a month's spending is a whole
+              * to be divided; income is not — the question is how much
+              * arrived as well as what it arrived as, and a share would answer
+              * only half of it.
+              */}
+            <GroupedBars
+              data={breakdown.months}
+              xKey="label"
+              bars={breakdown.sources.map((s) => ({
+                key: s.category,
+                name: s.category,
+                color: colors[s.category],
+              }))}
+              stacked
+              height={300}
+              yFmt={fmtCompact}
+            />
+          </div>
+        </Card>
+
+        {data.passiveSources.length > 0 && (
+          <Card>
+            <CardHeader
+              title="Passive income"
+              subtitle={`Dividends and interest · ${breakdown.windowMonths} months through ${labelMonth(through)}`}
+            />
+            <div className="px-3 pb-4">
+              <GroupedBars
+                data={data.passiveMonths}
+                xKey="label"
+                bars={data.passiveSources.map((s) => ({
+                  key: s.category,
+                  name: s.category,
+                  color: colors[s.category],
+                }))}
+                stacked
+                height={220}
+                yFmt={fmtCompact}
+              />
+            </div>
+            <p className="px-5 pb-5 text-[0.6875rem] leading-relaxed text-ink-faint">
+              {fmtCAD(data.passive)} a month on average, which is{" "}
+              <strong className="text-ink-dim">
+                {breakdown.average > 0
+                  ? `${((data.passive / breakdown.average) * 100).toFixed(1)}%`
+                  : "—"}
+              </strong>{" "}
+              of everything that came in
+              {data.passiveBest > 0 && (
+                <> · best month {fmtCAD(data.passiveBest)}</>
+              )}
+              . This is the part that does not need you to work for it, so what
+              matters is the slope rather than the height.
+            </p>
+          </Card>
+        )}
       </div>
     </Shell>
   );
