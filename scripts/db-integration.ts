@@ -43,18 +43,48 @@ async function main() {
     const { currentMonthKey } = await import("../src/lib/format");
 
     console.log("migrations + seed");
+    /*
+     * Counted against the generator rather than against numbers written here.
+     * The numbers were literals, so every addition to the sample — a pension
+     * account, a closed position — failed this suite for being right, and the
+     * fix each time was to edit the expectation, which is a test that only
+     * ever confirms what it was last told. What matters is that everything
+     * generated arrives, whatever that is this week.
+     */
+    const sample = generateSampleData();
     await ensureDb();
     let state = await repo.getState();
-    expect(state.accounts.length === 9, `seeded 9 accounts, 6 everyday + 3 investment (got ${state.accounts.length})`);
+    expect(
+      state.accounts.length === sample.accounts.length,
+      `every seeded account arrives (${sample.accounts.length}, got ${state.accounts.length})`,
+    );
     expect(state.transactions.length > 400, `seeded transactions (${state.transactions.length})`);
-    expect(state.holdings.length === 10, `seeded 10 holdings (got ${state.holdings.length})`);
-    expect(state.budgets.length === 11, `seeded 11 budgets (got ${state.budgets.length})`);
-    expect(state.categories.length === 13, `seeded 13 categories (got ${state.categories.length})`);
+    expect(
+      state.holdings.length === sample.holdings.length,
+      `every seeded holding arrives (${sample.holdings.length}, got ${state.holdings.length})`,
+    );
+    expect(
+      state.budgets.length === sample.budgets.length,
+      `every seeded budget arrives (${sample.budgets.length}, got ${state.budgets.length})`,
+    );
+    expect(
+      state.categories.length === sample.categories.length,
+      `every seeded category arrives (${sample.categories.length}, got ${state.categories.length})`,
+    );
+    expect(
+      state.recurring.length === sample.recurring.length,
+      `every seeded rule arrives (${sample.recurring.length}, got ${state.recurring.length})`,
+    );
+    /* The trade histories are what most of the app reads; seeded empty once. */
+    expect(
+      state.holdings.every((h) => (h.flows ?? []).length > 0),
+      "every seeded holding keeps its trades",
+    );
 
     // ensureDb is idempotent
     await ensureDb();
     state = await repo.getState();
-    expect(state.accounts.length === 9, "ensureDb does not double-seed");
+    expect(state.accounts.length === sample.accounts.length, "ensureDb does not double-seed");
 
     console.log("transaction balance side effects");
     const checking = state.accounts.find((a) => a.name === "Everyday Checking")!;
@@ -567,7 +597,10 @@ async function main() {
     console.log("reset");
     await repo.resetToSample(generateSampleData());
     state = await repo.getState();
-    expect(state.accounts.length === 9, "reset restores sample accounts");
+    expect(
+      state.accounts.length === sample.accounts.length,
+      "reset restores sample accounts",
+    );
     expect(!state.budgets.some((b) => b.category === "Coffee"), "reset clears added budgets");
     expect(!("test cafe" in state.merchantRules), "reset clears merchant rules");
 
@@ -693,7 +726,10 @@ async function main() {
       state.budgets.length === 1 && state.budgets[0].category === "Fees",
       `demo budgets deleted, the user's kept (got ${JSON.stringify(state.budgets)})`,
     );
-    expect(state.categories.length === 13, "category list is kept");
+    expect(
+      state.categories.length === sample.categories.length,
+      "category list is kept",
+    );
     expect(await repo.isDemoDeleted(), "deletion is recorded in app_meta");
 
     // The regression this marker exists for: an emptied database must not be
