@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type MutableRefObject, type ReactNode } from "react";
-import { Check, Loader2, X } from "lucide-react";
+import { Check, Loader2, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
 import {
   ACCOUNT_KINDS,
   ACCOUNT_KIND_LABELS,
@@ -28,6 +28,7 @@ import {
   isInvestmentAccount,
   isPension,
   supportsRegistration,
+  transactionEndpoints,
 } from "@/lib/types";
 import { fmtCAD, todayISO } from "@/lib/format";
 import { holdingAfterFlowEdit, type TradeRecord } from "@/lib/flows";
@@ -42,7 +43,7 @@ import {
   type TradeBatch,
   type TradeInput,
 } from "@/lib/trade-batch";
-import { Button, Field, Input, Modal, Select } from "./ui";
+import { Button, Field, Input, Modal, Segmented, Select } from "./ui";
 
 function FormActions({
   onCancel,
@@ -82,9 +83,161 @@ export function TransactionForm({
 }) {
   // Modal renders children only when open, so the inner form remounts
   // (fresh state) every time it opens; key guards against stale edits.
+  if (initial) {
+    return (
+      <Modal open={open} onClose={onClose} title="Edit transaction">
+        <TransactionFormInner key={initial.id} initial={initial} onClose={onClose} />
+      </Modal>
+    );
+  }
+  return <AddTransactionModal open={open} onClose={onClose} />;
+}
+
+/**
+ * Adding something to the record: once, or on a schedule.
+ *
+ * The two used to be separate — a button for one and a card further down the
+ * page for the other — which put the question "does this repeat?" a scroll
+ * away from the moment it is asked. They are the same intention with one
+ * detail different, so they are one dialog with the difference at the top of
+ * it, and the rules that already exist are listed where they can be changed
+ * rather than only where they can be admired.
+ *
+ * Editing an existing transaction skips all of this: a row that is already
+ * recorded cannot become a rule, so offering the choice would be a question
+ * with no answer.
+ */
+function AddTransactionModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [mode, setMode] = useState<"once" | "repeat">("once");
+  const [editingRule, setEditingRule] = useState<RecurringRule | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const accounts = useFinance((s) => s.accounts);
+  const recurring = useFinance((s) => s.recurring);
+  const deleteRecurring = useFinance((s) => s.deleteRecurring);
+
+  if (!open) return null;
+  const nameOf = (id: string) => accounts.find((a) => a.id === id)?.name ?? "Unknown";
+
   return (
-    <Modal open={open} onClose={onClose} title={initial ? "Edit transaction" : "New transaction"}>
-      <TransactionFormInner key={initial?.id ?? "new"} initial={initial ?? null} onClose={onClose} />
+    <Modal open onClose={onClose} title="Add to the record" size="lg">
+      <div className="mb-4">
+        <Segmented<"once" | "repeat">
+          options={[
+            { value: "once", label: "Once" },
+            { value: "repeat", label: "Repeating" },
+          ]}
+          value={mode}
+          onChange={(v) => {
+            setMode(v);
+            setEditingRule(null);
+            setConfirming(null);
+          }}
+        />
+      </div>
+
+      {mode === "once" ? (
+        <TransactionFormInner initial={null} onClose={onClose} />
+      ) : (
+        <div className="space-y-4">
+          {/*
+            * The rules already standing, above the form that writes another.
+            * A rule posts payments on its own, so being unable to find one is
+            * worse than being unable to write one — this is the only place
+            * either can be done.
+            */}
+          {recurring.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-ink-dim">Already repeating</p>
+              {recurring.map((r) => {
+                const { from, to } = transactionEndpoints(r, nameOf);
+                return (
+                  <div
+                    key={r.id}
+                    className="flex items-center gap-2 rounded-lg border border-line px-3 py-2"
+                  >
+                    <Repeat size={13} className="shrink-0 text-ink-faint" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{r.payee}</p>
+                      <p className="truncate text-[0.6875rem] text-ink-faint">
+                        {RECURRENCE_LABELS[r.frequency]} · {from} → {to}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-sm font-medium tabular-nums">
+                      {fmtCAD(r.amount)}
+                    </span>
+                    {confirming === r.id ? (
+                      <>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => {
+                            deleteRecurring(r.id);
+                            setConfirming(null);
+                            if (editingRule?.id === r.id) setEditingRule(null);
+                          }}
+                        >
+                          Delete
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setConfirming(null)}
+                        >
+                          Keep
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Edit ${r.payee}`}
+                          onClick={() => setEditingRule(r)}
+                        >
+                          <Pencil size={13} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Stop ${r.payee}`}
+                          onClick={() => setConfirming(r.id)}
+                          className="hover:text-negative"
+                        >
+                          <Trash2 size={13} />
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="border-t border-line pt-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <p className="text-xs font-medium text-ink-dim">
+                {editingRule ? `Editing ${editingRule.payee}` : "New rule"}
+              </p>
+              {editingRule && (
+                <Button variant="ghost" size="sm" onClick={() => setEditingRule(null)}>
+                  <Plus size={13} /> New instead
+                </Button>
+              )}
+            </div>
+            <RecurringFormInner
+              key={editingRule?.id ?? "new"}
+              initial={editingRule}
+              onClose={() => (editingRule ? setEditingRule(null) : onClose())}
+            />
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -1518,30 +1671,6 @@ export function TradeEntry({
 /* ---------------- Confirm delete ---------------- */
 
 /* ---------------- Recurring rule ---------------- */
-
-export function RecurringForm({
-  open,
-  onClose,
-  initial,
-}: {
-  open: boolean;
-  onClose: () => void;
-  initial?: RecurringRule | null;
-}) {
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title={initial ? "Edit recurring transaction" : "New recurring transaction"}
-    >
-      <RecurringFormInner
-        key={initial?.id ?? "new"}
-        initial={initial ?? null}
-        onClose={onClose}
-      />
-    </Modal>
-  );
-}
 
 function RecurringFormInner({
   initial,
