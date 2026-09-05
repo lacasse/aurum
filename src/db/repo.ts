@@ -21,6 +21,7 @@ import {
   Transaction,
   TxnType,
   balanceDelta,
+  movementApplies,
   withBalanceRecorded,
 } from "@/lib/types";
 import { advanceRule, dueOccurrences } from "@/lib/recurrence";
@@ -70,6 +71,7 @@ function toAccount(row: AccountRow): Account {
     registration: (row.registration ?? undefined) as Account["registration"],
     pensionAnnual: row.pensionAnnual ?? undefined,
     pensionService: row.pensionService ?? undefined,
+    balanceAsOf: row.balanceAsOf ?? null,
   };
 }
 
@@ -598,6 +600,7 @@ export async function insertAccount(a: Account, position: number): Promise<void>
     registration: a.registration ?? null,
     pensionAnnual: a.pensionAnnual ?? null,
     pensionService: a.pensionService ?? null,
+    balanceAsOf: a.balanceAsOf ?? null,
   });
 }
 
@@ -614,6 +617,7 @@ export async function replaceAccount(a: Account): Promise<void> {
       registration: a.registration ?? null,
       pensionAnnual: a.pensionAnnual ?? null,
       pensionService: a.pensionService ?? null,
+      balanceAsOf: a.balanceAsOf ?? null,
     })
     .where(eq(accounts.id, a.id));
 }
@@ -653,9 +657,18 @@ async function applyToAccount(
   side: "source" | "destination",
   amount: number,
   sign: 1 | -1,
+  date?: string,
 ): Promise<void> {
   const [acc] = await tx.select().from(accounts).where(eq(accounts.id, accountId));
   if (!acc) return;
+  /*
+   * A transaction dated on or before the balance the user last stated by hand
+   * is already inside that figure. Applying it again is double counting, and
+   * it is silent: the balance simply drifts. The transaction is still stored —
+   * it belongs in the history and on every chart — it just does not move a
+   * number somebody has already reconciled.
+   */
+  if (!movementApplies(toAccount(acc), date)) return;
   const delta = balanceDelta(acc.kind as AccountKind, side, amount) * sign;
   const balance = addMoney(acc.balance, delta);
   /*
@@ -675,10 +688,12 @@ async function applyToAccount(
  */
 async function applyTxnEffect(tx: Tx, txn: Transaction, sign: 1 | -1): Promise<void> {
   if (txn.sourceAccountId) {
-    await applyToAccount(tx, txn.sourceAccountId, "source", txn.amount, sign);
+    await applyToAccount(tx, txn.sourceAccountId, "source", txn.amount, sign, txn.date);
   }
   if (txn.destinationAccountId) {
-    await applyToAccount(tx, txn.destinationAccountId, "destination", txn.amount, sign);
+    await applyToAccount(
+      tx, txn.destinationAccountId, "destination", txn.amount, sign, txn.date,
+    );
   }
 }
 

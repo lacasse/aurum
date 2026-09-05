@@ -13,6 +13,7 @@ import {
   RecurringRule,
   Transaction,
   balanceDelta,
+  movementApplies,
   withBalanceRecorded,
 } from "./types";
 import { generateSampleData } from "./sample";
@@ -95,7 +96,7 @@ interface FinanceStore extends FinanceData {
    * counted twice: once as cash sitting in the account and again as the
    * position it bought.
    */
-  adjustAccountCash: (accountId: string, delta: number) => void;
+  adjustAccountCash: (accountId: string, delta: number, onDate?: string) => void;
   addHolding: (input: HoldingInput) => void;
   updateHolding: (id: string, input: HoldingInput) => void;
   /**
@@ -167,6 +168,9 @@ function applyTxn(accounts: Account[], txn: Transaction, sign: 1 | -1): Account[
           ? ("destination" as const)
           : null;
     if (!side) return acc;
+    // Same rule as the server's applyToAccount: a movement already inside a
+    // hand-stated balance does not move it again.
+    if (!movementApplies(acc, txn.date)) return acc;
     const balance = round2(
       acc.balance + balanceDelta(acc.kind, side, txn.amount) * sign,
     );
@@ -461,12 +465,13 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
         api.deleteAccount(id).catch(report);
       },
 
-      adjustAccountCash: (accountId, delta) => {
+      adjustAccountCash: (accountId, delta, onDate) => {
         if (!accountId || !Number.isFinite(delta) || delta === 0) return;
         let updated: Account | undefined;
         set((s) => ({
           accounts: s.accounts.map((a) => {
             if (a.id !== accountId) return a;
+            if (!movementApplies(a, onDate)) return a;
             const balance = round2(a.balance + delta);
             updated = withBalanceRecorded({ ...a, balance });
             return updated;

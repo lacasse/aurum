@@ -525,6 +525,17 @@ function AccountFormInner({
       // Only a pension has these, and only once the statement has been read.
       pensionAnnual: isPension(kind) ? numberOrUndefined(pensionAnnual) : undefined,
       pensionService: isPension(kind) ? numberOrUndefined(pensionService) : undefined,
+      /*
+       * Typing a balance is a statement about today, so today becomes the
+       * account's anchor: anything dated on or before it is already counted in
+       * the figure, and a later import will not subtract it again. Stamped
+       * only when the number actually changed — reopening the form to rename
+       * an account should not silently re-date a balance nobody restated.
+       */
+      balanceAsOf:
+        initial && Math.round(bal * 100) / 100 === initial.balance
+          ? (initial.balanceAsOf ?? null)
+          : todayISO(),
     };
     if (initial) updateAccount(initial.id, payload);
     else addAccount(payload);
@@ -1369,7 +1380,13 @@ export function TradeEntry({
   const commit = (entered: NewHoldingMeta[]) => {
     setError("");
     setOk("");
-    const plan = planTrades(rows, entered, holdings, usdCadRate);
+    const plan = planTrades(
+      rows,
+      entered,
+      holdings,
+      usdCadRate,
+      (id) => accounts.find((a) => a.id === id)?.balanceAsOf ?? null,
+    );
     if (!plan.ok) {
       setError(plan.error);
       return;
