@@ -33,6 +33,32 @@ Only HTTPS is exposed. A self-signed certificate is generated automatically on f
 startup (stored in the `certs` volume). HTTP requests on port 80 redirect to HTTPS. Since
 the certificate is self-signed, browsers will show a warning you'll need to accept.
 
+### What is reachable, and from where
+
+**Every published port binds to `127.0.0.1`.** Nothing listens on a routable address, so the
+app answers on this host and nowhere else — from another machine, reach it through an SSH
+tunnel rather than by opening a port:
+
+```bash
+ssh -N -L 8443:localhost:443 user@<host>   # then https://localhost:8443
+```
+
+A port published as `"443:443"` listens on *every* interface. That is a decision worth
+making rather than inheriting: everything this app holds is behind a login, but a login is
+the only thing between the network and a complete financial history.
+
+**Going internet-facing later** is three changes, and one of them is a deletion:
+
+1. **Delete the port 80 line.** It exists to redirect to HTTPS, and a redirect is not worth
+   an unencrypted port open to the internet. Anything that arrives on 80 either already
+   knows to use HTTPS or is not a browser.
+2. Widen 443 to `"443:443"`.
+3. Replace the self-signed certificate in the `certs` volume with a real one, since a
+   browser warning trains you to click through exactly the warning that matters.
+
+Nothing else changes: the proxy already terminates TLS, sets the security headers, and is
+the only way in.
+
 ### Login
 
 The app and its API are protected by a session-cookie login. Visiting any page (or hitting
