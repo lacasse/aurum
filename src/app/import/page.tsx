@@ -369,6 +369,7 @@ export default function ImportPage() {
       includedTrades,
       accountIdFor,
       afterActions,
+      (id) => accounts.find((a) => a.id === id)?.balanceAsOf ?? null,
     );
     let created = 0;
     let updated = 0;

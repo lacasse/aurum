@@ -162,6 +162,13 @@
       "when": 1789900100000,
       "tag": "0022_transaction_read_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789900200000,
+      "tag": "0023_account_balance_anchor",
+      "breakpoints": true
     }
   ]
 }
