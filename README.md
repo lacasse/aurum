@@ -105,6 +105,27 @@ Use a passphrase with no shell metacharacters — the script interpolates it int
 > noise. Keep a copy somewhere else. Turning encryption on does not re-encrypt the dumps
 > already taken: they stay plain until retention ages them out.
 
+Copy it into a password manager without putting it on screen. Reading a secret prints it
+wherever you read it — a scrollback buffer, a shared session, a transcript — and every one
+of those outlives the moment you needed it:
+
+```bash
+grep '^BACKUP_ENCRYPTION_KEY=' .env | cut -d= -f2 | tr -d '\n' | pbcopy   # macOS
+grep '^BACKUP_ENCRYPTION_KEY=' .env | cut -d= -f2 | tr -d '\n' | xclip -sel clip   # Linux
+pbcopy < /dev/null   # clear the clipboard once it is pasted
+```
+
+Confirm the copy matches without revealing either side — compare fingerprints, not keys:
+
+```bash
+grep '^BACKUP_ENCRYPTION_KEY=' .env | cut -d= -f2 | tr -d '\n' | shasum -a 256 | cut -c1-16
+```
+
+**If a key is ever exposed, rotate it.** Replace the line in `.env`, recreate the service
+(`docker compose up -d --no-deps backup`), and check the log shows a new `.enc` file
+written. Dumps taken under the old key still need the old key, so keep it until retention
+has aged them out — then destroy it.
+
 Check that backups exist (also visible under **GET `/api/backups`** after login):
 
 ```bash
