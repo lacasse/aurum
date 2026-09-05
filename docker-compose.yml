@@ -144,9 +144,23 @@ services:
       - ./nginx/entrypoint.sh:/entrypoint.sh:ro
       - certs:/etc/nginx/certs
     ports:
-      - "80:80"
-      - "443:443"
-      # Adminer UI: bound to the host loopback only. Reach it via SSH tunnel:
+      # Loopback only, on purpose.
+      #
+      # Published without an address these listen on every interface, which
+      # puts the whole financial record on anything that can route to this
+      # machine — behind a login, but reachable, and reachable is the part
+      # worth deciding rather than inheriting. Bound to 127.0.0.1 the app is
+      # reached from this host, or through an SSH tunnel from elsewhere:
+      #   ssh -N -L 8443:localhost:443 user@<host>
+      #
+      # Going internet-facing later means dropping the 80 line entirely rather
+      # than widening it — a redirect is the only thing it serves, and an
+      # unencrypted port open to the internet is a way in for something else —
+      # widening 443 to "443:443", and replacing the self-signed certificate
+      # with a real one. Nothing else here changes.
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
+      # Adminer UI. Reach it via SSH tunnel:
       #   ssh -N -L 8443:localhost:8443 user@<host>
       - "127.0.0.1:8443:8443"
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
