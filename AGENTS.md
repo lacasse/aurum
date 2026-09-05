@@ -34,13 +34,17 @@ loss is irreversible. Follow these rules without exception.
 - A `backup` service runs automatically (default every 6 hours) and writes gzipped `pg_dump`
   files to the persistent `backups` volume, retaining the newest 14 by default.
 - Before any risky operation (DB migration, reset, volume change, major refactor), ALWAYS take
-  a manual backup first. Either of these writes a timestamped `pg_dump`:
+  a manual backup first. Ask the backup service for one — it is the same code path as the
+  scheduled dump, so it encrypts when `BACKUP_ENCRYPTION_KEY` is set, verifies the result,
+  and exits non-zero if the dump does not check out:
   ```bash
-  # (a) fake a fresh scheduled dump into the backups volume:
-  docker exec finance-backup-1 /bin/sh -c 'cd /backups && STAMP=$(date -u +%Y%m%dT%H%M%SZ) && PGPASSWORD=aurum pg_dump -h db -U aurum -d aurum --no-owner --no-privileges | gzip > aurum_${STAMP}.sql.gz'
-  # (b) or dump to a local temp file outside the volume:
-  docker exec finance-db-1 pg_dump -U aurum -d aurum --no-owner --no-privileges | gzip > /tmp/aurum-manual-$(date +%Y%m%dT%H%M%SZ).sql.gz
+  docker exec finance-backup-1 /bin/sh /backup.sh once
   ```
+- **Never hand-roll a `pg_dump` to do this.** A dump typed at the shell skips encryption and
+  every integrity check, and writes the whole database in the clear — which is exactly what
+  happened on 5 Sep 2026 when the pre-release backup landed as plaintext beside seven
+  encrypted ones. If you need a copy outside the volume, take one the normal way and
+  `docker cp` the encrypted file out.
 - After any destructive change, verify a fresh backup exists in the `backups` volume
   (`docker exec finance-backup-1 sh -c 'ls -la /backups/'`) and that it decompresses cleanly
   (`gzip -t`).
