@@ -49,6 +49,7 @@ import {
   sidesFor,
 } from "@/lib/types";
 import { fmtCAD } from "@/lib/format";
+import { DEBT_CATEGORY } from "@/lib/expenses";
 
 type Step = "upload" | "review" | "done";
 
@@ -102,6 +103,12 @@ export default function ImportPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const investmentAccounts = accounts.filter((a) => isInvestmentAccount(a.kind));
+  /*
+   * The debts a repayment could be paying off. Every other expense ends at a
+   * merchant; this one ends at a balance owed, and which one decides whose
+   * balance comes down — so it is the one far side that cannot be guessed.
+   */
+  const debts = accounts.filter((a) => isLiability(a.kind));
   const cashAccountId =
     accounts.find((a) => a.kind === "checking")?.id ??
     accounts.find((a) => !isInvestmentAccount(a.kind) && !isLiability(a.kind))?.id ??
@@ -165,6 +172,10 @@ export default function ImportPage() {
   );
 
   const includedCash = cashRows.filter((r) => r.include);
+  /* Repayments still missing the debt they paid, which the save cannot infer. */
+  const unassignedDebt = includedCash.filter(
+    (r) => r.type === "expense" && r.category === DEBT_CATEGORY && !r.debtAccountId,
+  );
   const includedTrades = checkedTrades.filter((r) => r.include);
   const dupCash = cashRows.filter((r) => r.dup).length;
   const dupTrades = checkedTrades.filter((r) => r.duplicate).length;
@@ -259,6 +270,13 @@ export default function ImportPage() {
         amount: r.amount,
         category: r.category,
         ...sidesFor(r.type, accountForRow(r)),
+        /*
+         * A repayment has a far side: the debt it paid off. Given one, the
+         * balance owed comes down by the amount — the same thing the monthly
+         * checklist does, so a loan payment lands the same way whichever door
+         * it came through.
+         */
+        ...(r.debtAccountId ? { destinationAccountId: r.debtAccountId } : {}),
         payee: r.payee.trim(),
         note: r.note,
       });
@@ -535,12 +553,23 @@ export default function ImportPage() {
               </Card>
             </div>
 
-            {(needsAttention.length > 0 || unmatchedRegistrations.length > 0) && (
+            {(needsAttention.length > 0 ||
+              unmatchedRegistrations.length > 0 ||
+              unassignedDebt.length > 0) && (
               <Card className="border-amber-500/40 bg-amber-500/5 p-4">
                 <p className="flex items-center gap-2 text-xs font-medium text-amber-400">
                   <AlertTriangle size={14} /> Needs a person
                 </p>
                 <ul className="mt-2 space-y-1 text-[0.6875rem] text-ink-dim">
+                  {unassignedDebt.length > 0 && (
+                    <li>
+                      {unassignedDebt.length} debt{" "}
+                      {unassignedDebt.length === 1 ? "repayment has" : "repayments have"}{" "}
+                      no debt chosen — pick one below and the balance owed comes
+                      down with the payment. Left blank, the money leaves the
+                      account and the debt stays where it is.
+                    </li>
+                  )}
                   {unmatchedRegistrations.map((r) => (
                     <li key={r}>
                       No account is marked {REGISTRATION_LABELS[r]} — those trades cannot
@@ -685,6 +714,28 @@ export default function ImportPage() {
                                 </option>
                               ))}
                             </Select>
+                            {r.type === "expense" &&
+                            r.category === DEBT_CATEGORY &&
+                            debts.length > 0 ? (
+                              <Select
+                                value={r.debtAccountId ?? ""}
+                                onChange={(e) =>
+                                  updateCash(r.id, { debtAccountId: e.target.value })
+                                }
+                                aria-label={`Debt paid by ${r.payee}`}
+                                className={cn(
+                                  "mt-1 h-7 w-auto py-0 text-[0.6875rem]",
+                                  !r.debtAccountId && "border-amber-500/50",
+                                )}
+                              >
+                                <option value="">Which debt?</option>
+                                {debts.map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name}
+                                  </option>
+                                ))}
+                              </Select>
+                            ) : null}
                           </td>
                           <td className="whitespace-nowrap px-2 py-1.5 text-[0.6875rem] text-ink-faint">
                             {accounts.find((a) => a.id === accountForRow(r))?.name ?? "—"}
