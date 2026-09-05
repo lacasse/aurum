@@ -397,7 +397,7 @@ export default function ExpensesPage() {
 
         <Card>
           <CardHeader
-            title="Month by month"
+            title="Spending month by month"
             subtitle="Necessities under discretion, with the twelve-month average across them"
             action={
               <Segmented<string>
