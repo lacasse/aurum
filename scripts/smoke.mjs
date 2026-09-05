@@ -99,9 +99,28 @@ async function main() {
   const seeded = await api("/api/data");
   expect(seeded.status === 200, "authenticated read succeeds");
   const state = seeded.body ?? {};
-  expect(state.accounts?.length === 9, `9 seeded accounts (got ${state.accounts?.length})`);
-  expect(state.holdings?.length === 10, `10 seeded holdings (got ${state.holdings?.length})`);
-  expect(state.budgets?.length === 11, `11 seeded budgets (got ${state.budgets?.length})`);
+  /*
+   * What the seeded state must contain, rather than how many rows it has.
+   *
+   * This script runs under plain node and cannot import the generator, so the
+   * counts here were literals — and every addition to the sample broke this
+   * suite for being right, which teaches you to edit the number rather than
+   * read the failure. What the route actually has to prove is that a first run
+   * arrives whole and with the shapes the app reads: accounts of every kind,
+   * positions carrying their trade history, budgets and categories present.
+   * `src/lib/sample.test.ts` is where the sample's own coverage is asserted.
+   */
+  const kinds = new Set((state.accounts ?? []).map((a) => a.kind));
+  for (const kind of ["checking", "savings", "investment", "credit", "loan", "pension"]) {
+    expect(kinds.has(kind), `a ${kind} account was seeded`);
+  }
+  expect((state.holdings?.length ?? 0) >= 10, `seeded holdings (got ${state.holdings?.length})`);
+  expect(
+    (state.holdings ?? []).every((h) => (h.flows?.length ?? 0) > 0),
+    "every seeded holding arrives with its trades",
+  );
+  expect((state.budgets?.length ?? 0) > 0, `seeded budgets (got ${state.budgets?.length})`);
+  expect((state.categories?.length ?? 0) > 0, `seeded categories (got ${state.categories?.length})`);
 
   /*
    * Registration has been silently dropped twice, between the form and the
