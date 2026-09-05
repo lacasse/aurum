@@ -495,6 +495,20 @@ export default function InvestmentsPage() {
     const totalValue = open.reduce((s, r) => s + r.marketValue, 0);
     const totalCost = open.reduce((s, r) => s + r.costBasis, 0);
     const totalDividends = open.reduce((s, r) => s + r.totalDividends, 0);
+    /*
+     * The two halves of "how has this gone", kept apart.
+     *
+     * Every figure on this page pooled them: what the positions you hold are
+     * worth against their cost, plus what everything you have ever closed made
+     * or lost. They answer different questions — one is the portfolio, the
+     * other is its history — and adding them means a position sold years ago
+     * decides how today's looks. On this record the open positions are up
+     * $147k and the closed ones down $278k, so one number reports a portfolio
+     * that is doing well as a loss.
+     */
+    const unrealized = open.reduce((s, r) => s + r.gain, 0);
+    const realized = rows.reduce((s, r) => s + r.realizedGain, 0);
+    const dividendsAll = rows.reduce((s, r) => s + r.totalDividends, 0);
     // Only positions with a measurable return can be "best"; one entered by
     // hand has no flows and therefore no MWRR at all.
     const best = [...open]
@@ -517,6 +531,9 @@ export default function InvestmentsPage() {
       totalValue,
       totalCost,
       totalDividends,
+      unrealized,
+      realized,
+      dividendsAll,
       best,
       gainBars,
     };
@@ -783,6 +800,107 @@ export default function InvestmentsPage() {
             </div>
           </Card>
         </div>
+
+        {/* What you hold, apart from what you closed */}
+        <Card>
+          <CardHeader
+            title="Where the money stands"
+            subtitle="What you hold, what you closed, and what was paid out along the way"
+          />
+          <div className="grid gap-px bg-line sm:grid-cols-3">
+            <div className="bg-surface p-5">
+              <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+                Positions you hold
+              </p>
+              <p
+                className={cn(
+                  "mt-1 text-2xl font-semibold tabular-nums",
+                  data.unrealized >= 0 ? "text-positive" : "text-negative",
+                )}
+              >
+                {fmtSignedCAD(data.unrealized)}
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+                {fmtCAD(data.totalValue)} against {fmtCAD(data.totalCost)} paid
+                {data.totalCost > 0 && (
+                  <>
+                    {" "}
+                    ·{" "}
+                    <strong
+                      className={
+                        data.unrealized >= 0 ? "text-positive" : "text-negative"
+                      }
+                    >
+                      {fmtPct((data.unrealized / data.totalCost) * 100)}
+                    </strong>
+                  </>
+                )}
+              </p>
+              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
+                The portfolio as it stands. Nothing here is settled — it moves
+                with the next price.
+              </p>
+            </div>
+
+            <div className="bg-surface p-5">
+              <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+                Positions you closed
+              </p>
+              <p
+                className={cn(
+                  "mt-1 text-2xl font-semibold tabular-nums",
+                  data.realized >= 0 ? "text-positive" : "text-negative",
+                )}
+              >
+                {fmtSignedCAD(data.realized)}
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+                Everything sold, against what those shares had cost.
+              </p>
+              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
+                Settled and in the past. It is history rather than performance,
+                which is why it is not mixed into the figure beside it — a
+                position closed years ago should not decide how today&apos;s
+                looks.
+              </p>
+            </div>
+
+            <div className="bg-surface p-5">
+              <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+                Paid out to you
+              </p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums text-positive">
+                {fmtCAD(data.dividendsAll)}
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+                Dividends and distributions, across every position ever held.
+              </p>
+              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
+                Money that arrived whatever the price did, which is the part of
+                a return that cannot be given back.
+              </p>
+            </div>
+          </div>
+          <p className="border-t border-line px-5 py-3 text-[0.6875rem] leading-relaxed text-ink-faint">
+            Together{" "}
+            <strong
+              className={cn(
+                "tabular-nums",
+                data.unrealized + data.realized + data.dividendsAll >= 0
+                  ? "text-positive"
+                  : "text-negative",
+              )}
+            >
+              {fmtSignedCAD(
+                data.unrealized + data.realized + data.dividendsAll,
+              )}
+            </strong>{" "}
+            — the figure the three below are percentages of. A sale recorded
+            without its proceeds lands entirely in the middle column, so a
+            surprising figure there is worth reading as a question about the
+            data before a verdict on the investing.
+          </p>
+        </Card>
 
         <Card>
           <CardHeader
