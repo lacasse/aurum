@@ -435,6 +435,18 @@ export default function AccountsPage() {
                         USD
                       </p>
                     ) : null}
+                    {/*
+                      An asset account cannot hold less than no cash. When one
+                      does, the balance has been moved by something already
+                      counted in it — the case that made this worth saying out
+                      loud: two accounts drifted tens of thousands negative and
+                      nothing on the page mentioned it.
+                    */}
+                    {!liability && acc.balance < 0 ? (
+                      <p className="mt-1 text-[0.6875rem] font-medium text-negative">
+                        Negative cash — restate the balance to correct it
+                      </p>
+                    ) : null}
                   </div>
                   {delta !== undefined && delta !== 0 ? (
                     <Badge tone={(delta >= 0) !== liability ? "positive" : "negative"}>

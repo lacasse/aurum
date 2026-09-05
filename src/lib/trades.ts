@@ -7,7 +7,14 @@
  */
 import Papa from "papaparse";
 import { isCoinTicker } from "./market";
-import { AssetClass, CashFlow, Currency, Holding, Registration } from "./types";
+import {
+  AssetClass,
+  CashFlow,
+  Currency,
+  Holding,
+  Registration,
+  movementApplies,
+} from "./types";
 import { todayISO } from "./format";
 
 export type TradeType = "buy" | "sell" | "dividend" | "deposit" | "withdrawal";
@@ -402,6 +409,14 @@ export function accumulatePositions(
   rows: TradeRow[],
   accountIdFor: (registration: Registration) => string,
   existingHoldings: Holding[],
+  /*
+   * The day each account's cash balance was last stated by hand, if ever.
+   * Trades on or before it are already inside that figure — a file covering
+   * two years of history, imported onto a balance entered last week, would
+   * otherwise subtract every purchase in it a second time. The position itself
+   * is still built from every row; it is only the cash side that stops.
+   */
+  balanceAnchorFor: (accountId: string) => string | null | undefined = () => null,
 ): AccumulationResult {
   const positions = new Map<string, Position>();
   const cashDeltas = new Map<string, number>();
@@ -409,8 +424,10 @@ export function accumulatePositions(
   let skipped = 0;
   const oversold: AccumulationResult["oversold"] = [];
 
-  const moveCash = (accountId: string, delta: number) =>
+  const moveCash = (accountId: string, delta: number, onDate: string) => {
+    if (!movementApplies({ balanceAsOf: balanceAnchorFor(accountId) }, onDate)) return;
     cashDeltas.set(accountId, (cashDeltas.get(accountId) ?? 0) + delta);
+  };
 
   const positionFor = (row: TradeRow, accountId: string): Position => {
     const key = `${row.ticker}|${accountId}`;
@@ -492,14 +509,14 @@ export function accumulatePositions(
       // Buying converts cash already in the account into securities, so the
       // cash has to leave the balance or the money is counted twice — once as
       // cash and again as the position.
-      moveCash(accountId, -row.amountCad);
+      moveCash(accountId, -row.amountCad, row.date);
       pos.shares += row.quantity;
       pos.costNative += row.transactedAmount;
       pos.costCad += row.amountCad;
       pos.everHeld = true;
       pos.flows.push({ date: row.date, kind: "buy", amount: row.amountCad, shares: row.quantity });
     } else if (row.type === "sell") {
-      moveCash(accountId, row.amountCad);
+      moveCash(accountId, row.amountCad, row.date);
       /*
        * A sale bigger than the position means the buys are missing or landed
        * elsewhere. Clamping at zero keeps the arithmetic sane, but the caller
@@ -521,7 +538,7 @@ export function accumulatePositions(
       pos.shares = remaining;
       pos.flows.push({ date: row.date, kind: "sell", amount: row.amountCad, shares: -sold });
     } else if (row.type === "dividend") {
-      moveCash(accountId, row.amountCad);
+      moveCash(accountId, row.amountCad, row.date);
       pos.dividendsNative += row.transactedAmount;
       pos.dividendsCad += row.amountCad;
       pos.flows.push({ date: row.date, kind: "dividend", amount: row.amountCad, shares: 0 });
