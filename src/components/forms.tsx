@@ -531,6 +531,14 @@ function AccountFormInner({
        * the figure, and a later import will not subtract it again. Stamped
        * only when the number actually changed — reopening the form to rename
        * an account should not silently re-date a balance nobody restated.
+       *
+       * Today, deliberately, rather than a date the form asks for. The cost is
+       * a balance copied off an older statement: its anchor lands on the day it
+       * was typed, so anything between the statement and now is treated as
+       * already counted and the next import drops it. That is accepted rather
+       * than unnoticed — the balance is normally read live off the bank, and a
+       * second field on this form was judged not worth the one case where it
+       * is not.
        */
       balanceAsOf:
         initial && Math.round(bal * 100) / 100 === initial.balance
