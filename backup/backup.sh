@@ -106,6 +106,20 @@ prune() {
   fi
 }
 
+# One backup on demand, then stop:
+#
+#   docker exec finance-backup-1 /bin/sh /backup.sh once
+#
+# Deliberately the same path as the scheduled run. A manual backup is taken at
+# the riskiest moments — before a migration, a reset, a release — and that is
+# the worst time to be running a hand-typed pg_dump that skips encryption and
+# every check above it. Exits non-zero if the dump does not verify, so a script
+# that takes a backup before doing something dangerous can stop when it fails.
+if [ "$1" = "once" ]; then
+  backup_now
+  exit $?
+fi
+
 # Initial backup on start, then loop.
 log "starting backup loop (interval=${BACKUP_INTERVAL}s, retention=${RETENTION})"
 backup_now || true
