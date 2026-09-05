@@ -1,0 +1,23 @@
+{
+  "Net Pay": { "income": "Salary" },
+  "Additional Income": { "income": "Additional Income" },
+  "RSP / Pension": { "income": "RSP / Pension" },
+  "Interest & Cashback": { "income": "Interest" },
+  "Dividends": { "income": "Dividends" },
+
+  "Rent": { "expense": "Housing" },
+  "Utilities, Insurance, Internet": { "expense": "Utilities" },
+  "Transportation": { "expense": "Transport" },
+  "Groceries": { "expense": "Groceries" },
+  "Health & Wellness": { "expense": "Health" },
+  "Restaurants & Alcohol": { "expense": "Dining" },
+  "Hobbies / Entertainment": { "expense": "Entertainment" },
+  "Other Spending": { "expense": "Shopping" },
+  "Travel": { "expense": "Travel" },
+  "House Items / Cleaning": { "expense": "Household" },
+  "Gifts": { "expense": "Gifts" },
+
+  "[redacted]": { "expense": "Debt Repayment", "income": "Loan Proceeds" },
+  "[redacted]": { "expense": "Debt Repayment", "income": "Loan Proceeds" },
+  "Tax": { "expense": "Taxes", "income": "Refund" }
+}

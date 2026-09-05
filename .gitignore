@@ -47,3 +47,7 @@ next-env.d.ts
 
 # Personal Claude Code settings (sound hook, etc.)
 .claude/settings.local.json
+
+# Column maps for scripts/import-monthly-totals.ts name real lenders, landlords
+# and people. Keep them beside the spreadsheet, not in the repo.
+/scripts/*.map.json
