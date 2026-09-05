@@ -8,7 +8,6 @@ import {
   ArrowUpRight,
   Pencil,
   Plus,
-  Repeat,
   Search,
   Trash2,
 } from "lucide-react";
@@ -23,12 +22,7 @@ import {
   cn,
 } from "@/components/ui";
 import { GroupedBars } from "@/components/charts";
-import {
-  ConfirmDelete,
-  RecurringForm,
-  TradeForm,
-  TransactionForm,
-} from "@/components/forms";
+import { ConfirmDelete, TradeForm, TransactionForm } from "@/components/forms";
 import { allTrades, holdingAfterFlowEdit, type TradeRecord } from "@/lib/flows";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
@@ -36,8 +30,6 @@ import { fmtCompact, fmtCAD, labelDate, labelMonth, lastMonthKeys, monthKeyOf } 
 import {
   INCOME_CATEGORIES,
   alphabetical,
-  RECURRENCE_LABELS,
-  RecurringRule,
   TRANSFER_CATEGORY,
   Transaction,
   touchesAccount,
@@ -68,8 +60,6 @@ export default function TransactionsPage() {
   const transactions = useFinance((s) => s.transactions);
   const userCategories = useFinance((s) => s.categories);
   const deleteTransaction = useFinance((s) => s.deleteTransaction);
-  const recurring = useFinance((s) => s.recurring);
-  const deleteRecurring = useFinance((s) => s.deleteRecurring);
   const holdings = useFinance((s) => s.holdings);
   const updateHolding = useFinance((s) => s.updateHolding);
 
@@ -89,9 +79,6 @@ export default function TransactionsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState<Transaction | null>(null);
-  const [ruleFormOpen, setRuleFormOpen] = useState(false);
-  const [editingRule, setEditingRule] = useState<RecurringRule | null>(null);
-  const [deletingRule, setDeletingRule] = useState<RecurringRule | null>(null);
   const [editingTrade, setEditingTrade] = useState<TradeRecord | null>(null);
   const [deletingTrade, setDeletingTrade] = useState<TradeRecord | null>(null);
 
@@ -305,84 +292,6 @@ export default function TransactionsPage() {
           </div>
         </Card>
 
-        {/* Recurring rules */}
-        <Card>
-          <div className="flex items-center justify-between px-5 pt-5">
-            <div>
-              <h3 className="text-sm font-semibold">Recurring</h3>
-              <p className="mt-0.5 text-xs text-ink-faint">
-                Rent, salary, subscriptions and contributions post themselves on
-                schedule
-              </p>
-            </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setEditingRule(null);
-                setRuleFormOpen(true);
-              }}
-            >
-              <Plus size={14} /> New
-            </Button>
-          </div>
-          {recurring.length === 0 ? (
-            <p className="px-5 py-6 text-center text-xs text-ink-faint">
-              Nothing recurring yet. Add a rule and its payments appear here
-              automatically, including any already due.
-            </p>
-          ) : (
-            <div className="mt-3 divide-y divide-line/60 border-t border-line">
-              {recurring.map((r) => {
-                const { from, to } = transactionEndpoints(r, accountName);
-                return (
-                  <div
-                    key={r.id}
-                    className="flex items-center gap-3 px-5 py-3 text-sm"
-                  >
-                    <Repeat
-                      size={14}
-                      className={r.active ? "text-brand" : "text-ink-faint"}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">{r.payee}</span>
-                      <span className="block truncate text-[0.6875rem] text-ink-faint">
-                        {RECURRENCE_LABELS[r.frequency]} · {from} → {to}
-                        {r.active
-                          ? ` · next ${labelDate(r.nextDate)}`
-                          : " · paused"}
-                      </span>
-                    </span>
-                    <span className="whitespace-nowrap font-semibold tabular-nums">
-                      {fmtCAD(r.amount, 2)}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Edit ${r.payee}`}
-                      onClick={() => {
-                        setEditingRule(r);
-                        setRuleFormOpen(true);
-                      }}
-                    >
-                      <Pencil size={14} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Delete ${r.payee}`}
-                      onClick={() => setDeletingRule(r)}
-                      className="hover:text-negative"
-                    >
-                      <Trash2 size={14} />
-                    </Button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-
         {/* Filters */}
         <Card className="p-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -523,21 +432,6 @@ export default function TransactionsPage() {
           setFormOpen(false);
           setEditing(null);
         }}
-      />
-      <RecurringForm
-        open={ruleFormOpen}
-        initial={editingRule}
-        onClose={() => {
-          setRuleFormOpen(false);
-          setEditingRule(null);
-        }}
-      />
-      <ConfirmDelete
-        open={deletingRule !== null}
-        onClose={() => setDeletingRule(null)}
-        onConfirm={() => deletingRule && deleteRecurring(deletingRule.id)}
-        title="Delete recurring transaction"
-        message={`Stop “${deletingRule?.payee ?? ""}” from repeating? Payments it has already posted are kept.`}
       />
       {/* Mounted only while open, so each opening starts from what is stored. */}
       {editingTrade && (
