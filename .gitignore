@@ -44,3 +44,6 @@ next-env.d.ts
 
 # test build output
 /.test-build
+
+# Personal Claude Code settings (sound hook, etc.)
+.claude/settings.local.json
