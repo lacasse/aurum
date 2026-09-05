@@ -45,13 +45,35 @@ const NAV = [
   { href: "/investments", label: "Investments", icon: TrendingUp },
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/accounts", label: "Accounts", icon: Landmark },
-  { href: "/year", label: "Year", icon: CalendarRange },
-  { href: "/tax", label: "Tax", icon: Receipt },
+  { href: "/year", label: "Year", icon: CalendarRange, unreleased: true },
+  { href: "/tax", label: "Tax", icon: Receipt, unreleased: true },
   { href: "/import", label: "Import", icon: Upload },
-  { href: "/guide", label: "Guide", icon: BookOpen },
+  { href: "/guide", label: "Guide", icon: BookOpen, unreleased: true },
   /* Temporary: the colour-picking bench. Delete this line with the page. */
-  { href: "/colours", label: "Colours", icon: Palette },
+  { href: "/colours", label: "Colours", icon: Palette, unreleased: true },
 ] as const;
+
+/**
+ * Whether pages still being worked on are listed.
+ *
+ * `unreleased: true` above keeps a page out of the sidebar of a built app
+ * while leaving it exactly where it was in development, so work carries on
+ * without a branch to maintain or a revert to re-apply. Promoting a page is
+ * deleting one word.
+ *
+ * This hides rather than disables: the route is still built and still answers
+ * to its URL. That is deliberate — it is how a page is checked in the real app
+ * before it is promoted — so it is not a way to keep anything secret, only a
+ * way to keep an unfinished page from being offered as though it were done.
+ *
+ * Read at module scope because Next replaces `process.env.NEXT_PUBLIC_*` at
+ * build time; there is nothing to re-evaluate per render.
+ */
+const SHOW_UNRELEASED =
+  process.env.NODE_ENV !== "production" ||
+  process.env.NEXT_PUBLIC_SHOW_UNRELEASED === "1";
+
+const VISIBLE_NAV = NAV.filter((item) => SHOW_UNRELEASED || !("unreleased" in item));
 
 /**
  * The whole lockup, drawn rather than loaded.
@@ -214,7 +236,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </Link>
 
       <nav className="mt-6 flex-1 space-y-1">
-        {NAV.map(({ href, label, icon: Icon }) => {
+        {VISIBLE_NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname === href;
           return (
             <Link
