@@ -89,7 +89,21 @@ with env vars (set in `.env` or the environment):
 | `BACKUP_RETENTION` | `14` | Number of latest backups to keep |
 | `BACKUP_ENCRYPTION_KEY` | (empty) | Optional passphrase; encrypts backups with AES-256-CBC (OpenSSL) |
 
-If `BACKUP_ENCRYPTION_KEY` is set, dumps are written as `.sql.gz.enc` and encrypted.
+If `BACKUP_ENCRYPTION_KEY` is set, dumps are written as `.sql.gz.enc`, encrypted with
+AES-256-CBC and PBKDF2. **The backup service must run a Debian-based image for this**:
+`postgres:17-alpine` carries no `openssl`, so the encrypted path fails with
+`openssl: not found` and the service writes nothing at all — the compose file therefore
+pins `postgres:17` for `backup` while `db` stays on alpine. Prefer that to installing the
+package at startup, which would make every container start depend on a package mirror.
+
+Use a passphrase with no shell metacharacters — the script interpolates it into an
+`eval`, so hex is the safe shape (`openssl rand -hex 32`). Compose also expands `$` in
+`.env`, which hex avoids.
+
+> **The key is the backup.** It lives in `.env`, on the same machine as the `backups`
+> volume — so a disk failure loses both, and an encrypted dump without its passphrase is
+> noise. Keep a copy somewhere else. Turning encryption on does not re-encrypt the dumps
+> already taken: they stay plain until retention ages them out.
 
 Check that backups exist (also visible under **GET `/api/backups`** after login):
 
@@ -103,7 +117,7 @@ Take a **manual backup before any risky operation** (schema change, reset, volum
 docker exec finance-backup-1 /bin/sh -c 'cd /backups && STAMP=$(date -u +%Y%m%dT%H%M%SZ) && PGPASSWORD=aurum pg_dump -h db -U aurum -d aurum --no-owner --no-privileges | gzip > aurum_${STAMP}.sql.gz'
 ```
 
-**Restore** a backup (reload a `*.sql.gz` from the `backups` volume into the DB):
+**Restore** a backup (reload a dump from the `backups` volume into the DB):
 
 ```bash
 # Find the file you want:
@@ -112,6 +126,33 @@ docker exec finance-backup-1 sh -c 'ls -l /backups/'
 docker exec finance-db-1 psql -U aurum -d aurum -c "TRUNCATE transactions, holdings, monthly_snapshots, accounts, budgets, categories, merchant_rules RESTART IDENTITY CASCADE;"
 docker exec finance-backup-1 sh -c 'gzip -dc /backups/aurum_XXXXXXXX.sql.gz' | docker exec -i finance-db-1 psql -U aurum -d aurum
 ```
+
+For an encrypted dump, decrypt on the way through:
+
+```bash
+docker exec finance-backup-1 sh -c 'openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:"$BACKUP_ENCRYPTION_KEY" -in /backups/aurum_XXXXXXXX.sql.gz.enc | gzip -dc' \
+  | docker exec -i finance-db-1 psql -U aurum -d aurum
+```
+
+**Rehearse it against a scratch database, not this one.** A backup nobody has restored is
+an assumption. Restore into a throwaway container with no volumes attached, compare it
+with what is live, then throw the container away — the live database is never written to:
+
+```bash
+docker run -d --name restore-check -e POSTGRES_PASSWORD=scratch -e POSTGRES_USER=aurum \
+  -e POSTGRES_DB=postgres postgres:17-alpine
+docker exec restore-check psql -U aurum -d postgres -c "CREATE DATABASE restored;"
+docker exec finance-backup-1 sh -c 'gzip -dc /backups/aurum_XXXXXXXX.sql.gz' \
+  | docker exec -i restore-check psql -U aurum -d restored -v ON_ERROR_STOP=1
+# Same rows, same content? Run this against both and compare:
+docker exec restore-check psql -U aurum -d restored -t -A -c \
+  "SELECT md5(string_agg(id||date||amount::text||payee, '|' ORDER BY id)) FROM transactions;"
+docker rm -f -v restore-check
+```
+
+Checksum the tables rather than counting them: a dump can carry every row and still have
+lost a column. `holdings.flows` is the one worth checking by hand — it is JSON, it holds
+every trade, and every return figure in the app is derived from it.
 
 ## Run it (local, no Docker)
 
@@ -129,14 +170,14 @@ skipped with console errors).
 | --- | --- |
 | **Dashboard** | Net worth KPI cards with sparklines, an all-time net-worth line, what net worth is *made of* as a 100% stacked composition, a financial-independence tracker against your own spending, cash-flow averages, income vs expenses, where the money went, and spending by category as a 100% stacked line |
 | **Income** | Every kind of income over 1, 2 or 5 years: what arrives a month, how much of it is spendable, how much is passive, and a per-source table with trends — averaged over the window rather than over the months a source turned up in |
-| **Transactions** | Full CRUD with filters (search, type, category, account, month), filtered summary chips, filtered cash-flow chart, balances adjust automatically (client and server agree). Every row records where the money came *from* and went *to*; transfers move money between your own accounts. Recurring rules (rent, salary, contributions) post themselves on schedule and can be paused. Rows are drawn a page at a time |
-| **Expenses** | One month against the twelve before it: category totals, necessities vs discretionary vs excluded, what moved against its usual cost, a recurring-cost floor, and a **cost-of-ownership card** (the car) averaged over every month owned rather than every month billed. **Budgets live here too** — a limit is an attribute of a category, so it is set beside what the category actually costs |
-| **Investments** | Holdings CRUD with price updates, all-time value vs cost basis, asset allocation, holdings exposure by position, three measures of return side by side (simple, money-weighted, time-weighted) against a benchmark, and a per-position table sortable by class, value, gain and MWRR |
+| **Transactions** | Everything that happened on a date, in one list: transactions **and trades**, under one set of filters (search, type — including buy/sell/dividend — category, account, month). Full CRUD on both; a trade is corrected by replaying its position's whole history rather than patching the numbers. Balances adjust automatically, every row records where the money came *from* and went *to*, and **Add** asks whether it repeats — a one-off, or a rule that posts itself on schedule. Rows are drawn a page at a time |
+| **Expenses** | One month against the twelve before it: what it cost, how it split between necessity and choice, where it ranks against every month on record, what moved against each category's average, the recurring-cost floor, and a **cost-of-ownership card** (the car) averaged over every month owned rather than every month billed. **Budgets live here too** — a limit is an attribute of a category, so it is set beside what the category actually costs |
+| **Investments** | Holdings CRUD with price updates, all-time value vs cost basis, asset allocation, holdings exposure by position, **where the money stands** — what open positions have done, what closed ones did, and what was paid out, kept apart so a good year is not hidden behind a loss already banked — three measures of return side by side (simple, money-weighted, time-weighted) against a benchmark, and a per-position table sortable by class, value, gain and MWRR |
 | **Accounts** | Assets/liabilities/net-worth KPIs, assets-vs-liabilities stacked area, account cards with history sparklines, and a defined-benefit pension card (transfer value against what you contributed). Accounts carry a kind (chequing, savings, cash, investment, crypto, property, credit, loan, pension) and a registration (non-registered, TFSA, RRSP, FHSA, Pension) |
 | **Year** | Every year on record against the one before: income against spending, what it grew to, what the portfolio did with it, and the month each milestone was first passed |
 | **Tax** | Realized gains, dividends and interest by year — non-registered only, since that is the only place any of it is reportable |
 | **Import CSV** | Drop in one file or many and each is routed by what it *is*: a card statement, a bank export with debit/credit columns, a trade log, or a brokerage activity report that is all of those at once. Format, sign convention and account are detected per file, categories are suggested against your own list, duplicates are flagged, and every row is reviewable before anything is saved |
-| **Monthly checklist** | Closes the month that just ended in one pass: import → income → spending → trades → pension → save. Nothing is written until the last step |
+| **Monthly checklist** | Closes the month that just ended in one pass: import → income → spending → *mergers* → trades → pension → save. The mergers step appears only when a file carried one. Nothing is written until the last step |
 | **Guide** | How each figure is arrived at: the pension, staking rewards, necessity vs choice, what a statement is read for, what the checklist covers, realized vs unrealized, and which months a chart shows |
 
 ## Stack
@@ -232,6 +273,15 @@ spending was never reviewed, or trades posted before the snapshot meant to value
 Income is dated the last day of the month being closed, whatever day the checklist is
 actually done on, and the pension figure is recorded against that month too.
 
+**Mergers and demergers get a step only when a file carried one.** An empty step every
+month, for something that happens twice a decade, is a step people learn to click past.
+When one does turn up it is applied *before* the trades: the action decides what the new
+shares cost, and a sale of them in the same month is measured against that, so applying
+it afterwards prices the sale against a cost base that did not exist when it happened.
+Files were parsed for these and the results thrown away until recently — a month closed
+here recorded the sale of shares whose basis nothing had moved, and reported a gain out of
+nothing.
+
 **The portfolio snapshot is no longer a step.** It was a table of sixty prices to scroll
 past, and nobody edits a price they have no better source for than the app itself. Saving
 the month records what is held, read *after* the trades land so it reflects the month it
@@ -283,6 +333,49 @@ unrealized are both on `HoldingRow` (`realizedGain`, `gain`) if you want them ap
 Two rules the app does **not** implement, and would need to for tax filing: the
 **superficial loss** rule (a loss denied when the same security is bought back within 30
 days, and added to the new cost base instead), and any adjustment for return of capital.
+
+## Correcting a trade
+
+A trade is not a transaction. It has no row and no id of its own — it is an entry in a
+position's `flows` array — so a row on the transactions page carries the holding it
+belongs to and its index in that array, and that is the way back to it.
+
+**Editing one replays the position's whole history rather than patching its numbers.** A
+buy in the middle of a history cannot be undone by subtracting it: average cost depends on
+the order things happened in, and a sale between two buys was already priced against the
+average at that moment. `replayFlows` in `src/lib/flows.ts` recomputes shares, cost base
+and dividends from the first flow forward, sorted by date rather than by position in the
+array — a statement that arrives a month late is appended to the end and belongs earlier.
+A test asserts the replay agrees with what `planTrades` builds, since the two drifting
+apart would silently restate a portfolio.
+
+Three limits, each deliberate:
+
+- **Account balances are not touched.** The cash moved when the trade did; correcting the
+  record of it months later does not move any money back.
+- **The kind and the position cannot be changed.** A buy that should have been a sell is a
+  different event, and moving a trade between positions restates two cost bases. Delete it
+  and record it properly.
+- **Money in and out counts transactions only.** A buy is not spending and a sell is not
+  income — both move money between things you own — so trades get a count in the page
+  subtitle rather than a total. An afternoon of rebalancing would otherwise read as
+  enormous earning and enormous spending at once.
+
+## Shipping an unfinished page
+
+Pages under construction are marked `unreleased` in the nav array in
+`src/components/shell.tsx`. They are listed in development and hidden in a production
+build, so work carries on with no release branch to cherry-pick onto and no revert to
+re-apply. Promoting a page is deleting one word.
+
+```ts
+{ href: "/tax", label: "Tax", icon: Receipt, unreleased: true },
+```
+
+Visible when `NODE_ENV !== "production"`, or when `NEXT_PUBLIC_SHOW_UNRELEASED=1` is set
+at build time for checking a production build. **This hides rather than disables** — the
+route is still built and still answers to its URL, which is how a page is checked in the
+real app before it is promoted. It is not a way to keep anything private.
 
 ## Performance
 
@@ -554,6 +647,25 @@ on first run. Once you start entering your own figures it is just noise, so the 
 offers **Delete demo data** — a one-time cleanup that removes the seeded accounts,
 transactions, holdings and budgets while keeping anything you added yourself, along with
 your category list.
+
+**It exists to show the app working, so it has to reach every page.** Positions are built
+from trades and their numbers read back off them, so the holdings table, the exposure ring
+and the trade rows are three views of one record. One position is closed at a loss and two
+were trimmed while still held, which is what makes the realized and unrealized halves of a
+return disagree. Month-end snapshots are seeded alongside — without them the app values
+every past month at book cost and the portfolio charts are a flat line however good the
+prices are. Income runs to eight sources including a loan advance that is deliberately not
+income, there is a pension account, debt repayments, transfers and standing rules.
+`src/lib/sample.test.ts` asserts that coverage: a generator that quietly stops producing
+trades leaves whole features looking broken to anyone seeing them for the first time.
+
+**The securities are invented.** The sample is a fiction throughout and reads nobody's
+records, but real tickers still invite the wrong reading — a demo portfolio holding the
+same names as the real one is hard to tell apart at a glance, and a screenshot of it looks
+like a statement.
+
+The integration and smoke suites count what the generator produced rather than literals,
+so growing the sample cannot fail CI for being right.
 
 The seeded rows are recognised by their id prefixes (`acc-`, `hold-`, `txn-`); rows you
 create are assigned UUIDs and so are never matched. After the deletion the app records a
