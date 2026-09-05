@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Anchor,
+  ArrowDownWideNarrow,
   Car,
   Plus,
   Receipt,
   Settings2,
   ShoppingBag,
   Trash2,
-  TrendingDown,
 } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
@@ -187,7 +187,7 @@ export default function ExpensesPage() {
 
   if (!selected || !data) {
     return (
-      <Shell title="Expenses" subtitle="Where the money goes, and where you meant it to go">
+      <Shell title="Expenses" subtitle="What you spent, and what you meant to spend">
         <EmptyState
           icon={<Receipt size={20} />}
           title="No spending recorded yet"
@@ -198,6 +198,17 @@ export default function ExpensesPage() {
   }
 
   const { summary, floor, car } = data;
+
+  /*
+   * How many months on record cost less than this one.
+   *
+   * The rank alone does not say much — 3rd is alarming out of 26 and
+   * unremarkable out of 4 — and a count is easier to picture than either a
+   * rank or a percentile. Green once at least half the record is cheaper,
+   * which is the median month; above that the tone turns.
+   */
+  const cheaperMonths =
+    summary.rank === null ? null : summary.months - summary.rank;
   const pct = (now: number, then: number | null) =>
     then !== null && then !== 0 ? ((now - then) / Math.abs(then)) * 100 : undefined;
   const trend = data.trend.slice(-window);
@@ -206,7 +217,7 @@ export default function ExpensesPage() {
   return (
     <Shell
       title="Expenses"
-      subtitle="Where the money goes, and where you meant it to go"
+      subtitle="What you spent, and what you meant to spend"
       action={
         <div className="flex items-center gap-2">
           <Button
@@ -242,7 +253,7 @@ export default function ExpensesPage() {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
-            label={`Spent · ${labelMonth(selected)}`}
+            label={`Expenses for ${labelMonth(selected)}`}
             value={fmtCAD(summary.total)}
             delta={pct(summary.total, summary.average)}
             deltaLabel={
@@ -282,38 +293,200 @@ export default function ExpensesPage() {
                 ? undefined
                 : `${summary.discretionaryShare.toFixed(0)}%`
             }
-            deltaLabel="of the month — the part you choose"
+            deltaLabel="of the month"
             icon={<ShoppingBag size={16} />}
             spark={spark.map((m) => ({ v: m.discretionary }))}
             sparkKey="v"
             sparkColor="#34d399"
           />
-          <StatCard
-            label="Monthly floor"
-            value={fmtCAD(floor.total)}
-            deltaValue={`${floor.items.length} standing costs`}
-            deltaLabel={`over the last ${floor.window} months`}
-            icon={<TrendingDown size={16} />}
-          />
+          {/*
+            * How this month compares with every other, in the fourth slot
+            * rather than as a line of grey text under the row.
+            *
+            * The three cards beside it are all this month against itself —
+            * what it cost, and how it split. This is the only one that
+            * measures it against the record, which is what makes "expensive"
+            * mean anything, so it earns a card rather than a footnote.
+            *
+            * Laid out by hand rather than with StatCard because of the two
+            * sentences at the bottom, which that component has no slot for.
+            * The classes above them are StatCard's own, so the four cards
+            * still line up label to label and figure to figure.
+            */}
+          <Card className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-ink-dim">
+                Monthly expenses rank
+              </span>
+              <span className="text-ink-faint">
+                <ArrowDownWideNarrow size={16} />
+              </span>
+            </div>
+            <div className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
+              {summary.rank !== null ? (
+                <>
+                  {ordinal(summary.rank)}
+                  <span className="ml-1.5 text-sm font-normal text-ink-faint">
+                    of {summary.months}
+                  </span>
+                </>
+              ) : (
+                <span className="text-ink-faint">—</span>
+              )}
+            </div>
+            <div className="mt-1.5 flex items-center gap-2">
+              {cheaperMonths !== null ? (
+                <Badge
+                  tone={
+                    cheaperMonths * 2 >= summary.months ? "positive" : "negative"
+                  }
+                >
+                  {cheaperMonths === 1
+                    ? "1 month cost less"
+                    : `${cheaperMonths} months cost less`}
+                </Badge>
+              ) : null}
+            </div>
+            {/*
+              * Two rows rather than two sentences: they are the same shape of
+              * fact — a month, and what it cost — and as prose they wrapped
+              * into a grey paragraph nobody reads. Ranged left and right, the
+              * figures line up under each other and under the ones on the
+              * cards beside this.
+              */}
+            <dl className="mt-4 space-y-1 border-t border-line pt-3 text-[0.6875rem]">
+              {summary.previous !== null && (
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="text-ink-faint">The month before</dt>
+                  <dd className="font-medium tabular-nums text-ink-dim">
+                    {fmtCAD(summary.previous)}
+                  </dd>
+                </div>
+              )}
+              {summary.lastYear !== null && (
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="text-ink-faint">A year earlier</dt>
+                  <dd className="font-medium tabular-nums text-ink-dim">
+                    {fmtCAD(summary.lastYear)}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </Card>
         </div>
 
-        <p className="px-1 text-[0.6875rem] leading-relaxed text-ink-faint">
-          {summary.rank !== null && (
-            <>
-              {labelMonth(selected)} was the{" "}
-              <strong className="text-ink-dim">{ordinal(summary.rank)}</strong>{" "}
-              most expensive of the {summary.months} months on record.{" "}
-            </>
-          )}
-          {summary.previous !== null && (
-            <>
-              The month before came to {fmtCAD(summary.previous)}.{" "}
-            </>
-          )}
-          {summary.lastYear !== null && (
-            <>A year earlier the same month cost {fmtCAD(summary.lastYear)}.</>
-          )}
-        </p>
+        <Card>
+          <CardHeader
+            title="Spending month by month"
+            subtitle="Necessities under discretion, with the twelve-month average across them"
+            action={
+              <Segmented<string>
+                options={[
+                  { value: "12", label: "1y" },
+                  { value: "24", label: "2y" },
+                  { value: "60", label: "5y" },
+                ]}
+                value={String(window)}
+                onChange={(v) => setWindow(Number(v) as 12 | 24 | 60)}
+              />
+            }
+          />
+          <div className="px-3 pb-4">
+            <SeriesChart
+              data={trend as unknown as Record<string, unknown>[]}
+              xKey="label"
+              stacked
+              series={[
+                { key: "necessity", name: "Necessities", color: "#8b5cf6" },
+                { key: "discretionary", name: "Discretionary", color: "#34d399" },
+                {
+                  key: "average",
+                  name: "12-month average",
+                  color: "#f59e0b",
+                  kind: "line",
+                  dashed: true,
+                },
+              ]}
+              height={280}
+              yFmt={fmtCompact}
+            />
+            <div className="px-2 pt-2">
+              <ChartLegend
+                items={[
+                  { label: "Necessities", color: "#8b5cf6" },
+                  { label: "Discretionary", color: "#34d399" },
+                  { label: "12-month average of the total", color: "#f59e0b" },
+                ]}
+              />
+            </div>
+          </div>
+          <p className="px-5 pb-4 text-[0.6875rem] leading-relaxed text-ink-faint">
+            Debt repayment is left out of every total on this page. It is money
+            moving from one side of the balance sheet to the other rather than
+            money spent, and counting it makes a year of paying down a loan look
+            like a year of living beyond your means.
+          </p>
+        </Card>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <Card className="lg:col-span-2">
+            <CardHeader
+              title={`What ${labelMonth(selected)} was made of`}
+              subtitle="Consumption only, largest first"
+            />
+            <div className="px-4 pb-4">
+              {data.donut.length > 0 ? (
+                <DonutChart
+                  data={data.donut}
+                  colors={data.colors}
+                  centerLabel="Spent"
+                  centerValue={fmtCAD(summary.total)}
+                  fmt={(n) => fmtCAD(n)}
+                  height={260}
+                  /* Two thirds of the row is too wide for a ring alone. */
+                  legend="right"
+                />
+              ) : (
+                <p className="py-20 text-center text-xs text-ink-faint">
+                  Nothing recorded in {labelMonth(selected)}.
+                </p>
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="What moved"
+              subtitle="This month against each category's average"
+            />
+            <div className="space-y-1 px-3 pb-4">
+              {data.movers.length === 0 ? (
+                <p className="py-16 text-center text-xs text-ink-faint">
+                  Every category came in close to its average.
+                </p>
+              ) : (
+                data.movers.map((r) => (
+                  <div
+                    key={r.category}
+                    className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-elevated"
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: data.colors[r.category] ?? "var(--ink-faint)" }}
+                    />
+                    <span className="truncate text-sm">{r.category}</span>
+                    <span className="ml-auto shrink-0 text-sm tabular-nums">
+                      {fmtCAD(r.amount)}
+                    </span>
+                    <Badge tone={r.delta > 0 ? "negative" : "positive"}>
+                      {r.delta > 0 ? "▲" : "▼"} {fmtCAD(Math.abs(r.delta))}
+                    </Badge>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        </div>
 
         {data.budgeted > 0 && (
           /*
@@ -326,7 +499,7 @@ export default function ExpensesPage() {
             <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3">
               <div>
                 <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
-                  Against the plan
+                  Against the budget
                 </p>
                 <p className="mt-1 text-xl font-semibold tabular-nums">
                   {fmtCAD(data.againstPlan)}
@@ -397,186 +570,6 @@ export default function ExpensesPage() {
 
         <Card>
           <CardHeader
-            title="Spending month by month"
-            subtitle="Necessities under discretion, with the twelve-month average across them"
-            action={
-              <Segmented<string>
-                options={[
-                  { value: "12", label: "1y" },
-                  { value: "24", label: "2y" },
-                  { value: "60", label: "5y" },
-                ]}
-                value={String(window)}
-                onChange={(v) => setWindow(Number(v) as 12 | 24 | 60)}
-              />
-            }
-          />
-          <div className="px-3 pb-4">
-            <SeriesChart
-              data={trend as unknown as Record<string, unknown>[]}
-              xKey="label"
-              stacked
-              series={[
-                { key: "necessity", name: "Necessities", color: "#8b5cf6" },
-                { key: "discretionary", name: "Discretionary", color: "#34d399" },
-                {
-                  key: "average",
-                  name: "12-month average",
-                  color: "#f59e0b",
-                  kind: "line",
-                  dashed: true,
-                },
-              ]}
-              height={280}
-              yFmt={fmtCompact}
-            />
-            <div className="px-2 pt-2">
-              <ChartLegend
-                items={[
-                  { label: "Necessities", color: "#8b5cf6" },
-                  { label: "Discretionary", color: "#34d399" },
-                  { label: "12-month average of the total", color: "#f59e0b" },
-                ]}
-              />
-            </div>
-          </div>
-          <p className="px-5 pb-4 text-[0.6875rem] leading-relaxed text-ink-faint">
-            Debt repayment is left out of every total on this page. It is money
-            moving from one side of the balance sheet to the other rather than
-            money spent, and counting it makes a year of paying down a loan look
-            like a year of living beyond your means.
-          </p>
-        </Card>
-
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-          <Card className="lg:col-span-2">
-            <CardHeader
-              title={`What ${labelMonth(selected)} was made of`}
-              subtitle="Consumption only, largest first"
-            />
-            <div className="px-2 pb-4">
-              {data.donut.length > 0 ? (
-                <DonutChart
-                  data={data.donut}
-                  colors={data.colors}
-                  centerLabel="Spent"
-                  centerValue={fmtCAD(summary.total)}
-                  fmt={(n) => fmtCAD(n)}
-                  height={260}
-                />
-              ) : (
-                <p className="py-20 text-center text-xs text-ink-faint">
-                  Nothing recorded in {labelMonth(selected)}.
-                </p>
-              )}
-            </div>
-          </Card>
-
-          <Card className="lg:col-span-3">
-            <CardHeader
-              title="What moved"
-              subtitle={`This month against what each category usually costs`}
-            />
-            <div className="space-y-1 px-3 pb-4">
-              {data.movers.length === 0 ? (
-                <p className="py-16 text-center text-xs text-ink-faint">
-                  Every category came in close to its usual.
-                </p>
-              ) : (
-                data.movers.map((r) => (
-                  <div
-                    key={r.category}
-                    className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-elevated"
-                  >
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{ background: data.colors[r.category] ?? "var(--ink-faint)" }}
-                    />
-                    <span className="text-sm">{r.category}</span>
-                    <span className="ml-auto text-xs tabular-nums text-ink-faint">
-                      {fmtCAD(r.average)} usual
-                    </span>
-                    <span className="w-24 text-right text-sm tabular-nums">
-                      {fmtCAD(r.amount)}
-                    </span>
-                    <Badge tone={r.delta > 0 ? "negative" : "positive"}>
-                      {r.delta > 0 ? "▲" : "▼"} {fmtCAD(Math.abs(r.delta))}
-                    </Badge>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
-        </div>
-
-        {/*
-          * The cost of a thing you own, rather than of a month.
-          *
-          * Nothing else on the page can answer it: the categories are what the
-          * record has, and "the car" is spread across whichever of them the
-          * user says it is. So the question is asked here — from when, and
-          * which categories — and the arithmetic follows.
-          */}
-        <Card>
-          <CardHeader
-            title="What the car costs"
-            subtitle={
-              settings.car
-                ? `${settings.car.categories.join(", ")} since ${labelMonth(settings.car.start)}`
-                : "Pick a starting point and the categories that belong to it"
-            }
-            action={
-              <Button variant="ghost" size="sm" onClick={() => setEditing("car")}>
-                <Settings2 size={14} /> {settings.car ? "Change" : "Set up"}
-              </Button>
-            }
-          />
-          {car && car.months > 0 ? (
-            <div className="grid gap-4 px-5 pb-5 lg:grid-cols-[repeat(4,minmax(0,1fr))_2fr]">
-              <Figure
-                label="Per month"
-                value={fmtCAD(car.perMonth)}
-                note={`over ${car.months} months of ownership`}
-                strong
-              />
-              <Figure label="Per year" value={fmtCAD(car.perYear)} note="at that rate" />
-              <Figure
-                label="Total"
-                value={fmtCAD(car.total)}
-                note={`since ${labelMonth(settings.car!.start)}`}
-              />
-              <Figure
-                label="Priciest month"
-                value={car.largest ? fmtCAD(car.largest.value) : "—"}
-                note={car.largest ? labelMonth(car.largest.key) : "nothing recorded"}
-              />
-              <div className="min-w-0">
-                <span className="text-xs font-medium text-ink-dim">Month by month</span>
-                <Sparkline data={car.series} dataKey="value" color="#f59e0b" height={72} />
-              </div>
-            </div>
-          ) : (
-            <div className="px-5 pb-5">
-              <EmptyState
-                icon={<Car size={20} />}
-                title={settings.car ? "Nothing in those categories yet" : "Not set up"}
-                subtitle="Choose the month you bought it and the categories its costs land in."
-              />
-            </div>
-          )}
-          {car && car.months > 0 && (
-            <p className="px-5 pb-4 text-[0.6875rem] leading-relaxed text-ink-faint">
-              Divided by every month of ownership, including the{" "}
-              {car.months - car.monthsWithSpend} with no charge at all — a car
-              costs what it costs in the months it is not filled up, and
-              averaging only over the months with a receipt would price it off
-              its expensive ones alone.
-            </p>
-          )}
-        </Card>
-
-        <Card>
-          <CardHeader
             title="Every category"
             subtitle={`${labelMonth(selected)} against the ${summary.averageMonths} months before it`}
           />
@@ -588,8 +581,8 @@ export default function ExpensesPage() {
                   <th className="px-3 py-2 text-left font-medium">Kind</th>
                   <th className="px-3 py-2 text-right font-medium">This month</th>
                   <th className="px-3 py-2 text-right font-medium">Budget</th>
-                  <th className="px-3 py-2 text-right font-medium">Usual</th>
-                  <th className="px-3 py-2 text-right font-medium">Vs usual</th>
+                  <th className="px-3 py-2 text-right font-medium">Average</th>
+                  <th className="px-3 py-2 text-right font-medium">Vs average</th>
                   <th className="px-3 py-2 text-right font-medium">Share</th>
                   <th className="px-3 py-2 text-right font-medium">Months</th>
                   <th className="px-3 py-2 text-right font-medium">Year ago</th>
@@ -739,9 +732,9 @@ export default function ExpensesPage() {
             </table>
           </div>
           <p className="px-5 pb-4 text-[0.6875rem] leading-relaxed text-ink-faint">
-            <strong className="text-ink-dim">Usual</strong> is the average over
-            the months behind this one, which never includes the month being
-            read — a month cannot be unusual against an average it is part of.{" "}
+            <strong className="text-ink-dim">Average</strong> is taken over the
+            months behind this one, and never includes the month being read — a
+            month cannot be unusual against an average it is part of.{" "}
             <strong className="text-ink-dim">Months</strong> counts how many of
             them the category appeared in at all: something billed twelve times
             out of twelve is a commitment, and something billed twice is a
@@ -751,6 +744,71 @@ export default function ExpensesPage() {
           </p>
         </Card>
 
+        {/*
+          * The cost of a thing you own, rather than of a month.
+          *
+          * Nothing else on the page can answer it: the categories are what the
+          * record has, and "the car" is spread across whichever of them the
+          * user says it is. So the question is asked here — from when, and
+          * which categories — and the arithmetic follows.
+          */}
+        <Card>
+          <CardHeader
+            title="What the car costs"
+            subtitle={
+              settings.car
+                ? `${settings.car.categories.join(", ")} since ${labelMonth(settings.car.start)}`
+                : "Pick a starting point and the categories that belong to it"
+            }
+            action={
+              <Button variant="ghost" size="sm" onClick={() => setEditing("car")}>
+                <Settings2 size={14} /> {settings.car ? "Change" : "Set up"}
+              </Button>
+            }
+          />
+          {car && car.months > 0 ? (
+            <div className="grid gap-4 px-5 pb-5 lg:grid-cols-[repeat(4,minmax(0,1fr))_2fr]">
+              <Figure
+                label="Per month"
+                value={fmtCAD(car.perMonth)}
+                note={`over ${car.months} months of ownership`}
+                strong
+              />
+              <Figure label="Per year" value={fmtCAD(car.perYear)} note="at that rate" />
+              <Figure
+                label="Total"
+                value={fmtCAD(car.total)}
+                note={`since ${labelMonth(settings.car!.start)}`}
+              />
+              <Figure
+                label="Priciest month"
+                value={car.largest ? fmtCAD(car.largest.value) : "—"}
+                note={car.largest ? labelMonth(car.largest.key) : "nothing recorded"}
+              />
+              <div className="min-w-0">
+                <span className="text-xs font-medium text-ink-dim">Month by month</span>
+                <Sparkline data={car.series} dataKey="value" color="#f59e0b" height={72} />
+              </div>
+            </div>
+          ) : (
+            <div className="px-5 pb-5">
+              <EmptyState
+                icon={<Car size={20} />}
+                title={settings.car ? "Nothing in those categories yet" : "Not set up"}
+                subtitle="Choose the month you bought it and the categories its costs land in."
+              />
+            </div>
+          )}
+          {car && car.months > 0 && (
+            <p className="px-5 pb-4 text-[0.6875rem] leading-relaxed text-ink-faint">
+              Divided by every month of ownership, including the{" "}
+              {car.months - car.monthsWithSpend} with no charge at all — a car
+              costs what it costs in the months it is not filled up, and
+              averaging only over the months with a receipt would price it off
+              its expensive ones alone.
+            </p>
+          )}
+        </Card>
         {floor.items.length > 0 && (
           <Card>
             <CardHeader

@@ -436,6 +436,7 @@ export function DonutChart({
   centerValue,
   fmt,
   colors,
+  legend = "below",
 }: {
   data: { name: string; value: number }[];
   height?: number;
@@ -444,6 +445,15 @@ export function DonutChart({
   fmt?: (n: number) => string;
   /** Colour per category name. Falls back to the palette in slice order. */
   colors?: Record<string, string>;
+  /**
+   * Where the key goes.
+   *
+   * "below" stacks it under the ring, which is what a narrow card wants. On a
+   * wide one that leaves the ring floating in a column of its own with white
+   * space either side, so "left" and "right" set the two beside each other and
+   * let the pair fill the width.
+   */
+  legend?: "below" | "left" | "right";
 }) {
   /*
    * Sorted here rather than trusted from the caller: the colour map is keyed
@@ -453,9 +463,15 @@ export function DonutChart({
   /* The exposure ring's spectrum, spread across the slices there are. */
   const colorOf = (name: string, i: number) =>
     colors?.[name] ?? spectrumAt(i, rows.length);
+  const beside = legend !== "below";
   return (
-    <div>
-      <div className="relative">
+    <div
+      className={cn(
+        beside && "flex flex-col gap-4 sm:flex-row sm:items-center",
+        legend === "left" && "sm:flex-row-reverse",
+      )}
+    >
+      <div className={cn("relative", beside && "min-w-0 flex-1")}>
         <ResponsiveContainer width="100%" height={height}>
           <PieChart>
             <Pie
@@ -484,7 +500,12 @@ export function DonutChart({
           </div>
         ) : null}
       </div>
-      <ul className="mt-2 space-y-1.5 px-1">
+      <ul
+        className={cn(
+          "space-y-1.5 px-1",
+          beside ? "min-w-0 flex-1" : "mt-2",
+        )}
+      >
         {rows.slice(0, 7).map((d, i) => (
           <li key={d.name} className="flex items-center gap-2 text-xs">
             <span
@@ -539,10 +560,21 @@ export function ExposurePie({
   data,
   height = 300,
   fmt,
+  legend = "below",
 }: {
   data: ExposureDatum[];
   height?: number;
   fmt?: (n: number) => string;
+  /**
+   * Where the key goes.
+   *
+   * "below" stacks it under the ring. Across a full-width card that leaves the
+   * ring adrift in the middle with the rows running the whole width beneath
+   * it, so "right" puts the two side by side — the ring at a readable size and
+   * the key filling what is left, which is what a long list of positions
+   * wants.
+   */
+  legend?: "below" | "right";
 }) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
 
@@ -559,31 +591,34 @@ export function ExposurePie({
 
   const pct = (v: number) => (total > 0 ? `${((v / total) * 100).toFixed(1)}%` : "—");
 
+  const beside = legend === "right";
   return (
-    <div>
-      <ResponsiveContainer width="100%" height={height}>
-        <PieChart>
-          <Pie
-            data={colored}
-            dataKey="value"
-            nameKey="ticker"
-            startAngle={PIE_START}
-            endAngle={PIE_END}
-            innerRadius="48%"
-            outerRadius="86%"
-            paddingAngle={1}
-            stroke="var(--surface)"
-            strokeWidth={1}
-          >
-            {colored.map((d) => (
-              <Cell key={d.ticker} fill={d.color} />
-            ))}
-          </Pie>
-          <Tooltip
-            content={<ChartTooltip fmt={(n) => `${fmt ? fmt(n) : n} · ${pct(n)}`} />}
-          />
-        </PieChart>
-      </ResponsiveContainer>
+    <div className={cn(beside && "flex flex-col gap-5 lg:flex-row lg:items-center")}>
+      <div className={cn(beside && "lg:w-2/5 lg:shrink-0")}>
+        <ResponsiveContainer width="100%" height={height}>
+          <PieChart>
+            <Pie
+              data={colored}
+              dataKey="value"
+              nameKey="ticker"
+              startAngle={PIE_START}
+              endAngle={PIE_END}
+              innerRadius="48%"
+              outerRadius="86%"
+              paddingAngle={1}
+              stroke="var(--surface)"
+              strokeWidth={1}
+            >
+              {colored.map((d) => (
+                <Cell key={d.ticker} fill={d.color} />
+              ))}
+            </Pie>
+            <Tooltip
+              content={<ChartTooltip fmt={(n) => `${fmt ? fmt(n) : n} · ${pct(n)}`} />}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
 
       {/*
         One row per holding, because that is now what a colour means. It used
@@ -591,26 +626,33 @@ export function ExposurePie({
         classes are still here, as a tag, but they no longer decide the colour
         and so cannot organise the key.
       */}
-      <div className="mt-3 space-y-px px-1">
+      <div className={cn("space-y-px px-1", beside ? "min-w-0 flex-1" : "mt-3")}>
         {colored.map((r) => (
           <div
             key={r.ticker}
-            className="flex items-center gap-2 text-[0.6875rem] leading-5"
+            className="flex items-center gap-2 text-xs leading-6"
             title={r.name}
           >
             <span
-              className="h-2 w-2 shrink-0 rounded-full"
+              className="h-2.5 w-2.5 shrink-0 rounded-full"
               style={{ background: r.color }}
             />
             <span className="shrink-0 font-medium text-ink">{r.ticker}</span>
-            <span className="truncate text-ink-faint">{r.name}</span>
-            <span className="ml-auto shrink-0 rounded bg-elevated px-1 py-px text-[0.5625rem] text-ink-faint">
+            {/*
+              * The name takes the slack rather than the numbers being pushed
+              * to the far edge by it. With `ml-auto` on the tag, a short name
+              * like "Bitcoin" left a band of nothing between the label and the
+              * figures it belongs to; growing the name closes that gap while
+              * the columns stay ranged right and aligned down the list.
+              */}
+            <span className="min-w-0 flex-1 truncate text-ink-faint">{r.name}</span>
+            <span className="shrink-0 rounded bg-elevated px-1.5 py-px text-[0.625rem] text-ink-faint">
               {r.assetClass}
             </span>
-            <span className="w-16 shrink-0 text-right tabular-nums text-ink-dim">
+            <span className="w-20 shrink-0 text-right tabular-nums text-ink-dim">
               {fmt ? fmt(r.value) : r.value}
             </span>
-            <span className="w-10 shrink-0 text-right font-medium tabular-nums text-ink">
+            <span className="w-12 shrink-0 text-right font-medium tabular-nums text-ink">
               {pct(r.value)}
             </span>
           </div>
