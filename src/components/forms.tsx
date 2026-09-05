@@ -16,6 +16,7 @@ import {
   AccountKind,
   AssetClass,
   Currency,
+  CashFlow,
   Holding,
   INCOME_CATEGORIES,
   alphabetical,
@@ -29,6 +30,8 @@ import {
   supportsRegistration,
 } from "@/lib/types";
 import { fmtCAD, todayISO } from "@/lib/format";
+import { holdingAfterFlowEdit, type TradeRecord } from "@/lib/flows";
+import { roundMoney } from "@/lib/money";
 import { useFinance } from "@/lib/store";
 import { useTickerValidation } from "@/lib/hooks";
 import { isCoinTicker } from "@/lib/market";
@@ -1818,6 +1821,136 @@ export function ConfirmDelete({
         >
           Delete
         </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Correcting one recorded trade.
+ *
+ * Trades are not transactions — they live on the position as flows, with no
+ * identity beyond their place in its array — so this edits by reference and
+ * lets `holdingAfterFlowEdit` replay the whole history rather than patching
+ * the position's numbers. That is what keeps a corrected buy from leaving the
+ * cost base priced on the figure it used to have.
+ *
+ * The date, the money and the share count are all that can be changed. What
+ * kind of trade it is, and which position it belongs to, are not: a buy that
+ * should have been a sell is two different events, and moving a trade between
+ * positions would restate the cost base of both. Delete it and record it
+ * properly — which is what the Delete button here is for.
+ */
+export function TradeForm({
+  trade,
+  onClose,
+}: {
+  /**
+   * The trade being corrected. Mount this component only while there is one —
+   * the fields start from it and are never reset, so opening a second trade
+   * means a second mounting rather than an effect copying props into state.
+   */
+  trade: TradeRecord;
+  onClose: () => void;
+}) {
+  const holdings = useFinance((s) => s.holdings);
+  const updateHolding = useFinance((s) => s.updateHolding);
+  const [date, setDate] = useState(trade.date);
+  const [amount, setAmount] = useState(String(trade.amount));
+  const [shares, setShares] = useState(String(Math.abs(trade.shares)));
+  const [error, setError] = useState<string | null>(null);
+
+  const holding = holdings.find((h) => h.id === trade.holdingId) ?? null;
+  const isDividend = trade.kind === "dividend";
+
+  const save = () => {
+    if (!holding) {
+      setError("That position is no longer here.");
+      return;
+    }
+    const money = Number(amount);
+    if (!Number.isFinite(money) || money < 0) {
+      setError("Amount must be a number, and not negative.");
+      return;
+    }
+    const qty = isDividend ? 0 : Number(shares);
+    if (!isDividend && (!Number.isFinite(qty) || qty <= 0)) {
+      setError("Shares must be greater than zero.");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setError("Pick a date.");
+      return;
+    }
+    const edited: CashFlow = {
+      date,
+      kind: trade.kind,
+      amount: roundMoney(money),
+      // Sells are stored negative, which is what tells them apart in a replay.
+      shares: trade.kind === "sell" ? -Math.abs(qty) : qty,
+      ...(trade.kind === "buy" && money === 0 && trade.awaitingPrice
+        ? { awaitingPrice: true }
+        : {}),
+    };
+    const next = holdingAfterFlowEdit(holding, trade.index, edited);
+    if (!next) {
+      setError("That trade is no longer here.");
+      return;
+    }
+    updateHolding(holding.id, {
+      ...holding,
+      shares: next.shares,
+      avgCost: next.avgCost,
+      dividendsReceived: next.dividends,
+      flows: next.flows,
+    });
+    onClose();
+  };
+
+  return (
+    <Modal open onClose={onClose} title={`Edit ${trade.kind} · ${trade.ticker}`}>
+      <div className="space-y-4">
+        <Field label="Date">
+          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </Field>
+        <Field
+          label={isDividend ? "Amount received (CAD)" : "Total value (CAD)"}
+          hint={
+            isDividend
+              ? undefined
+              : "What the whole trade came to, not the price per share."
+          }
+        >
+          <Input
+            type="number"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </Field>
+        {!isDividend && (
+          <Field label="Shares">
+            <Input
+              type="number"
+              step="any"
+              value={shares}
+              onChange={(e) => setShares(e.target.value)}
+            />
+          </Field>
+        )}
+        <p className="text-[0.6875rem] leading-relaxed text-ink-faint">
+          The position&rsquo;s share count, cost base and dividend total are
+          worked out again from its whole history when this is saved. Account
+          balances are left alone — the cash moved when the trade did, and
+          correcting the record of it does not move any money back.
+        </p>
+        {error ? <p className="text-xs text-negative">{error}</p> : null}
+      </div>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button onClick={save}>Save trade</Button>
       </div>
     </Modal>
   );
