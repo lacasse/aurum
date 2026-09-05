@@ -33,6 +33,7 @@ import {
   DEMO_RECURRING_ID_PREFIX,
   DEMO_TRANSACTION_ID_PREFIX,
   SAMPLE_BUDGETS,
+  type SampleSnapshot,
 } from "@/lib/sample";
 import { z } from "zod";
 import {
@@ -178,7 +179,10 @@ export async function isSeeded(): Promise<boolean> {
 /* Seed / reset                                                        */
 /* ------------------------------------------------------------------ */
 
-export async function seed(data: FinanceData): Promise<void> {
+export async function seed(
+  data: FinanceData,
+  snapshotRows: SampleSnapshot[] = [],
+): Promise<void> {
   if (data.accounts.length > 0) {
     await db.insert(accounts).values(
       data.accounts.map((a, i) => ({
@@ -246,6 +250,18 @@ export async function seed(data: FinanceData): Promise<void> {
     await db
       .insert(categories)
       .values(data.categories.map((name, i) => ({ name, position: i })));
+  }
+  /*
+   * Month-end valuations for the sample portfolio.
+   *
+   * Every chart of the portfolio over time reads the recorded record first and
+   * falls back to book cost where there is none, so a sample seeded without
+   * these draws eighteen months of flat line however good its prices are.
+   * Only written for rows this function itself created, and removed by
+   * `deleteDemoData` along with the holdings they belong to.
+   */
+  if (snapshotRows.length > 0) {
+    await db.insert(monthlySnapshots).values(snapshotRows);
   }
 }
 
