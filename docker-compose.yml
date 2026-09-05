@@ -87,7 +87,7 @@ services:
       - db
 
   backup:
-    image: postgres:17-alpine
+    image: postgres:17
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
