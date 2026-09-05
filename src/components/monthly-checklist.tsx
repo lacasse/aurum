@@ -33,17 +33,25 @@ import {
 import {
   INCOME_CATEGORIES,
   alphabetical,
+  REGISTRATION_LABELS,
+  isInvestmentAccount,
   isLiability,
   isPension,
   sidesFor,
 } from "@/lib/types";
 import { DEBT_CATEGORY } from "@/lib/expenses";
+import {
+  CorporateAction,
+  applyAction,
+  describeAction,
+} from "@/lib/corporate-actions";
 import { contributionsByMonth, estimateValue } from "@/lib/pension";
 
 type Step =
   | "import"
   | "income"
   | "expenses"
+  | "actions"
   | "trades"
   | "pension"
   | "review";
@@ -85,6 +93,13 @@ interface Loaded {
   files: RoutedFile[];
   cash: ImportedRow[];
   trades: TradeRow[];
+  /*
+   * Mergers and demergers found in the files. They were parsed and thrown away
+   * here — only the import page could apply one — so a month closed through
+   * the checklist recorded the sale of shares whose cost base the action had
+   * never moved, and the gain came out of thin air.
+   */
+  actions: CorporateAction[];
   trimmedCash: { older: number; newer: number };
   trimmedTrades: { older: number; newer: number };
 }
@@ -93,6 +108,7 @@ const EMPTY_LOAD: Loaded = {
   files: [],
   cash: [],
   trades: [],
+  actions: [],
   trimmedCash: { older: 0, newer: 0 },
   trimmedTrades: { older: 0, newer: 0 },
 };
@@ -313,6 +329,12 @@ function ImportStep({
       files: [...loaded.files, ...routed],
       cash: [...loaded.cash, ...cash.kept],
       trades: [...loaded.trades, ...trades.kept],
+      /*
+       * Not trimmed to the month. An action dated just outside it still has to
+       * be applied before the sale that follows, or the sale is priced against
+       * a cost base the action was supposed to move.
+       */
+      actions: [...loaded.actions, ...routed.flatMap((r) => r.actions)],
       trimmedCash: {
         older: loaded.trimmedCash.older + cash.older.length,
         newer: loaded.trimmedCash.newer + cash.newer.length,
@@ -716,7 +738,23 @@ function ExpensesStep({
   onRows: (rows: ImportedRow[]) => void;
 }) {
   const userCategories = useFinance((s) => s.categories);
-  const debts = useFinance((s) => s.accounts.filter((a) => isLiability(a.kind)));
+  /*
+   * Selected as the whole array and filtered here, not filtered inside the
+   * selector.
+   *
+   * A selector runs on every store read and its result is compared by
+   * identity, so one that builds a new array hands back something different
+   * every time — the store looks changed, the component re-renders, the
+   * selector runs again. React caught that as "maximum update depth exceeded"
+   * and took the whole page down with it, which is what this step did between
+   * the day the debt question was added and the day someone reached step three
+   * of the checklist.
+   */
+  const allAccounts = useFinance((s) => s.accounts);
+  const debts = useMemo(
+    () => allAccounts.filter((a) => isLiability(a.kind)),
+    [allAccounts],
+  );
 
   const spend = rows.filter((r) => r.type === "expense");
   /*
@@ -877,6 +915,133 @@ function ExpensesStep({
 
 /* ---------- Step 4: Trades ---------- */
 
+/* ---------- Step: mergers and demergers ---------- */
+
+/**
+ * Corporate actions found in the files, before the trades that depend on them.
+ *
+ * Rare enough that the step only exists when a file carried one — an empty
+ * step every month, for something that happens twice a decade, is a step
+ * people learn to click past. But when one does turn up it has to be handled
+ * before the sale in the same file: the action decides what the new shares
+ * cost, and a sale measured against a basis the action never moved reports a
+ * gain that never happened.
+ */
+function ActionsStep({
+  number,
+  total,
+  month,
+  onNext,
+  onBack,
+  actions,
+  onActions,
+}: StepProps & {
+  actions: CorporateAction[];
+  onActions: (a: CorporateAction[]) => void;
+}) {
+  const holdings = useFinance((s) => s.holdings);
+  const accounts = useFinance((s) => s.accounts);
+  const patch = (id: string, change: Partial<CorporateAction>) =>
+    onActions(actions.map((a) => (a.id === id ? { ...a, ...change } : a)));
+
+  const holdingFor = (ticker: string, registration: CorporateAction["registration"]) => {
+    const accountId = registration
+      ? (accounts.find(
+          (a) => isInvestmentAccount(a.kind) && a.registration === registration,
+        )?.id ?? "")
+      : "";
+    return holdings.find(
+      (h) =>
+        h.ticker.toUpperCase() === ticker.toUpperCase() &&
+        (!accountId || h.accountId === accountId),
+    );
+  };
+
+  const included = actions.filter((a) => a.include);
+  const missing = included.filter((a) => !holdingFor(a.from, a.registration));
+
+  return (
+    <StepBody
+      number={number}
+      total={total}
+      title={`Mergers and demergers in ${labelMonth(month)}`}
+      lead="A share of the parent's cost basis follows the new shares — the company publishes the split. Applied before the trades, so a sale afterwards is measured against the basis this leaves behind."
+      onBack={onBack}
+      note={
+        missing.length > 0
+          ? `${missing.map((a) => a.from).join(", ")} — no position found to start from, so ${missing.length === 1 ? "this one" : "these"} cannot be applied.`
+          : undefined
+      }
+      actions={
+        <>
+          <Button variant="ghost" onClick={() => { onActions(actions.map((a) => ({ ...a, include: false }))); onNext(); }}>
+            Skip
+          </Button>
+          <Button onClick={onNext}>
+            Next <ArrowRight size={14} />
+          </Button>
+        </>
+      }
+    >
+      <ul className="space-y-2">
+        {actions.map((a) => {
+          const parent = holdingFor(a.from, a.registration);
+          const applied = applyAction(a, parent);
+          return (
+            <li
+              key={a.id}
+              className={cn(
+                "rounded-lg border border-line bg-elevated/40 p-3",
+                !a.include && "opacity-40",
+              )}
+            >
+              <div className="flex flex-wrap items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={a.include}
+                  onChange={(e) => patch(a.id, { include: e.target.checked })}
+                  aria-label={`Include ${a.from} ${a.kind}`}
+                />
+                <span className="text-xs font-medium">
+                  {a.date} · {a.from} → {a.to}
+                </span>
+                <span className="text-[0.6875rem] text-ink-faint">
+                  {a.registration
+                    ? REGISTRATION_LABELS[a.registration]
+                    : a.registrationRaw}
+                </span>
+                {a.kind === "demerger" && (
+                  <label className="ml-auto flex items-center gap-2 text-[0.6875rem] text-ink-dim">
+                    Cost basis moving
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={a.allocationPct}
+                      onChange={(e) =>
+                        patch(a.id, { allocationPct: Number(e.target.value) || 0 })
+                      }
+                      className="h-7 w-20 py-0 text-right text-[0.6875rem]"
+                      aria-label={`Percentage of ${a.from} cost basis moving to ${a.to}`}
+                    />
+                    %
+                  </label>
+                )}
+              </div>
+              <p className="mt-1.5 text-[0.6875rem] text-ink-faint">
+                {parent
+                  ? describeAction(a, applied?.movedBasis ?? 0)
+                  : `No ${a.from} position found in this account — nothing to move a cost basis from.`}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+    </StepBody>
+  );
+}
+
 function TradesStep({
   number,
   total,
@@ -974,6 +1139,7 @@ function ReviewStep({
   draft,
   cash,
   files,
+  actions,
 }: {
   number: number;
   total: number;
@@ -983,6 +1149,7 @@ function ReviewStep({
   draft: Draft;
   cash: ImportedRow[];
   files: RoutedFile[];
+  actions: CorporateAction[];
 }) {
   const addTransaction = useFinance((s) => s.addTransaction);
   const setMerchantRule = useFinance((s) => s.setMerchantRule);
@@ -999,6 +1166,30 @@ function ReviewStep({
   const [error, setError] = useState("");
 
   const pensions = accounts.filter((a) => isPension(a.kind));
+
+  /*
+   * The action's parent, found in the account it happened in: the same ticker
+   * held elsewhere is a different position with its own cost base, and moving
+   * the wrong one restates a basis nobody touched.
+   */
+  const holdingForAction = (
+    ticker: string,
+    registration: CorporateAction["registration"],
+  ) => {
+    const accountId = registration
+      ? (accounts.find(
+          (a) => isInvestmentAccount(a.kind) && a.registration === registration,
+        )?.id ?? "")
+      : "";
+    return holdings.find(
+      (h) =>
+        h.ticker.toUpperCase() === ticker.toUpperCase() &&
+        (!accountId || h.accountId === accountId),
+    );
+  };
+  const includedActions = actions.filter(
+    (a) => a.include && holdingForAction(a.from, a.registration),
+  );
 
   /**
    * Which account a row of spending came out of.
@@ -1093,6 +1284,16 @@ function ReviewStep({
       count: rules.length,
     });
   }
+  if (includedActions.length > 0) {
+    planned.push({
+      label: "Mergers and demergers",
+      detail: includedActions
+        .map((a) => `${a.from} → ${a.to}`)
+        .join(", ")
+        .concat(", applied before the trades below"),
+      count: includedActions.length,
+    });
+  }
   if (draft.trades) {
     planned.push({
       label: "Trades",
@@ -1162,6 +1363,56 @@ function ReviewStep({
         });
       }
       for (const r of rules) setMerchantRule(r.payee, r.category);
+
+      /*
+       * Corporate actions before trades, always.
+       *
+       * The action decides what the new shares cost, and a sale of them in the
+       * same month is measured against that. Applied afterwards, the sale
+       * would be priced against a basis that did not exist when it happened,
+       * and the gain reported would be one that never occurred.
+       */
+      for (const action of includedActions) {
+        const parent = holdingForAction(action.from, action.registration);
+        const applied = applyAction(action, parent);
+        if (!applied || !parent) continue;
+        if (applied.parent) {
+          updateHolding(parent.id, {
+            ...parent,
+            avgCost: applied.parent.avgCostCAD,
+            // The exact CAD figure, not one re-derived from today's rate: this
+            // basis was fixed when the parent shares were bought.
+            avgCostCADOverride: applied.parent.avgCostCAD,
+            shares: action.kind === "merger" ? 0 : parent.shares,
+          });
+        }
+        const existingChild = holdingForAction(applied.child.ticker, action.registration);
+        if (existingChild) {
+          updateHolding(existingChild.id, {
+            ...existingChild,
+            shares: existingChild.shares + applied.child.shares,
+            avgCost: applied.child.avgCostCAD,
+            avgCostCADOverride: applied.child.avgCostCAD,
+            flows: [...(existingChild.flows ?? []), applied.child.flow],
+          });
+        } else {
+          addHolding({
+            ticker: applied.child.ticker,
+            name: applied.child.ticker,
+            assetClass: parent.assetClass,
+            shares: applied.child.shares,
+            avgCost: applied.child.avgCostCAD,
+            avgCostCADOverride: applied.child.avgCostCAD,
+            // No price of its own yet: the feed fills it in on the next
+            // refresh, and until then what it cost is the best figure there is.
+            price: applied.child.avgCostCAD,
+            dividendsReceived: 0,
+            accountId: parent.accountId,
+            currency: parent.currency,
+            flows: [applied.child.flow],
+          });
+        }
+      }
 
       if (draft.trades) {
         for (const c of draft.trades.batch.changes) {
@@ -1434,6 +1685,7 @@ const STEPS: { key: Step; label: string }[] = [
   { key: "import", label: "Import" },
   { key: "income", label: "Income" },
   { key: "expenses", label: "Expenses" },
+  { key: "actions", label: "Actions" },
   { key: "trades", label: "Trades" },
   { key: "pension", label: "Pension" },
   { key: "review", label: "Save" },
@@ -1498,7 +1750,6 @@ export function MonthlyChecklistModal({
 function Checklist({ onClose }: { onClose: () => void }) {
   // No pension, no step: the checklist should only ask what applies.
   const hasPension = useFinance((s) => s.accounts.some((a) => isPension(a.kind)));
-  const steps = hasPension ? STEPS : STEPS.filter((s) => s.key !== "pension");
   const accounts = useFinance((s) => s.accounts);
   const transactions = useFinance((s) => s.transactions);
 
@@ -1512,6 +1763,17 @@ function Checklist({ onClose }: { onClose: () => void }) {
   const [index, setIndex] = useState(0);
   const [loaded, setLoaded] = useState<Loaded>(EMPTY_LOAD);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  /*
+   * Steps the month does not need are not shown. No pension account, no
+   * pension step; and the mergers step appears only once a file has actually
+   * carried one, which for most months is never. Derived rather than fixed at
+   * the top, because the import that reveals an action is itself step one.
+   */
+  const steps = STEPS.filter(
+    (s) =>
+      (s.key !== "pension" || hasPension) &&
+      (s.key !== "actions" || loaded.actions.length > 0),
+  );
   const at = Math.min(index, steps.length - 1);
   const step = steps[at].key;
   const next = () => setIndex((i) => Math.min(i + 1, steps.length - 1));
@@ -1610,6 +1872,13 @@ function Checklist({ onClose }: { onClose: () => void }) {
           onRows={(cash) => setLoaded((l) => ({ ...l, cash }))}
         />
       )}
+      {step === "actions" && (
+        <ActionsStep
+          {...shared}
+          actions={loaded.actions}
+          onActions={(actions) => setLoaded((l) => ({ ...l, actions }))}
+        />
+      )}
       {step === "trades" && (
         <TradesStep
           {...shared}
@@ -1636,6 +1905,7 @@ function Checklist({ onClose }: { onClose: () => void }) {
           draft={draft}
           cash={loaded.cash}
           files={loaded.files}
+          actions={loaded.actions}
         />
       )}
     </Modal>
