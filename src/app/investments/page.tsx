@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Flame,
   Pencil,
+  Plus,
   RefreshCw,
   TrendingUp,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import {
   Card,
   CardHeader,
   Input,
+  Modal,
   Progress,
   Segmented,
   cn,
@@ -27,7 +29,6 @@ import {
   spectrumAt,
   ExposurePie,
   SeriesChart,
-  SignedHBars,
   TwrChart,
 } from "@/components/charts";
 import { HoldingForm, TradeEntry } from "@/components/forms";
@@ -248,6 +249,7 @@ export default function InvestmentsPage() {
   };
 
   const [formOpen, setFormOpen] = useState(false);
+  const [tradesOpen, setTradesOpen] = useState(false);
   const [editing, setEditing] = useState<Holding | null>(null);
   const [benchmark, setBenchmark] = useState<BenchmarkData | null>(null);
   const [lastPriceUpdate, setLastPriceUpdate] = useState<Date | null>(null);
@@ -514,13 +516,6 @@ export default function InvestmentsPage() {
     const best = [...open]
       .filter((r) => r.mwrr !== null)
       .sort((a, b) => (b.mwrr ?? 0) - (a.mwrr ?? 0))[0];
-    // Independent of the table's sort: the chart shows the ten largest
-    // positions, and should not reshuffle when a column header is clicked.
-    const gainBars = [...open]
-      .sort((a, b) => b.marketValue - a.marketValue)
-      .slice(0, 10)
-      .map((r) => ({ label: r.ticker, gain: r.totalReturn }))
-      .sort((a, b) => b.gain - a.gain);
     return {
       rows,
       closedCount,
@@ -535,7 +530,6 @@ export default function InvestmentsPage() {
       realized,
       dividendsAll,
       best,
-      gainBars,
     };
   }, [holdings, sort, showClosed]);
 
@@ -677,6 +671,9 @@ export default function InvestmentsPage() {
       }
       action={
         <div className="flex items-center gap-2">
+          <Button onClick={() => setTradesOpen(true)}>
+            <Plus size={15} /> Log trades
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -1054,68 +1051,34 @@ export default function InvestmentsPage() {
           </Card>
         )}
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          {/*
-            * The bars fill whatever height the exposure ring beside them sets.
-            *
-            * That card lists a row per open position under its pie, so it runs
-            * to several times the height of ten bars at 34px each — which left
-            * the gain/loss card mostly empty below its shortest bar. Ten bars
-            * spread over the taller box are also easier to read than ten bars
-            * crowded into a third of it.
-            */}
-          <Card className="flex h-full flex-col">
-            <CardHeader
-              title="Gain / loss by position"
-              subtitle="Total return including dividends (top 10)"
-            />
-            {/*
-              * Absolutely positioned inside the growing box, so the chart has
-              * a height to be a percentage *of*. A percentage height against a
-              * flex item whose own height came from its content is circular,
-              * and resolves to nothing; against `inset-0` it is simply the box.
-              * The floor keeps it readable on a narrow screen, where the cards
-              * stack and there is no taller neighbour to match.
-              */}
-            <div className="relative min-h-[340px] flex-1">
-              <div className="absolute inset-0 px-3 pb-4">
-                {data.gainBars.length > 0 ? (
-                  <SignedHBars
-                    data={data.gainBars as unknown as Record<string, unknown>[]}
-                    labelKey="label"
-                    valueKey="gain"
-                    height="100%"
-                    fmt={(n) => fmtCompact(n)}
-                  />
-                ) : (
-                  <p className="py-16 text-center text-xs text-ink-faint">
-                    No data yet.
-                  </p>
-                )}
-              </div>
-            </div>
-          </Card>
-
-          <Card>
-            <CardHeader
-              title="Holdings exposure"
-              subtitle="Every position, largest to smallest"
-            />
-            <div className="px-3 pb-4">
-              {data.exposure.length > 0 ? (
-                <ExposurePie
-                  data={data.exposure}
-                  height={260}
-                  fmt={(n) => fmtCompact(n)}
-                />
-              ) : (
-                <p className="py-16 text-center text-xs text-ink-faint">
-                  Add a holding to see the breakdown.
-                </p>
-              )}
-            </div>
-          </Card>
-        </div>
+        <Card>
+          <CardHeader
+            title="Holdings exposure"
+            subtitle="Every position, largest to smallest"
+          />
+          <div className="px-5 pb-5">
+            {data.exposure.length > 0 ? (
+              /*
+                * The ring and its key side by side across the whole width.
+                *
+                * It shared a row with a gain/loss bar chart that ranked the
+                * same positions by a different measure, and the pair was one
+                * question asked twice — the table below answers both per
+                * holding, with every position rather than the top ten.
+                */
+              <ExposurePie
+                data={data.exposure}
+                height={320}
+                fmt={(n) => fmtCompact(n)}
+                legend="right"
+              />
+            ) : (
+              <p className="py-16 text-center text-xs text-ink-faint">
+                Add a holding to see the breakdown.
+              </p>
+            )}
+          </div>
+        </Card>
 
         {/* Holdings table */}
         <Card>
@@ -1367,7 +1330,7 @@ export default function InvestmentsPage() {
                 {data.rows.length === 0 && (
                   <tr>
                     <td colSpan={11} className="py-12 text-center text-xs text-ink-faint">
-                      No holdings yet — log your first trade below.
+                      No holdings yet — use Log trades above to record your first.
                     </td>
                   </tr>
                 )}
@@ -1375,18 +1338,32 @@ export default function InvestmentsPage() {
             </table>
           </div>
         </Card>
-
-        {/* Batch trade entry */}
-        <Card>
-          <CardHeader
-            title="Log trades"
-            subtitle="Record buys, sells, and dividends. A ticker you have never held asks for its details on submit."
-          />
-          <div className="px-3 pb-4">
-            <TradeEntry onComplete={() => {}} />
-          </div>
-        </Card>
       </div>
+
+      {/*
+        * The batch trade sheet, in a dialog rather than a card at the foot of
+        * the page.
+        *
+        * It is the one thing here that writes rather than reads, and it sat
+        * below a table of every holding — several screens down from the button
+        * that would send you looking for it. Mounted only while open, so each
+        * opening starts on an empty sheet, and closing on completion returns
+        * to the holdings the trade just changed.
+        */}
+      {tradesOpen && (
+        <Modal
+          open
+          onClose={() => setTradesOpen(false)}
+          title="Log trades"
+          size="2xl"
+        >
+          <p className="mb-4 text-xs text-ink-dim">
+            Record buys, sells, and dividends. A ticker you have never held asks
+            for its details on submit.
+          </p>
+          <TradeEntry onComplete={() => setTradesOpen(false)} />
+        </Modal>
+      )}
 
       <HoldingForm
         open={formOpen}
