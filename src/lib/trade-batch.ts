@@ -1,6 +1,7 @@
 import { isCoinTicker } from "./market";
 import { rewardFlows } from "./rewards";
 import type { AssetClass, CashFlow, Currency, Holding } from "./types";
+import { movementApplies } from "./types";
 
 /**
  * What a batch of hand-entered trades does to the portfolio, worked out before
@@ -162,6 +163,13 @@ export function planTrades(
   meta: NewPositionMeta[],
   holdings: Holding[],
   usdCadRate: number,
+  /*
+   * The day each account's balance was last stated by hand. A trade dated on
+   * or before it is already inside that figure, so its cash side is dropped —
+   * the position is still built from it. Defaults to no anchor anywhere, which
+   * is the behaviour every caller had before.
+   */
+  balanceAnchorFor: (accountId: string) => string | null | undefined = () => null,
 ): TradePlan {
   const byTicker = new Map(meta.map((m) => [m.ticker, m]));
   const active = rows.filter((r) => !isBlankTrade(r));
@@ -173,6 +181,10 @@ export function planTrades(
   }
 
   const cashDeltas = new Map<string, number>();
+  const moveCash = (accountId: string, delta: number, onDate: string) => {
+    if (!movementApplies({ balanceAsOf: balanceAnchorFor(accountId) }, onDate)) return;
+    cashDeltas.set(accountId, (cashDeltas.get(accountId) ?? 0) + delta);
+  };
 
   /*
    * A batch can touch the same position on several rows, but `holdings` is a
@@ -226,10 +238,7 @@ export function planTrades(
       const costCad = isUsd ? Number(row.cadAmount) || qty * px * usdCadRate : qty * px;
       // The cash that paid for the shares leaves the account's balance; the
       // shares themselves are valued from the holding.
-      cashDeltas.set(
-        row.accountId,
-        (cashDeltas.get(row.accountId) ?? 0) - Math.abs(costCad),
-      );
+      moveCash(row.accountId, -Math.abs(costCad), row.date);
       const newShares = lot.shares + qty;
       lot.avgCost =
         lot.shares > 0 ? (lot.shares * lot.avgCost + costCad) / newShares : costCad / qty;
@@ -255,10 +264,7 @@ export function planTrades(
       const proceedsCad = isUsd
         ? Number(row.cadAmount) || qty * px * usdCadRate
         : qty * px;
-      cashDeltas.set(
-        row.accountId,
-        (cashDeltas.get(row.accountId) ?? 0) + Math.abs(proceedsCad),
-      );
+      moveCash(row.accountId, Math.abs(proceedsCad), row.date);
       lot.shares -= qty;
       lot.flows.push({
         date: row.date,
@@ -304,10 +310,7 @@ export function planTrades(
       if (!held) {
         return { ok: false, error: `Dividend ${ticker}: no position found to credit.` };
       }
-      cashDeltas.set(
-        row.accountId,
-        (cashDeltas.get(row.accountId) ?? 0) + cadAmount,
-      );
+      moveCash(row.accountId, cadAmount, row.date);
       lot.dividends += cadAmount;
       lot.flows.push({
         date: row.date,
