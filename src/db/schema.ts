@@ -41,6 +41,11 @@ export const accounts = pgTable("accounts", {
   /** Tax treatment; null for kinds where it does not apply. */
   registration: text("registration"),
   /**
+   * The day the balance was last stated by hand. Movements dated on or before
+   * it are already inside that figure and do not move it again.
+   */
+  balanceAsOf: text("balance_as_of"),
+  /**
    * A defined benefit pension's own statement: the annual pension earned so
    * far, and the service that earned it. Null everywhere else.
    */

@@ -64,6 +64,40 @@ export interface Account {
    */
   pensionAnnual?: number;
   pensionService?: number;
+  /**
+   * The date the balance above was last stated by hand, as `YYYY-MM-DD`.
+   *
+   * A balance typed into the account form is a statement about a moment: "this
+   * is what the account held on this day". Everything that happened before it
+   * is already inside that number. Without the date there is no way to know
+   * that, so importing a year of history on top of a freshly-entered balance
+   * subtracted every purchase a second time — which is how two investment
+   * accounts ended up holding negative cash.
+   *
+   * Undefined on accounts nobody has stated by hand; then every dated movement
+   * applies, which is the old behaviour and the right one for an account whose
+   * balance was only ever built up from its transactions.
+   */
+  balanceAsOf?: string | null;
+}
+
+/**
+ * Whether a movement dated `date` still applies to this account's balance.
+ *
+ * False for anything at or before the anchor: that money is already counted in
+ * the figure the user typed. The comparison is inclusive of the anchor day
+ * because a balance stated on a date is the balance at the *end* of it — the
+ * day's own transactions are in it.
+ *
+ * Dateless callers pass undefined and always apply, so a manual entry made in
+ * the app now is never silently dropped.
+ */
+export function movementApplies(
+  account: Pick<Account, "balanceAsOf">,
+  date: string | undefined,
+): boolean {
+  if (!account.balanceAsOf || !date) return true;
+  return date > account.balanceAsOf;
 }
 
 /**
