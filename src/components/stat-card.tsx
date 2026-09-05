@@ -9,6 +9,7 @@ export function StatCard({
   value,
   delta,
   deltaValue,
+  deltaDir,
   deltaLabel,
   icon,
   tone = "neutral",
@@ -21,6 +22,15 @@ export function StatCard({
   delta?: number; // percent
   /** The same move in money, shown beside the percentage. */
   deltaValue?: string;
+  /**
+   * Which way `deltaValue` moved, when it is a move rather than a caption.
+   *
+   * Set it and the figure gets the badge the percentage would have had —
+   * tinted box, arrow, the lot. The direction is separate from the tone on
+   * purpose: spending less is a fall *and* good news, so the arrow points
+   * down while the box stays green.
+   */
+  deltaDir?: "up" | "down";
   deltaLabel?: string;
   icon?: ReactNode;
   tone?: "neutral" | "positive" | "negative";
@@ -44,7 +54,17 @@ export function StatCard({
             {positive ? "▲" : "▼"} {Math.abs(delta).toFixed(1)}%
           </Badge>
         ) : null}
-        {deltaValue ? (
+        {deltaValue && deltaDir ? (
+          <Badge tone={tone === "neutral" ? "neutral" : tone}>
+            {deltaDir === "up" ? "▲" : "▼"}{" "}
+            <span className="tabular-nums">{deltaValue}</span>
+          </Badge>
+        ) : deltaValue ? (
+          /*
+           * No direction given, so this is a caption rather than a move — "3
+           * disposals", "of net worth" — and it stays plain text in the muted
+           * ink rather than pretending to be a change.
+           */
           <span className="text-[0.6875rem] font-medium tabular-nums text-ink-dim">
             {deltaValue}
           </span>
