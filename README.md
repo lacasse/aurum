@@ -364,6 +364,31 @@ row is left alone, because `MA` and `MA.NEO` in one account really are Mastercar
 CDR. And a **repayment is asked which debt it pays**, since that is the one row whose far
 side cannot be guessed — every other expense ends at the merchant.
 
+## Importing a budgeting spreadsheet
+
+A sheet that keeps one row per month and one column per category is a different shape from
+the per-transaction data the app holds, so `scripts/import-monthly-totals.ts` turns each
+non-zero cell into one transaction dated at the month end, with the sheet's own column name
+as the payee. It leaves account balances alone — the totals are history, already reflected
+in what the accounts carry today, and replaying them would count every dollar twice — and
+its ids are derived from month, category and payee, so a second run corrects the same rows
+rather than duplicating them.
+
+```bash
+docker exec -e DATABASE_URL=... aurum-dev \
+  npx tsx scripts/import-monthly-totals.ts rows.json --map my.map.json
+```
+
+Without `--commit` it prints what it would write and changes nothing. `rows.json` is an
+array of `{ date, kind, sheetCategory, amount }`; a negative amount in a spending column is
+money coming back, and lands as income.
+
+The column map is a **separate file you keep outside the repository**. That is the point of
+the flag: a column map is a list of the things one particular person spends money on —
+their lender, their landlord, the people they owe — and it has no business in source
+control. `scripts/monthly-totals.example.json` shows the shape with generic names, and
+`/scripts/*.map.json` is gitignored so your real one cannot be committed by accident.
+
 ## Realized, unrealized, and the cost base
 
 Cost base is **average cost, per account**, and a partial sale disposes of a proportional
