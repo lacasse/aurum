@@ -11,6 +11,7 @@ import {
   HandCoins,
   Landmark,
   LayoutDashboard,
+  Palette,
   Menu,
   Moon,
   Receipt,
@@ -48,6 +49,8 @@ const NAV = [
   { href: "/tax", label: "Tax", icon: Receipt },
   { href: "/import", label: "Import", icon: Upload },
   { href: "/guide", label: "Guide", icon: BookOpen },
+  /* Temporary: the colour-picking bench. Delete this line with the page. */
+  { href: "/colours", label: "Colours", icon: Palette },
 ] as const;
 
 /**

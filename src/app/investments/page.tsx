@@ -1055,23 +1055,44 @@ export default function InvestmentsPage() {
         )}
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <Card>
+          {/*
+            * The bars fill whatever height the exposure ring beside them sets.
+            *
+            * That card lists a row per open position under its pie, so it runs
+            * to several times the height of ten bars at 34px each — which left
+            * the gain/loss card mostly empty below its shortest bar. Ten bars
+            * spread over the taller box are also easier to read than ten bars
+            * crowded into a third of it.
+            */}
+          <Card className="flex h-full flex-col">
             <CardHeader
               title="Gain / loss by position"
               subtitle="Total return including dividends (top 10)"
             />
-            <div className="px-3 pb-4">
-              {data.gainBars.length > 0 ? (
-                <SignedHBars
-                  data={data.gainBars as unknown as Record<string, unknown>[]}
-                  labelKey="label"
-                  valueKey="gain"
-                  height={Math.max(220, data.gainBars.length * 34)}
-                  fmt={(n) => fmtCompact(n)}
-                />
-              ) : (
-                <p className="py-16 text-center text-xs text-ink-faint">No data yet.</p>
-              )}
+            {/*
+              * Absolutely positioned inside the growing box, so the chart has
+              * a height to be a percentage *of*. A percentage height against a
+              * flex item whose own height came from its content is circular,
+              * and resolves to nothing; against `inset-0` it is simply the box.
+              * The floor keeps it readable on a narrow screen, where the cards
+              * stack and there is no taller neighbour to match.
+              */}
+            <div className="relative min-h-[340px] flex-1">
+              <div className="absolute inset-0 px-3 pb-4">
+                {data.gainBars.length > 0 ? (
+                  <SignedHBars
+                    data={data.gainBars as unknown as Record<string, unknown>[]}
+                    labelKey="label"
+                    valueKey="gain"
+                    height="100%"
+                    fmt={(n) => fmtCompact(n)}
+                  />
+                ) : (
+                  <p className="py-16 text-center text-xs text-ink-faint">
+                    No data yet.
+                  </p>
+                )}
+              </div>
             </div>
           </Card>
 
