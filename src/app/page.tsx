@@ -710,7 +710,17 @@ export default function DashboardPage() {
 
         {/* What came in and went out, and where it went */}
         <div className="grid gap-4 lg:grid-cols-3">
-          <Card className="lg:col-span-2">
+          {/*
+            * The chart fills whatever height the donut beside it sets.
+            *
+            * Side by side in a grid the two cards are the same height, and the
+            * donut's card is the taller of the two — its legend is a row per
+            * category. At a fixed 280 the lines sat in the top two thirds of
+            * their card with the rest of it blank. Growing to the row rather
+            * than to a number means the pair stays matched however many
+            * categories the legend ends up listing.
+            */}
+          <Card className="flex h-full flex-col lg:col-span-2">
             <CardHeader
               title="Income vs expenses"
               subtitle={`Monthly cash flow · 12 months through ${monthName}`}
@@ -722,17 +732,27 @@ export default function DashboardPage() {
                 </Link>
               }
             />
-            <div className="px-3 pb-4">
-              <SeriesChart
-                data={data.cf as unknown as Record<string, unknown>[]}
-                xKey="label"
-                series={[
-                  { key: "income", name: "Income", color: "#34d399" },
-                  { key: "expenses", name: "Expenses", color: "#fb7185" },
-                ]}
-                height={280}
-                yFmt={fmtCompact}
-              />
+            {/*
+              * Absolutely positioned inside the growing box, so the chart has
+              * a height to be a percentage *of*. A percentage height against a
+              * flex item whose own height came from its content is circular,
+              * and resolves to nothing; against `inset-0` it is simply the box.
+              * The floor keeps it readable on a narrow screen, where the cards
+              * stack and there is no taller neighbour to match.
+              */}
+            <div className="relative min-h-[280px] flex-1">
+              <div className="absolute inset-0 px-3 pb-4">
+                <SeriesChart
+                  data={data.cf as unknown as Record<string, unknown>[]}
+                  xKey="label"
+                  series={[
+                    { key: "income", name: "Income", color: "#34d399" },
+                    { key: "expenses", name: "Expenses", color: "#fb7185" },
+                  ]}
+                  height="100%"
+                  yFmt={fmtCompact}
+                />
+              </div>
             </div>
           </Card>
 

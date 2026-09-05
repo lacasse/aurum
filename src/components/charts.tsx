@@ -23,6 +23,9 @@ import {
   YAxis,
 } from "recharts";
 import { cn } from "./ui";
+import { accent, spectrumAt } from "@/lib/palette";
+
+export { spectrumAt } from "@/lib/palette";
 
 /**
  * One colour per category, assigned in the order given.
@@ -117,7 +120,7 @@ export function ChartTooltip({
 export function Sparkline({
   data,
   dataKey,
-  color = "var(--brand-strong)",
+  color,
   height = 40,
 }: {
   data: Record<string, unknown>[];
@@ -125,6 +128,7 @@ export function Sparkline({
   color?: string;
   height?: number;
 }) {
+  const stroke = color ?? accent("brand");
   const gid = useId().replace(/[:]/g, "");
   /*
    * Fit the line to its own range rather than to zero.
@@ -149,14 +153,14 @@ export function Sparkline({
         <YAxis hide domain={[low - pad, high + pad]} />
         <defs>
           <linearGradient id={`spark-${gid}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.3} />
-            <stop offset="100%" stopColor={color} stopOpacity={0} />
+            <stop offset="0%" stopColor={stroke} stopOpacity={0.3} />
+            <stop offset="100%" stopColor={stroke} stopOpacity={0} />
           </linearGradient>
         </defs>
         <Area
           type="monotone"
           dataKey={dataKey}
-          stroke={color}
+          stroke={stroke}
           strokeWidth={1.5}
           fill={`url(#spark-${gid})`}
           isAnimationActive={false}
@@ -212,7 +216,12 @@ export function SeriesChart({
   data: Record<string, unknown>[];
   xKey: string;
   series: SeriesDef[];
-  height?: number;
+  /**
+   * A number of pixels, or a percentage of the box this sits in — which is how
+   * a chart in a card beside a taller card grows to meet it rather than
+   * leaving the bottom of its card empty.
+   */
+  height?: number | `${number}%`;
   yFmt?: (n: number) => string;
   xFmt?: (n: number) => string;
   stacked?: boolean;
@@ -495,10 +504,11 @@ export function DonutChart({
 
 /* ---------------- Holdings exposure ---------------- */
 
-/**
- * The spectrum every holding is coloured from.
+/*
+ * The spectrum every holding is coloured from lives in `@/lib/palette`, which
+ * is what the colour-picking page edits. Why this particular ramp:
  *
- * Fourteen anchors, sampled to however many positions there are. It replaced
+ * Thirteen anchors, sampled to however many positions there are. It replaced
  * one hue per asset class with a ramp of shades inside it, which sounded
  * tidier than it looked: a class with seven holdings had to fit seven
  * distinguishable shades of one hue into the range both themes can show, and
@@ -517,28 +527,6 @@ export function DonutChart({
  * identify a slice. That is what the legend and the tooltip are for, and why
  * both name every position.
  */
-const SPECTRUM = [
-  "#0d3b52",
-  "#12657f",
-  "#2a7f8a",
-  "#2e8b6f",
-  "#43a047",
-  "#a8c93a",
-  "#e8c33a",
-  "#f4a12a",
-  "#f2762f",
-  "#ea5765",
-  "#d94f8c",
-  "#b0509f",
-  "#7b56ab",
-] as const;
-
-/** Step `i` of `n` along the spectrum, ends included. */
-export function spectrumAt(i: number, n: number): string {
-  if (n <= 1) return SPECTRUM[Math.floor(SPECTRUM.length / 2)];
-  const at = Math.round((i * (SPECTRUM.length - 1)) / (n - 1));
-  return SPECTRUM[Math.min(at, SPECTRUM.length - 1)];
-}
 
 export type ExposureDatum = {
   ticker: string;
@@ -665,7 +653,7 @@ export function TwrChart({
           type="monotone"
           dataKey="portfolio"
           name="Portfolio"
-          stroke="#22d3ee"
+          stroke={accent("market")}
           strokeWidth={2}
           dot={false}
           activeDot={{ r: 3 }}
@@ -674,7 +662,7 @@ export function TwrChart({
           type="monotone"
           dataKey="benchmark"
           name={benchmarkName}
-          stroke="#f59e0b"
+          stroke={accent("cost")}
           strokeWidth={2}
           dot={false}
           activeDot={{ r: 3 }}
@@ -692,13 +680,18 @@ export function SignedHBars({
   valueKey,
   height = 300,
   fmt,
-  positiveColor = "#34d399",
-  negativeColor = "#fb7185",
+  positiveColor,
+  negativeColor,
 }: {
   data: Record<string, unknown>[];
   labelKey: string;
   valueKey: string;
-  height?: number;
+  /**
+   * A number of pixels, or a percentage of the box this sits in — which is how
+   * a chart in a card beside a taller card grows to meet it rather than
+   * leaving the bottom of its card empty.
+   */
+  height?: number | `${number}%`;
   fmt?: (n: number) => string;
   positiveColor?: string;
   negativeColor?: string;
@@ -734,7 +727,11 @@ export function SignedHBars({
           {data.map((row, i) => (
             <Cell
               key={i}
-              fill={Number(row[valueKey]) >= 0 ? positiveColor : negativeColor}
+              fill={
+              Number(row[valueKey]) >= 0
+                ? (positiveColor ?? accent("positive"))
+                : (negativeColor ?? accent("negative"))
+            }
             />
           ))}
         </Bar>
@@ -760,7 +757,7 @@ export function BudgetVsActual({
       xKey="category"
       bars={[
         { key: "budgeted", name: "Budgeted", color: "#3f3f50" },
-        { key: "spent", name: "Spent", color: "#8b5cf6" },
+        { key: "spent", name: "Spent", color: accent("brand") },
       ]}
       height={height}
       yFmt={fmt}
@@ -782,7 +779,8 @@ export function RadialGauge({
   height?: number;
 }) {
   const clamped = Math.max(0, Math.min(100, pct));
-  const color = pct >= 100 ? "#fb7185" : pct >= 80 ? "#f59e0b" : "#34d399";
+  const color =
+    pct >= 100 ? accent("negative") : pct >= 80 ? accent("cost") : accent("positive");
   return (
     <div className="relative">
       <ResponsiveContainer width="100%" height={height}>
