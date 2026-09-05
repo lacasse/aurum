@@ -39,11 +39,9 @@ import {
   NET_WORTH_CLASSES,
   type NetWorthClass,
   portfolioSeries,
-  stackedSpend,
 } from "@/lib/analytics";
 import {
   fmtCompact,
-  fmtSignedCAD,
   fmtCAD,
   labelMonth,
   lastCompleteMonthKey,
@@ -90,38 +88,37 @@ const CLASS_COLORS: Record<NetWorthClass, string> = {
  */
 const BAND_ORDER: NetWorthClass[] = ["Cash", "Bonds", "Pension", "Stocks", "Crypto"];
 
-/**
- * The band that carries whatever the named categories do not.
- *
- * A share chart has to total a hundred, and five categories are not a month.
- * Drawn in the muted ink rather than a sixth hue, so it reads as the remainder
- * it is and never competes with a category for attention.
- */
-const OTHER_BAND = "Everything else";
-
 /** How much of the net worth history to draw: months, or the whole record. */
 type Range = "12" | "60" | "all";
 
 /**
  * A year-over-year move for one of the average-month figures.
  *
- * Percent only when there is a positive figure to be a percent *of*: a change
- * from minus two hundred to plus fifty is a real improvement and "−125%" says
- * nothing true about it, so the money is the answer there. `good` is which
- * direction is the welcome one — spending more is not an improvement.
+ * Money only, no percentage. A change from minus two hundred to plus fifty is
+ * a real improvement and "−125%" says nothing true about it, and the pair of
+ * them side by side was two readings of one move. The colour carries what the
+ * badge used to. `good` is which direction is the welcome one — spending more
+ * is not an improvement.
  */
 function yearOverYear(
   now: number,
   before: number | undefined,
   good: "up" | "down",
-): { delta?: number; deltaValue: string; tone: "positive" | "negative" | "neutral" } {
+): {
+  deltaValue: string;
+  deltaDir?: "up" | "down";
+  tone: "positive" | "negative" | "neutral";
+} {
   if (before === undefined) return { deltaValue: "", tone: "neutral" };
   const change = roundMoney(now - before);
   const rose = change >= 0;
   const tone = change === 0 ? "neutral" : (rose === (good === "up") ? "positive" : "negative");
+  /*
+   * Unsigned: the arrow on the badge is the sign, and "▲ +$420" says it twice.
+   */
   return {
-    delta: before > 0 ? (change / before) * 100 : undefined,
-    deltaValue: fmtSignedCAD(change),
+    deltaValue: fmtCAD(Math.abs(change)),
+    deltaDir: rose ? "up" : "down",
     tone,
   };
 }
@@ -202,14 +199,10 @@ export default function DashboardPage() {
      * lands in it and the breakdown is about that, not about you — and the
      * average is also what the four cards above it report.
      *
-     * The stacked chart below is the same twelve months seen month by month,
-     * so both take their categories from this one ranking: same order, same
-     * colours, and the legend beside the donut serves the pair.
+     * One ranking for the order and the colours the donut is drawn in.
      */
     const spend = avgSpendByCategory(transactions, 12, through);
     const catColors = categoryColors(spend.map((c) => c.name));
-    const topCats = spend.slice(0, 5).map((c) => c.name);
-    const stacked = stackedSpend(transactions, topCats, 12, through);
     /*
      * Net worth and the portfolio on one set of months.
      *
@@ -263,42 +256,13 @@ export default function DashboardPage() {
       through,
     ).length;
 
-    /*
-     * The same twelve months as shares of what was spent in each.
-     *
-     * Five categories do not add up to a month, so the rest of the month is
-     * carried as one band rather than left out — without it the stack would
-     * total whatever those five happened to be, which is not a share of
-     * anything. It comes from the cash-flow series, which is the same window
-     * and the same definition of an expense.
-     */
-    const expensesByMonth = new Map(cf.map((m) => [m.key, m.expenses]));
-    const spendMix = stacked.map((row) => {
-      const key = String(row.key);
-      const named = topCats.reduce((sum, c) => sum + Number(row[c] ?? 0), 0);
-      const total = expensesByMonth.get(key) ?? named;
-      const other = Math.max(0, total - named);
-      const out: Record<string, string | number> = {
-        key,
-        label: String(row.label),
-      };
-      for (const c of topCats) {
-        out[c] = total > 0 ? (Number(row[c] ?? 0) / total) * 100 : 0;
-      }
-      out[OTHER_BAND] = total > 0 ? (other / total) * 100 : 0;
-      return out;
-    });
-
     return {
       through,
       snapshotGaps: gaps,
-      spendMix,
       nwAll,
       cf,
       spend,
       catColors,
-      stacked,
-      topCats,
       port,
       byClass,
       avg,
@@ -368,6 +332,13 @@ export default function DashboardPage() {
       ? null
       : nwLast.liabilities - nwPrev.liabilities;
 
+  /*
+   * Cash as a share of net worth. Against net worth rather than assets, so it
+   * answers "how much of what I am worth is spendable" — and null when net
+   * worth is zero or negative, where a share of it means nothing.
+   */
+  const cashShare = nwLast.net > 0 ? (nwLast.assets / nwLast.net) * 100 : null;
+
   const prev = data.avg.previous;
   /*
    * Two ratios that need no window of their own: both read the twelve-month
@@ -383,19 +354,20 @@ export default function DashboardPage() {
     uncommittedLiquid: yearOverYear(data.avg.uncommittedLiquid, prev?.uncommittedLiquid, "up"),
     passive: yearOverYear(data.avg.passive, prev?.passive, "up"),
     /*
-     * A rate is already a percentage, so the change is in points and the
-     * "percent of a percent" a ratio would give is not a thing anybody wants.
+     * A rate is already a percentage, so the change is the difference between
+     * the two rates — the "percent of a percent" a ratio would give is not a
+     * thing anybody wants.
      */
     savings:
       saved !== null && savedBefore !== null
         ? {
-            delta: undefined,
-            deltaValue: `${savedBefore <= saved ? "+" : ""}${(saved - savedBefore).toFixed(1)} pts`,
+            deltaValue: `${Math.abs(saved - savedBefore).toFixed(1)}%`,
+            deltaDir: (saved >= savedBefore ? "up" : "down") as "up" | "down",
             tone: (saved >= savedBefore ? "positive" : "negative") as
               | "positive"
               | "negative",
           }
-        : { delta: undefined, deltaValue: "", tone: "neutral" as const },
+        : { deltaValue: "", deltaDir: undefined, tone: "neutral" as const },
   };
 
   const fi = fiProgress(nwLast.net, data.avg.expenses, Number(rate) || DEFAULT_WITHDRAWAL_RATE);
@@ -416,7 +388,7 @@ export default function DashboardPage() {
       }
     >
       <div className="space-y-4">
-        <SectionHeading title="Net worth" note="what you own, as it stands today" />
+        <SectionHeading title="Net worth" note="what you own" />
 
         {/* What net worth is made of */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -454,7 +426,10 @@ export default function DashboardPage() {
             label="Debt"
             value={fmtCAD(nwLast.liabilities)}
             deltaValue={
-              debtDelta === null ? undefined : fmtSignedCAD(debtDelta)
+              debtDelta === null ? undefined : fmtCAD(Math.abs(debtDelta))
+            }
+            deltaDir={
+              debtDelta === null ? undefined : debtDelta >= 0 ? "up" : "down"
             }
             deltaLabel={debtDelta === null ? "nothing owed" : "vs last month"}
             tone={debtDelta !== null && debtDelta > 0 ? "negative" : "positive"}
@@ -464,9 +439,12 @@ export default function DashboardPage() {
             sparkColor="#fb7185"
           />
           <StatCard
-            label="Cash and accounts"
+            label="Cash"
             value={fmtCAD(nwLast.assets)}
-            deltaLabel="balances you can draw on"
+            deltaValue={cashShare === null ? undefined : `${cashShare.toFixed(1)}%`}
+            deltaLabel={
+              cashShare === null ? "balances you can draw on" : "of net worth"
+            }
             tone={nwLast.assets >= 0 ? "neutral" : "negative"}
             icon={<Banknote size={16} />}
             spark={spark.map((p) => ({ v: p.assets }))}
@@ -540,12 +518,7 @@ export default function DashboardPage() {
         {/* The whole record, in one chart */}
         <Card>
             <CardHeader
-              title="Net worth"
-              subtitle={
-                nwLast.pension > 0
-                  ? `${fmtCAD(nwLast.assets)} cash + ${fmtCAD(nwLast.portfolio)} portfolio + ${fmtCAD(nwLast.pension)} pension − ${fmtCAD(nwLast.liabilities)} debt`
-                  : `${fmtCAD(nwLast.assets)} cash + ${fmtCAD(nwLast.portfolio)} portfolio − ${fmtCAD(nwLast.liabilities)} debt`
-              }
+              title="Net worth over time"
               action={
                 <div className="flex items-center gap-2">
                   <Segmented<Range>
@@ -586,11 +559,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader
             title="Net worth composition"
-            subtitle={`Share of everything you own, month by month${
-              bandsLast && bandsLast.liabilities > 0
-                ? ` · ${fmtCAD(bandsLast.liabilities)} of debt sits outside this`
-                : ""
-            }`}
+            subtitle="Share of everything you own, month by month"
           />
           {/*
             * Shares, not dollars.
@@ -674,11 +643,11 @@ export default function DashboardPage() {
         {/* How the months average out */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <StatCard
-            label="Monthly income"
+            label="Monthly net income"
             value={fmtCAD(data.avg.income)}
-            delta={yoy.income.delta}
             deltaValue={yoy.income.deltaValue}
-            deltaLabel="vs the year before"
+            deltaDir={yoy.income.deltaDir}
+            deltaLabel="vs last year"
             tone={yoy.income.tone}
             icon={<ArrowDownRight size={16} className="text-positive" />}
             spark={data.avg.series.map((p) => ({ v: p.income }))}
@@ -688,9 +657,9 @@ export default function DashboardPage() {
           <StatCard
             label="Monthly expenses"
             value={fmtCAD(data.avg.expenses)}
-            delta={yoy.expenses.delta}
             deltaValue={yoy.expenses.deltaValue}
-            deltaLabel="vs the year before"
+            deltaDir={yoy.expenses.deltaDir}
+            deltaLabel="vs last year"
             tone={yoy.expenses.tone}
             icon={<ArrowUpRight size={16} className="text-negative" />}
             spark={data.avg.series.map((p) => ({ v: p.expenses }))}
@@ -700,9 +669,9 @@ export default function DashboardPage() {
           <StatCard
             label="Monthly uncommitted liquid cash flow"
             value={fmtCAD(data.avg.uncommittedLiquid)}
-            delta={yoy.uncommittedLiquid.delta}
             deltaValue={yoy.uncommittedLiquid.deltaValue}
-            deltaLabel="vs the year before"
+            deltaDir={yoy.uncommittedLiquid.deltaDir}
+            deltaLabel="vs last year"
             tone={yoy.uncommittedLiquid.tone}
             icon={<PiggyBank size={16} />}
             spark={data.avg.series.map((p) => ({ v: p.uncommittedLiquid }))}
@@ -712,9 +681,9 @@ export default function DashboardPage() {
           <StatCard
             label="Monthly passive income"
             value={fmtCAD(data.avg.passive)}
-            delta={yoy.passive.delta}
             deltaValue={yoy.passive.deltaValue}
-            deltaLabel="vs the year before"
+            deltaDir={yoy.passive.deltaDir}
+            deltaLabel="vs last year"
             tone={yoy.passive.tone}
             icon={<Coins size={16} />}
             spark={data.avg.series.map((p) => ({ v: p.passive }))}
@@ -724,9 +693,9 @@ export default function DashboardPage() {
           <StatCard
             label="Savings rate"
             value={saved === null ? "—" : `${saved.toFixed(1)}%`}
-            delta={yoy.savings.delta}
             deltaValue={yoy.savings.deltaValue}
-            deltaLabel="vs the year before"
+            deltaDir={yoy.savings.deltaDir}
+            deltaLabel="vs last year"
             tone={yoy.savings.tone}
             icon={<Gauge size={16} />}
           />
@@ -735,7 +704,6 @@ export default function DashboardPage() {
             value={runway === null ? "—" : `${runway.toFixed(1)} mo`}
             deltaValue={fmtCAD(nwLast.assets)}
             deltaLabel="of cash, against a month's spending"
-            tone={runway !== null && runway < 3 ? "negative" : "neutral"}
             icon={<Timer size={16} />}
           />
         </div>
@@ -759,8 +727,8 @@ export default function DashboardPage() {
                 data={data.cf as unknown as Record<string, unknown>[]}
                 xKey="label"
                 series={[
-                  { key: "income", name: "Income", color: "#34d399", kind: "line" },
-                  { key: "expenses", name: "Expenses", color: "#fb7185", kind: "line" },
+                  { key: "income", name: "Income", color: "#34d399" },
+                  { key: "expenses", name: "Expenses", color: "#fb7185" },
                 ]}
                 height={280}
                 yFmt={fmtCompact}
@@ -792,83 +760,6 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* Category trend */}
-        <Card>
-          <CardHeader
-            title="Spending by category"
-            subtitle={`Share of each month's spending · top five categories · 12 months through ${monthName}`}
-          />
-          <div className="px-3 pb-4">
-            {/*
-              * A hundred percent stacked, as lines.
-              *
-              * In dollars this was a chart of how much a month cost with the
-              * categories as texture inside it — the same thing the totals
-              * above already say. As shares it answers the question the card
-              * is titled with: what the spending was made of, and which way
-              * that is drifting. Recharts stacks areas and not lines, since a
-              * `Line` ignores `stackId`, so this is an area chart with the
-              * fill taken away and each category read as the distance from
-              * its line to the one below.
-              *
-              * Faded at zero for the same reason the composition chart is: a
-              * category with nothing in a month still has a place in the
-              * stack, so it drew a flat line along its neighbour for every
-              * month it was empty. Travel is missing from five of the last
-              * twelve.
-              */}
-            <SeriesChart
-              data={data.spendMix as unknown as Record<string, unknown>[]}
-              xKey="label"
-              stacked
-              strokeOnly
-              fadeAtZero
-              series={[...data.topCats, OTHER_BAND].map((cat) => ({
-                key: cat,
-                name: cat,
-                color: cat === OTHER_BAND ? "var(--ink-faint)" : data.catColors[cat],
-              }))}
-              height={280}
-              yDomain={[0, 100]}
-              yFmt={(n) => `${Math.round(n)}%`}
-            />
-          </div>
-          {/*
-            * The same legend the composition chart carries. Five stacked lines
-            * and no key is five colours nobody can name — and the figure beside
-            * each one is what the chart cannot show anyway, since a band is
-            * measured against the line below it rather than against zero.
-            */}
-          <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
-            {[...data.topCats, OTHER_BAND].map((cat) => {
-              const avg =
-                cat === OTHER_BAND
-                  ? totalSpend - data.topCats.reduce(
-                      (sum, c) => sum + (data.spend.find((x) => x.name === c)?.value ?? 0),
-                      0,
-                    )
-                  : (data.spend.find((c) => c.name === cat)?.value ?? 0);
-              return (
-                <div key={cat} className="flex items-baseline gap-2">
-                  <span
-                    className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
-                    style={{
-                      background:
-                        cat === OTHER_BAND ? "var(--ink-faint)" : data.catColors[cat],
-                    }}
-                  />
-                  <span className="text-[0.6875rem] text-ink-faint">{cat}</span>
-                  <span className="text-sm font-semibold tabular-nums">
-                    {fmtCAD(avg)}
-                  </span>
-                  <span className="text-[0.6875rem] tabular-nums text-ink-faint">
-                    {totalSpend > 0 ? `${Math.round((avg / totalSpend) * 100)}%` : "—"}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
       </div>
 
       <MonthlyChecklistModal open={checklistOpen} onClose={() => setChecklistOpen(false)} />
