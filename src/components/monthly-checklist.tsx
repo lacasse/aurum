@@ -1440,6 +1440,8 @@ function ReviewStep({
           meta,
           useFinance.getState().holdings,
           useFinance.getState().usdCadRate,
+          (id) =>
+            useFinance.getState().accounts.find((a) => a.id === id)?.balanceAsOf ?? null,
         );
         if (replanned.ok) batch = replanned.batch;
       }

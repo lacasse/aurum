@@ -120,6 +120,9 @@ export const accountSchema = z.object({
   // has been read: absent is the normal case, not a missing value.
   pensionAnnual: z.coerce.number().finite().nonnegative().optional().catch(undefined),
   pensionService: z.coerce.number().finite().nonnegative().optional().catch(undefined),
+  // The day the balance was last stated by hand. Null, not absent, is the
+  // normal case: most accounts are only ever built up from their transactions.
+  balanceAsOf: z.string().regex(DATE).nullish().catch(null),
 });
 
 /**
