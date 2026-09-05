@@ -121,3 +121,72 @@ describe("describeAction", () => {
     assert.match(text, /800\.00/);
   });
 });
+
+describe("an action and a trade on the same position", () => {
+  /*
+   * The bug this guards: a demerger reduces the parent's cost base, and a
+   * dividend on that same parent in the same import was planned against the
+   * holdings as they were *before* the action. Writing that plan afterwards
+   * restored the parent's old basis, while the child kept the basis the action
+   * had moved to it — so the two together held more cost than the position ever
+   * had. On real data that invented $455 of cost base out of nothing.
+   *
+   * The fix is ordering: whatever plans the trades has to see the positions the
+   * actions left behind. This asserts the arithmetic that makes that visible.
+   */
+  const spgi: Holding = {
+    id: "p1",
+    ticker: "SPGI",
+    name: "S&P Global",
+    assetClass: "US Equity",
+    shares: 16,
+    avgCost: 580.541265,
+    price: 443.47,
+    history: [],
+    dividendsReceived: 0,
+    accountId: "rrsp",
+    currency: "USD",
+    priceCAD: 443.47,
+    avgCostCAD: 580.541265,
+    dividendsReceivedCAD: 0,
+    historyCAD: [],
+    flows: [],
+  } as Holding;
+
+  const action: CorporateAction = {
+    id: "a1",
+    kind: "demerger",
+    date: "2026-07-01",
+    from: "SPGI",
+    to: "MBGL",
+    shares: 16,
+    registration: "RRSP",
+    registrationRaw: "RRSP",
+    allocationPct: 4.9004,
+    include: true,
+    sourceFile: "acts.csv",
+  };
+
+  test("cost basis is conserved: what leaves the parent is what reaches the child", () => {
+    const before = spgi.shares * spgi.avgCostCAD;
+    const applied = applyAction(action, spgi);
+    assert.ok(applied);
+    assert.ok(applied.parent);
+    const parentAfter = applied.parent.avgCostCAD * spgi.shares;
+    const childAfter = applied.child.avgCostCAD * applied.child.shares;
+    // Within a cent of rounding, nothing is created and nothing is lost.
+    assert.ok(
+      Math.abs(before - (parentAfter + childAfter)) < 0.05,
+      `basis before ${before}, after ${parentAfter} + ${childAfter}`,
+    );
+  });
+
+  test("the parent's basis actually comes down", () => {
+    const applied = applyAction(action, spgi);
+    assert.ok(applied?.parent);
+    assert.ok(
+      applied.parent.avgCostCAD < spgi.avgCostCAD,
+      "a demerger that leaves the parent untouched has created cost from nothing",
+    );
+  });
+});

@@ -39,6 +39,7 @@ import {
   describeAction,
 } from "@/lib/corporate-actions";
 import {
+  Holding,
   INCOME_CATEGORIES,
   alphabetical,
   REGISTRATION_LABELS,
@@ -297,29 +298,53 @@ export default function ImportPage() {
      * yet.
      */
     let actionsApplied = 0;
+    /*
+     * The positions as the actions leave them.
+     *
+     * `holdings` is the render's snapshot, and the trade accumulator below
+     * reads it — so an action that reduced a parent's cost base was overwritten
+     * a moment later by any trade or dividend on that same parent in the same
+     * import, and the basis it had moved to the child was left in both places.
+     * A demerger out of a position that also paid a dividend that month
+     * therefore created cost out of nothing. The accumulator gets this array
+     * instead, so it starts from what the actions actually produced.
+     */
+    const afterActions = [...holdings];
+    const replace = (h: Holding) => {
+      const i = afterActions.findIndex((x) => x.id === h.id);
+      if (i >= 0) afterActions[i] = h;
+      else afterActions.push(h);
+    };
     for (const action of actions.filter((a) => a.include)) {
       const parent = holdingFor(action.from, action.registration);
       const applied = applyAction(action, parent);
       if (!applied || !parent) continue;
       if (applied.parent) {
-        updateHolding(parent.id, {
+        const next = {
           ...parent,
           avgCost: applied.parent.avgCostCAD,
           // The exact CAD figure, not one re-derived from today's rate: this
           // basis was fixed when the parent shares were bought.
-          avgCostCADOverride: applied.parent.avgCostCAD,
+          avgCostCAD: applied.parent.avgCostCAD,
           shares: action.kind === "merger" ? 0 : parent.shares,
-        });
+        };
+        updateHolding(parent.id, { ...next, avgCostCADOverride: applied.parent.avgCostCAD });
+        replace(next);
       }
       const existingChild = holdingFor(applied.child.ticker, action.registration);
       if (existingChild) {
-        updateHolding(existingChild.id, {
+        const next = {
           ...existingChild,
           shares: existingChild.shares + applied.child.shares,
           avgCost: applied.child.avgCostCAD,
-          avgCostCADOverride: applied.child.avgCostCAD,
+          avgCostCAD: applied.child.avgCostCAD,
           flows: [...(existingChild.flows ?? []), applied.child.flow],
+        };
+        updateHolding(existingChild.id, {
+          ...next,
+          avgCostCADOverride: applied.child.avgCostCAD,
         });
+        replace(next);
       } else {
         addHolding({
           ticker: applied.child.ticker,
@@ -343,7 +368,7 @@ export default function ImportPage() {
     const { positions, cashDeltas, transfers } = accumulatePositions(
       includedTrades,
       accountIdFor,
-      holdings,
+      afterActions,
     );
     let created = 0;
     let updated = 0;
