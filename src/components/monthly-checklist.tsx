@@ -45,6 +45,7 @@ import {
   applyAction,
   describeAction,
 } from "@/lib/corporate-actions";
+import { planTrades } from "@/lib/trade-batch";
 import { contributionsByMonth, estimateValue } from "@/lib/pension";
 
 type Step =
@@ -1414,8 +1415,37 @@ function ReviewStep({
         }
       }
 
-      if (draft.trades) {
-        for (const c of draft.trades.batch.changes) {
+      /*
+       * The trades are re-planned against the positions the actions left.
+       *
+       * The batch was worked out on the trades step, from the holdings as they
+       * were before any action ran — so writing it as planned would overwrite a
+       * parent whose cost base an action had just reduced, leaving the basis it
+       * moved to the child in both places. A demerger out of a position that
+       * also paid a dividend that month created cost out of nothing.
+       *
+       * The new positions the batch opens carry their own name and class, so
+       * the details a re-plan needs come back off the batch rather than being
+       * asked for again. If the re-plan fails the original batch still stands:
+       * a month written from slightly stale numbers is a smaller problem than
+       * a month not written at all.
+       */
+      let batch = draft.trades?.batch ?? null;
+      if (draft.trades && includedActions.length > 0) {
+        const meta = draft.trades.batch.changes
+          .filter((c) => !c.existing)
+          .map((c) => ({ ticker: c.ticker, name: c.name, assetClass: c.assetClass }));
+        const replanned = planTrades(
+          draft.trades.rows,
+          meta,
+          useFinance.getState().holdings,
+          useFinance.getState().usdCadRate,
+        );
+        if (replanned.ok) batch = replanned.batch;
+      }
+
+      if (batch) {
+        for (const c of batch.changes) {
           if (c.existing) {
             updateHolding(c.existing.id, {
               ...c.existing,
@@ -1439,7 +1469,7 @@ function ReviewStep({
             });
           }
         }
-        for (const { accountId, delta } of draft.trades.batch.cash) {
+        for (const { accountId, delta } of batch.cash) {
           adjustAccountCash(accountId, delta);
         }
       }
