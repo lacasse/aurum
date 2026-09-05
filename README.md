@@ -161,8 +161,16 @@ docker exec finance-backup-1 sh -c 'ls -la /backups/'
 Take a **manual backup before any risky operation** (schema change, reset, volume work):
 
 ```bash
-docker exec finance-backup-1 /bin/sh -c 'cd /backups && STAMP=$(date -u +%Y%m%dT%H%M%SZ) && PGPASSWORD=aurum pg_dump -h db -U aurum -d aurum --no-owner --no-privileges | gzip > aurum_${STAMP}.sql.gz'
+docker exec finance-backup-1 /bin/sh /backup.sh once
 ```
+
+That runs the scheduled dump's own code path rather than a second one written for the
+occasion, which matters more than it sounds: it encrypts when `BACKUP_ENCRYPTION_KEY` is
+set, applies the same integrity checks, prunes to retention, and exits non-zero if the
+dump does not verify — so a script that backs up before doing something dangerous can
+stop when the backup fails. A hand-typed `pg_dump` gets none of that and writes the whole
+database in the clear; if you need a copy outside the volume, take one this way and
+`docker cp` the encrypted file out.
 
 **Restore** a backup (reload a dump from the `backups` volume into the DB):
 
