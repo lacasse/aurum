@@ -5,7 +5,12 @@ import { Banknote, Coins, HandCoins } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardHeader, EmptyState, Segmented, cn } from "@/components/ui";
-import { GroupedBars, Sparkline, categoryColors } from "@/components/charts";
+import {
+  GroupedBars,
+  Sparkline,
+  categoryColors,
+  spectrumAt,
+} from "@/components/charts";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import { incomeBySource, PASSIVE_INCOME_CATEGORIES } from "@/lib/analytics";
@@ -139,7 +144,13 @@ export default function IncomePage() {
               ),
             }))}
             sparkKey="v"
-            sparkColor="#34d399"
+            /*
+             * The palette's own single colour — what `spectrumAt` gives a
+             * series of one. The green here before came from a categorical set
+             * that no longer exists anywhere else in the app, so the two cards
+             * were drawn in colours the charts below could never produce.
+             */
+            sparkColor={spectrumAt(0, 1)}
           />
           <StatCard
             label="Spendable per month"
@@ -174,13 +185,18 @@ export default function IncomePage() {
               ),
             }))}
             sparkKey="v"
-            sparkColor="#e8c33a"
+            /* The colour the same figures wear in the chart below. */
+            sparkColor={
+              data.passiveSources.length > 0
+                ? colors[data.passiveSources[0].category]
+                : spectrumAt(0, 1)
+            }
           />
         </div>
 
         <Card>
           <CardHeader
-            title="Month by month"
+            title="Income month by month"
             subtitle={`Every kind of income · ${breakdown.windowMonths} months through ${labelMonth(through)}`}
           />
           <div className="px-3 pb-4">

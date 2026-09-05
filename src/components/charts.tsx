@@ -504,6 +504,12 @@ export function DonutChart({
  * distinguishable shades of one hue into the range both themes can show, and
  * the small ones ended up as near-identical slivers of the same colour.
  *
+ * It ends at violet rather than carrying on to blue. A spectrum whose two ends
+ * are both cool does not read as a sweep when there are only a handful of
+ * slices: four categories came out navy, green, red, blue, which looks like a
+ * set that doubled back rather than a rainbow. Ending one step early, the same
+ * four are navy, green, orange, violet.
+ *
  * Colour now says which holding, and nothing else — the class is a tag in the
  * legend beside it. The honest trade is that neighbouring steps of any
  * spectrum are close: this one's worst adjacent pair measures ΔE 8.2 with full
@@ -525,7 +531,6 @@ const SPECTRUM = [
   "#d94f8c",
   "#b0509f",
   "#7b56ab",
-  "#3f5ea8",
 ] as const;
 
 /** Step `i` of `n` along the spectrum, ends included. */
