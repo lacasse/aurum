@@ -17,7 +17,7 @@
 #   scripts/check-no-personal-figures.sh            scan tracked files
 #   scripts/check-no-personal-figures.sh --staged   scan staged changes + message
 #
-# What counts is a comma-grouped currency figure -- [figure redacted] and up. Below a
+# What counts is a comma-grouped currency figure -- one thousand and up. Below a
 # thousand there is nothing identifying; above it, a precise amount is almost
 # always copied from something real.
 #
