@@ -780,9 +780,16 @@ export function annualized(cumulativePct: number, months: number): number | null
 }
 
 export interface SimpleReturn {
-  /** Everything paid in, over every recorded buy. */
+  /**
+   * Money that actually went in: every buy, less the sale proceeds that paid
+   * for the later ones.
+   */
   contributed: number;
-  /** Everything that came back: sales and dividends. */
+  /** Gross purchases, before the recycling is netted off. */
+  grossBought: number;
+  /** Sale proceeds, which funded part of what was bought. */
+  grossSold: number;
+  /** What came back without selling anything: dividends and priced rewards. */
   returned: number;
   /** What is still held, at today's prices. */
   held: number;
@@ -791,28 +798,52 @@ export interface SimpleReturn {
 }
 
 /**
- * The plainest answer: everything in against everything out.
+ * The plainest answer: what you put in against what it is worth.
  *
- * No dates, no weighting — what was paid in, what came back, and what is still
- * held. It is the figure a bank statement would give you, and it ignores time
- * completely: the same 10% looks identical whether it took five months or five
- * years. That blindness is exactly why the other two measures exist, and why
- * showing it beside them explains them better than either does alone.
+ * No dates, no weighting. It ignores time completely — the same 10% looks
+ * identical whether it took five months or five years — and that blindness is
+ * exactly why the other two measures exist beside it.
+ *
+ * What it must not ignore is where the money came from. Summing every buy
+ * counts the same dollar again every time it is reinvested: sell a position,
+ * buy another with the proceeds, and gross purchases grow while nothing new
+ * has been contributed. On a portfolio that has been traded for years that is
+ * not a small distortion — here it read $946,990 of purchases against $623,345
+ * actually put in, and quoted the return over the larger number, which flatters
+ * a loss and understates a gain by the same mechanism.
+ *
+ * So sale proceeds are netted off what was bought. The gain is identical
+ * either way; only the denominator changes, and this is the one that answers
+ * the question the card asks.
+ *
+ * Dividends stay on the other side. They are a return on the money rather than
+ * a source of it, and netting them off contributions would hide them.
  */
 export function simpleReturn(holdings: Holding[], marketValue: number): SimpleReturn {
-  let contributed = 0;
+  let grossBought = 0;
+  let grossSold = 0;
   let returned = 0;
   for (const h of holdings) {
     for (const f of h.flows) {
-      if (f.kind === "buy") contributed += f.amount;
+      if (f.kind === "buy") grossBought += f.amount;
+      else if (f.kind === "sell") grossSold += f.amount;
       else returned += f.amount;
     }
   }
-  contributed = roundMoney(contributed);
+  grossBought = roundMoney(grossBought);
+  grossSold = roundMoney(grossSold);
   returned = roundMoney(returned);
+  /*
+   * Floored at zero: a portfolio that has returned more than it was ever given
+   * has no meaningful "amount invested" left to divide by, and a negative
+   * denominator would flip the sign of the answer rather than fail visibly.
+   */
+  const contributed = roundMoney(Math.max(0, grossBought - grossSold));
   const held = roundMoney(marketValue);
   return {
     contributed,
+    grossBought,
+    grossSold,
     returned,
     held,
     pct: contributed > 0 ? ((returned + held - contributed) / contributed) * 100 : null,

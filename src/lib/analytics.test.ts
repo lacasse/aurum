@@ -1729,7 +1729,13 @@ describe("overMonths", () => {
 describe("simpleReturn", () => {
   const holding = (flows: unknown[]): Holding => ({ ticker: "A", flows } as unknown as Holding);
 
-  test("in against out and what is still held", () => {
+  test("sale proceeds are netted off what was bought", () => {
+    /*
+     * $1,000 went in and $300 came back out, so $700 is at risk — not $1,000.
+     * Dividing by the gross figure was the bug: it read a real portfolio as
+     * $946,990 invested when $623,345 had been put in, the rest being the same
+     * money reinvested.
+     */
     const r = simpleReturn(
       [holding([
         { date: "2024-01-01", kind: "buy", amount: 1000, shares: 10 },
@@ -1737,10 +1743,48 @@ describe("simpleReturn", () => {
       ])],
       900,
     );
-    assert.equal(r.contributed, 1000);
-    assert.equal(r.returned, 300);
+    assert.equal(r.contributed, 700);
+    assert.equal(r.grossBought, 1000);
+    assert.equal(r.grossSold, 300);
     assert.equal(r.held, 900);
-    assert.equal(r.pct, 20, "300 back plus 900 held on 1000 in");
+    assert.ok(Math.abs(r.pct! - 28.5714) < 0.001, "900 held on 700 in");
+  });
+
+  test("money recycled through a sale is not new capital", () => {
+    /*
+     * Sell one position, buy another with the proceeds. Gross purchases double;
+     * nothing further was contributed, and the return must not be quoted over
+     * the larger number.
+     */
+    const recycled = simpleReturn(
+      [holding([
+        { date: "2024-01-01", kind: "buy", amount: 1000, shares: 10 },
+        { date: "2024-06-01", kind: "sell", amount: 1000, shares: -10 },
+        { date: "2024-06-02", kind: "buy", amount: 1000, shares: 8 },
+      ])],
+      1200,
+    );
+    const straight = simpleReturn(
+      [holding([{ date: "2024-01-01", kind: "buy", amount: 1000, shares: 10 }])],
+      1200,
+    );
+    assert.equal(recycled.contributed, 1000);
+    assert.equal(recycled.grossBought, 2000);
+    assert.equal(recycled.pct, straight.pct, "same money in, same return");
+  });
+
+  test("a portfolio that returned more than it was given has no percentage", () => {
+    // Nothing left invested to divide by; a negative denominator would flip
+    // the sign rather than fail visibly.
+    const r = simpleReturn(
+      [holding([
+        { date: "2024-01-01", kind: "buy", amount: 1000, shares: 10 },
+        { date: "2024-06-01", kind: "sell", amount: 1500, shares: -10 },
+      ])],
+      0,
+    );
+    assert.equal(r.contributed, 0);
+    assert.equal(r.pct, null);
   });
 
   test("dividends count as money back", () => {
@@ -1752,6 +1796,7 @@ describe("simpleReturn", () => {
       1000,
     );
     assert.equal(r.returned, 50);
+    assert.equal(r.contributed, 1000, "a dividend is a return, not a withdrawal");
     assert.equal(r.pct, 5);
   });
 
