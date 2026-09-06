@@ -916,13 +916,26 @@ export default function InvestmentsPage() {
                 {returns.simple.pct === null ? "—" : fmtPct(returns.simple.pct)}
               </p>
               <p className="mt-2 text-xs leading-relaxed text-ink-dim">
-                Everything you put in against everything you got back and still hold.
+                What you actually put in against what it is worth now.
               </p>
               <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
                 {fmtCAD(returns.simple.contributed)} in · {fmtCAD(returns.simple.returned)}{" "}
-                back · {fmtCAD(returns.simple.held)} held. It ignores time entirely, so the
-                same figure could be one good year or five slow ones.
+                in dividends · {fmtCAD(returns.simple.held)} held. It ignores time
+                entirely, so the same figure could be one good year or five slow ones.
               </p>
+              {/*
+                Said out loud because the two numbers differ by a lot here, and
+                the larger one is the one a broker statement shows. Without this
+                the card looks like it has simply lost track of a few hundred
+                thousand dollars.
+              */}
+              {returns.simple.grossSold > 0 ? (
+                <p className="mt-1 text-[0.6875rem] leading-relaxed text-ink-faint">
+                  {fmtCAD(returns.simple.grossBought)} of purchases, less{" "}
+                  {fmtCAD(returns.simple.grossSold)} of sale proceeds that paid for
+                  some of them.
+                </p>
+              ) : null}
             </div>
 
             <div className="bg-surface p-5">
