@@ -436,15 +436,22 @@ export default function AccountsPage() {
                       </p>
                     ) : null}
                     {/*
-                      An asset account cannot hold less than no cash. When one
-                      does, the balance has been moved by something already
-                      counted in it — the case that made this worth saying out
-                      loud: two accounts drifted tens of thousands negative and
-                      nothing on the page mentioned it.
+                      A balance below zero means the opposite of what the card
+                      says: an account holding less than no cash, or a debt that
+                      owes money back to you. Either way something has moved the
+                      figure that was already counted in it.
+
+                      Said out loud because the silence is the problem. Two
+                      accounts drifted tens of thousands negative and nothing on
+                      this page mentioned it; the first version of this warning
+                      then covered only assets, and a liability sitting the
+                      wrong way round stayed just as quiet.
                     */}
-                    {!liability && acc.balance < 0 ? (
+                    {acc.balance < 0 ? (
                       <p className="mt-1 text-[0.6875rem] font-medium text-negative">
-                        Negative cash — restate the balance to correct it
+                        {liability
+                          ? "Owed to you, not by you — restate the balance to correct it"
+                          : "Negative cash — restate the balance to correct it"}
                       </p>
                     ) : null}
                   </div>
