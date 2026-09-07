@@ -1,11 +1,54 @@
 # Aurum · Personal Finance
 
-A personal finance webapp for tracking **net worth**, **income & expenses**, **budgets**,
-and an **investment portfolio** — with charts everywhere. State lives in **PostgreSQL**
-(via Drizzle ORM) behind a small JSON API, and the whole stack ships as a set of **Docker
-containers**. CSV imports — card statements, bank exports, brokerage activity reports —
-are auto-categorized and reviewable before anything is saved, and a **monthly checklist**
-closes a finished month in one pass.
+**A self-hosted webapp for keeping track of your own money.** Net worth, income and
+expenses, budgets, and an investment portfolio — on your own machine, in your own
+database, with nothing sent anywhere.
+
+State lives in **PostgreSQL** behind a small JSON API, and the whole stack ships as a set
+of **Docker containers**. CSV imports — card statements, bank exports, brokerage activity
+reports — are routed by what each file *is*, auto-categorised, and reviewable before
+anything is saved. A **monthly checklist** closes a finished month in one pass.
+
+## Why it exists
+
+Budgeting services want your bank credentials, and spreadsheets stop scaling the moment
+you own more than one thing. Aurum is the third option: the spreadsheet's control, with
+software's memory of what you already told it.
+
+The design follows from that. Every figure is **derived from what you recorded**, not
+stored as a summary that can drift from it — a position's shares, cost base and return all
+come from replaying its trades. Nothing is fetched from your bank; you import files you
+already have. And the app runs bound to **loopback by default**, because the sensible
+place for one person's finances is not the open internet.
+
+## What it is opinionated about
+
+These are the calls the app makes, so you can tell early whether they suit you:
+
+- **Cost base is average cost, per account** — the Canadian treatment. A partial sale
+  disposes of a proportional slice of it.
+- **A cost base is fixed when you acquire something.** A converted amount is a fact about
+  the day it converted, never recomputed at today's exchange rate.
+- **Money you borrowed is not money you earned**, and a transfer between your own accounts
+  is neither income nor spending. Both are excluded from every cash-flow figure.
+- **Staking rewards are income *and* an acquisition** at what the tokens were worth on the
+  day, so the income is recorded once and the eventual sale is not taxed on it twice.
+- **A defined-benefit pension is not cash.** It counts toward net worth and is kept out of
+  anything called "assets" or "spendable".
+- **Realized and unrealized are kept apart**, so a good year is not hidden behind a loss
+  already banked.
+
+## Scope, and what it is not
+
+- **Single user, self-hosted.** There are no accounts, no tenancy, no sharing. One person,
+  one database, one password.
+- **Canadian by default** — registration types (TFSA, RRSP, FHSA), average-cost basis, CAD
+  as the reporting currency with USD holdings converted at the rate you actually paid.
+- **Not a tax filing tool.** The tax page reports realized gains, dividends and interest by
+  year, and the superficial-loss rule is not implemented. Treat the output as a starting
+  point for a conversation with an accountant, not as a return.
+- **Not financial advice**, and not a broker. It records what you tell it.
+- A personal project, shared in case it is useful. There is no support and no roadmap.
 
 Two themes: a warm cream light theme and a near-black dark one, both from the same set of
 semantic tokens, with a toggle in the sidebar.
