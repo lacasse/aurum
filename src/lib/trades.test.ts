@@ -485,9 +485,16 @@ describe("markAlreadyImported", () => {
     assert.equal(r.duplicate, false);
   });
 
-  test("a different date or amount is not a duplicate", () => {
+  test("a different date or a different trade is not a duplicate", () => {
+    /*
+     * Amount alone no longer distinguishes two trades: one event recorded in
+     * two places disagrees about the money, because a hand conversion and a
+     * broker's conversion of the same sale differ by a few dollars. What
+     * separates two genuine trades on one day is their size, so the second row
+     * here differs in quantity as well.
+     */
     const other = markAlreadyImported(
-      [csvRow({ date: "2025-02-05" }), csvRow({ amountCad: 301 })],
+      [csvRow({ date: "2025-02-05" }), csvRow({ quantity: 40, amountCad: 620 })],
       resolveAcc,
       [held({})],
       [],
