@@ -124,6 +124,52 @@ survives any force-push, so a PR pins the commits it was opened from forever.
 Where PRs exist, a history rewrite is **not** enough — the repository has to be
 deleted and recreated.
 
+# The Owner's Records — CRITICAL RULES
+
+The stored record of someone's money is not the app's to reinterpret. Two rules
+follow from that, and both were broken.
+
+## Never show demo data in place of real data
+
+`loadFromServer` caught every failure — including a 401 from an expired session
+— and left the bundled sample data on screen. The result was a complete,
+plausible dashboard of somebody else's money: net worth, investments, debt,
+cash and every holding wrong together, indistinguishable from the records having
+been destroyed. The owner reasonably concluded they had been.
+
+- **A failure to load must be visible.** An auth failure goes to the login page.
+  Any other failure shows an error state that says the data could not be read.
+- **Sample data is for a database that is genuinely empty**, never a fallback for
+  a request that failed. A page with no data must look like a page with no data.
+- **Never render a figure the app is not certain of as though it were a fact.**
+  If provenance is unknown, say so on screen.
+- Demo data must be **visibly** demo wherever it can appear — a banner, a
+  distinct label — so it can never be mistaken for the owner's own.
+
+## Never recompute a stored historical value from a live input
+
+`computeCadFields` re-derived a USD holding's Canadian cost base as
+`avgCost * rate` on **every write**, so any save — a price refresh, an edit, a
+checklist run — silently restated a cost base at that day's exchange rate. One
+position's basis moved by 38% with no trade behind it.
+
+- **A cost base is fixed when the thing is acquired.** So is a converted amount:
+  the rate that applied on the day is a fact about that day.
+- **Store it once, read it forever.** A stored figure is only recomputed when the
+  event behind it changes — a corrected trade, an edited flow — never as a side
+  effect of writing something else.
+- **A write must change only what it was asked to change.** Recomputing adjacent
+  fields "for consistency" is how a record drifts with nothing to point at.
+- Where a derived value must be cached, keep the inputs that produced it and the
+  date they applied, so it can be checked rather than trusted.
+
+## When the owner says their data is wrong, believe the screen
+
+Checking the database and answering "the counts are unchanged" does not address
+what someone is looking at. Reproduce what they see first — open the page, read
+the figures — then work back to the store, the API and the database. Row counts
+matching is evidence about storage, not about correctness or display.
+
 # Data Safety — CRITICAL RULES
 
 The PostgreSQL database is the single source of truth for all personal finance data. Data
