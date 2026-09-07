@@ -146,6 +146,45 @@ been destroyed. The owner reasonably concluded they had been.
 - Demo data must be **visibly** demo wherever it can appear — a banner, a
   distinct label — so it can never be mistaken for the owner's own.
 
+## One rule per question, in one place, used by every path
+
+An import created seven duplicate positions because `accumulatePositions` in
+`trades.ts` matched an existing holding by exact ticker equality, while
+`resolveTicker` in `trade-batch.ts` — written for precisely this, with a comment
+describing precisely this failure — was never called by it. A broker export
+writes bare symbols where the position is held with a venue suffix, so every
+matching row opened a second holding beside the real one and the same trade was
+counted twice.
+
+- **When two code paths answer the same question, they call the same function.**
+  Importing a trade from a CSV and entering one by hand are the same question
+  about identity; they must not have two answers.
+- **Before writing a matcher, a converter or a classifier, search for one.**
+  The second implementation is always the careless one, because the first was
+  written while thinking about the problem.
+- **A rule with a comment explaining which bug it prevents is a rule that must
+  be called everywhere that bug can occur.** Grep for its callers when touching
+  any related path.
+- **Identity is decided in one place.** For a security that is `baseTicker` plus
+  account; nothing else may decide whether two rows are the same position.
+
+## Creating a record is the dangerous branch, not updating one
+
+Opening a position, an account or a category is where a mistake becomes a
+duplicate that quietly double-counts. Updating the wrong row is visible;
+creating a spurious one is not.
+
+- **A create that could have been a match must justify itself.** Where an
+  importer is about to open a position, it states so in the review step and says
+  what it looked for. A silent create is the fault above.
+- **Import review shows creates separately from updates**, with counts, so
+  "opened 7 new positions" is read before it is committed rather than discovered
+  weeks later.
+- **After any bulk write, assert the invariants.** No two holdings may share a
+  base ticker within one account; no account balance may be negative on an
+  asset; totals must reconcile. Check them and report, rather than trusting that
+  each row was individually correct — every row here was.
+
 ## Never recompute a stored historical value from a live input
 
 `computeCadFields` re-derived a USD holding's Canadian cost base as
