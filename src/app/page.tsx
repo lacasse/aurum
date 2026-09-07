@@ -488,11 +488,11 @@ export default function DashboardPage() {
           </div>
           <Progress value={fi.pct} max={100} tone="positive" className="mt-4" />
           {/*
-            * A sentence rather than three labelled figures. The old row read
-            * "Pays [figure redacted] a month at 3.5% · A month costs [figure redacted] · Still short
-            * [figure redacted] a month" — every number correct and the relationship
-            * between them left for the reader to assemble. It is one idea:
-            * what the money would pay you, against what you spend.
+            * A sentence rather than three labelled figures. The old row gave
+            * the payout, the cost of a month and the shortfall side by side —
+            * every number correct, and the relationship between them left for
+            * the reader to assemble. It is one idea: what the money would pay
+            * you, against what you spend.
             */}
           <p className="mt-3 text-[0.6875rem] leading-relaxed text-ink-faint">
             Drawing{" "}

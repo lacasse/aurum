@@ -50,6 +50,12 @@ jobs:
       - name: Security regression check
         run: npm run check:security
 
+      # The hooks only protect a machine that ran `npm install`. CI is what
+      # makes the rule hold for anything reaching the remote, including a
+      # commit made with --no-verify.
+      - name: No real financial figures
+        run: npm run check:figures
+
       - name: Unit tests
         run: npm test
 

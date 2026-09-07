@@ -4,7 +4,7 @@ import { roundMoney } from "./money";
  * What the portfolio is against what it is meant to be.
  *
  * A target is only meaningful next to the actual weight and the money between
- * them: "eight points over" is a judgement, "[figure redacted] over" is an instruction.
+ * them: "eight points over" is a judgement, an amount over is an instruction.
  * Both are here, and the second is the one that gets acted on.
  *
  * Targets are per security rather than per asset class. That is how they were

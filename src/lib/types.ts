@@ -329,9 +329,9 @@ export const INVESTMENT_KINDS: AccountKind[] = ["investment", "crypto"];
  * cash figure is the transfer value — the lump sum payable if you left, which
  * moves with interest rates as much as with what you put in. That figure
  * belongs in net worth, since it is yours, but it is not spendable and it must
- * not be stacked in beside chequing: on this record the pension is nine
- * tenths of what the balance sheet called "assets", which made [figure redacted] of
- * actual cash read as [figure redacted].
+ * not be stacked in beside chequing: on a record where the pension is most
+ * of what the balance sheet calls "assets", it makes the actual spendable
+ * cash read as an order of magnitude more than it is.
  *
  * So it is its own kind, drawn in its own band, and left out of every figure
  * that means "money you could use".

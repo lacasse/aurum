@@ -306,11 +306,11 @@ describe("runwayMonths", () => {
 
 describe("fiProgress", () => {
   test("the target follows from what a year costs, and is not entered", () => {
-    // The workbook's own figures: [figure redacted] a month at 3.5% is [figure redacted],
-    // and [figure redacted] of net worth is 37.5% of the way there.
+    // Round figures throughout: 3,500 a month is 42,000 a year, which at 3.5%
+    // needs a pot of 1,200,000. Nothing here is anybody's actual position.
     const fi = fiProgress(500000, 3500);
     assert.equal(fi.target, 1200000);
-    assert.equal(Math.round(fi.pct * 10) / 10, 37.5);
+    assert.equal(Math.round(fi.pct * 10) / 10, 41.7);
   });
 
   test("the payout is the rate on net worth", () => {
@@ -1828,7 +1828,7 @@ describe("incomeBySource", () => {
   });
 
   test("averages over the window, not over the months it arrived in", () => {
-    // One bonus in a twelve-month window is $100 a month, not [figure redacted].
+    // INVENTED: one bonus in a twelve-month window is $100 a month, not [figure redacted].
     const b = incomeBySource([pay("2026-08-31", 1200, "Additional Income")], 12, "2026-08");
     assert.equal(b.sources[0].average, 100);
     assert.equal(b.sources[0].months, 1);

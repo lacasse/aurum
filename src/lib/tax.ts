@@ -127,7 +127,7 @@ export interface TaxYear {
    *
    * A sale for nothing is almost always a sale nobody entered the proceeds
    * for, and it reads as a loss of the entire cost base — on this record five
-   * of them come to [figure redacted] of losses that did not happen. They are counted
+   * of them come to a large sum of losses that did not happen. They are counted
    * in the figures above, because leaving them out would invent a different
    * lie, but they are listed here so the year can say it is not ready.
    */

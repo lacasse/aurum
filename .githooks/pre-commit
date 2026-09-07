@@ -1,0 +1,4 @@
+#!/bin/sh
+# Staged content only. The message is checked by commit-msg, which runs after
+# git has collected it. Never bypass with --no-verify.
+exec ./scripts/check-no-personal-figures.sh --staged
