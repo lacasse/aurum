@@ -77,7 +77,7 @@ describe("normalizeType", () => {
 describe("parseNum", () => {
   test("reads plain, separated and accounting-style numbers", () => {
     assert.equal(parseNum("1,234.5"), 1234.5);
-    assert.equal(parseNum("[figure redacted]"), 1234.5); // INVENTED
+    assert.equal(parseNum("$1,234.50"), 1234.5); // INVENTED
     assert.equal(parseNum("(8)"), -8, "accounting notation is negative");
     assert.equal(parseNum("-8"), -8);
     assert.equal(parseNum(""), 0);

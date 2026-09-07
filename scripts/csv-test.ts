@@ -43,7 +43,7 @@ function parseStr(csv: string) {
 console.log("primitives");
 expect(parseAmount("-86.41") === -86.41, "parseAmount negative");
 expect(parseAmount("(45.00)") === -45, "parseAmount parentheses");
-expect(parseAmount("[figure redacted]") === 1234.56, "parseAmount currency/commas"); // INVENTED
+expect(parseAmount("$1,234.56") === 1234.56, "parseAmount currency/commas"); // INVENTED
 expect(parseAmount("12.00-") === -12, "parseAmount trailing minus");
 expect(parseFlexibleDate("8/12/26") === "2026-08-12", "date M/D/YY");
 expect(parseFlexibleDate("08/12/2026") === "2026-08-12", "date MM/DD/YYYY");
