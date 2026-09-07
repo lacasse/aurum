@@ -9,6 +9,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Zap,
   TrendingUp,
 } from "lucide-react";
 import { Shell } from "@/components/shell";
@@ -317,7 +318,10 @@ export default function InvestmentsPage() {
    * strictly limited daily allowance to learn one number.
    */
   const fetchPricesFor = useCallback(
-    async (subset: Holding[], { replaceStale }: { replaceStale: boolean }) => {
+    async (
+      subset: Holding[],
+      { replaceStale, force = false }: { replaceStale: boolean; force?: boolean },
+    ) => {
       const priceable = new Map<string, { assetClass: string; currency: string }>();
       for (const h of subset) {
         const key = h.ticker.trim().toUpperCase();
@@ -334,7 +338,8 @@ export default function InvestmentsPage() {
         const classes = entries.map(([, v]) => v.assetClass).join(",");
         const currencies = entries.map(([, v]) => v.currency).join(",");
         const res = await fetch(
-          `/api/prices?tickers=${encodeURIComponent(tickers)}&classes=${encodeURIComponent(classes)}&currencies=${encodeURIComponent(currencies)}`,
+          `/api/prices?tickers=${encodeURIComponent(tickers)}&classes=${encodeURIComponent(classes)}&currencies=${encodeURIComponent(currencies)}` +
+            (force ? "&force=1" : ""),
           { cache: "no-store" },
         );
         if (!res.ok) return;
@@ -381,6 +386,27 @@ export default function InvestmentsPage() {
     () => fetchPricesFor(holdings.filter((h) => h.shares > 0), { replaceStale: true }),
     [holdings, fetchPricesFor],
   );
+
+  /*
+   * The same refresh with every throttle lifted: the price cache, the rule that
+   * end-of-day data is only worth buying after the close, and the providers'
+   * own allowances.
+   *
+   * Behind a confirmation because it spends something finite and shared. The
+   * allowances exist so the app cannot quietly exhaust a day of calls on its
+   * own schedule; they are not a reason to refuse someone who has been told the
+   * cost and wants the price anyway. What it spends is still recorded, so the
+   * next automatic refresh sees a smaller allowance rather than a fresh one.
+   */
+  const [forceOpen, setForceOpen] = useState(false);
+  const forceRefresh = useCallback(() => {
+    setForceOpen(false);
+    return fetchPricesFor(holdings.filter((h) => h.shares > 0), {
+      replaceStale: true,
+      force: true,
+    });
+  }, [holdings, fetchPricesFor]);
+  const forceCount = holdings.filter((h) => h.shares > 0).length;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -684,10 +710,52 @@ export default function InvestmentsPage() {
           >
             <RefreshCw size={15} className={priceRefreshing ? "animate-spin" : ""} />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setForceOpen(true)}
+            disabled={priceRefreshing}
+            aria-label="Force a price refresh, ignoring the daily limits"
+            title="Force refresh — ignores the daily API limits"
+          >
+            <Zap size={15} />
+          </Button>
         </div>
       }
     >
       <div className="space-y-4">
+        {forceOpen && (
+          <Card className="border-amber-500/50 bg-amber-500/5 p-4">
+            <p className="text-sm font-medium text-amber-400">
+              Force a refresh, ignoring the daily limits?
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+              This asks Twelve Data and EODHD for {forceCount} price
+              {forceCount === 1 ? "" : "s"} right now, skipping the cache, the
+              rule that end-of-day data is only fetched after the close, and
+              both providers&rsquo; allowances.
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+              Those allowances are small and shared with every other refresh
+              today — EODHD in particular is{" "}
+              <span className="font-medium text-ink">
+                {quota ? `${quota.remaining} of ${quota.limit}` : "a few"} calls
+              </span>{" "}
+              left. Spending them here means the automatic refresh has fewer, and
+              going over may mean the provider refuses calls until the limit
+              resets{quota ? ` at ${quota.resetsAt}` : ""}. What this spends is
+              recorded either way.
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <Button onClick={forceRefresh} disabled={priceRefreshing}>
+                <Zap size={14} /> Refresh anyway
+              </Button>
+              <Button variant="ghost" onClick={() => setForceOpen(false)}>
+                Cancel
+              </Button>
+            </div>
+          </Card>
+        )}
         {staleTickers.size > 0 && (
           <Card className="border-amber-500/40 bg-amber-500/5 p-4">
             <p className="text-sm font-medium text-amber-400">

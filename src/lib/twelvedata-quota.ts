@@ -92,14 +92,26 @@ export function grantCredits(
   credits: number,
   minuteLimit: number = TWELVEDATA_MINUTE_LIMIT,
   dayLimit: number = TWELVEDATA_DAY_LIMIT,
+  /**
+   * Spend past the limit anyway, at the user's explicit request.
+   *
+   * The limits are here to stop the app quietly exhausting a day's allowance on
+   * its own schedule. They are not here to stop someone who has decided they
+   * want a price now and understands what it costs. The spend is still written
+   * to the ledger — overriding the cap is not the same as hiding the usage, and
+   * the next automatic refresh must see what was taken.
+   */
+  force = false,
 ): { granted: boolean; nextValue: string; ledger: Ledger } {
   const ledger = parseLedger(value, now);
   const want = Math.trunc(credits);
 
+  if (want <= 0) return { granted: false, nextValue: serializeLedger(ledger), ledger };
+
   if (
-    want <= 0 ||
-    ledger.minute.used + want > effectiveLimit(minuteLimit, MINUTE_RESERVE) ||
-    ledger.day.used + want > effectiveLimit(dayLimit, DAY_RESERVE)
+    !force &&
+    (ledger.minute.used + want > effectiveLimit(minuteLimit, MINUTE_RESERVE) ||
+      ledger.day.used + want > effectiveLimit(dayLimit, DAY_RESERVE))
   ) {
     return { granted: false, nextValue: serializeLedger(ledger), ledger };
   }

@@ -30,10 +30,21 @@ export async function reserveEodhdCalls(
   want: number,
   now: Date = new Date(),
   limit: number = EODHD_DAY_LIMIT,
+  /**
+   * Spend past the day's cap at the user's explicit request.
+   *
+   * The only thing that may lift the cap. A caller passing its own `limit` may
+   * still only lower it — that clamp is what keeps a low-priority use from
+   * quietly raising the ceiling — but a person who has asked for a refresh and
+   * been told what it costs is not a caller. The spend is recorded either way.
+   */
+  force = false,
 ): Promise<number> {
   // Clamped, not trusted: a caller may lower its own ceiling but never lift
-  // the day's, which is what makes the comment above true rather than a hope.
+  // the day's. Only `force` does that, and only from the user.
   const cap = Math.min(limit, EODHD_DAY_LIMIT);
+  // A cap of zero means do not call this provider; a forced refresh does not
+  // override that, because it is a switch rather than a budget.
   if (!Number.isFinite(want) || want <= 0 || cap <= 0) return 0;
   const today = utcDay(now);
 
@@ -49,7 +60,7 @@ export async function reserveEodhdCalls(
       .where(eq(appMeta.key, EODHD_QUOTA_KEY))
       .for("update");
 
-    const { granted, nextValue } = grant(row?.value, today, want, cap);
+    const { granted, nextValue } = grant(row?.value, today, want, cap, force);
     if (granted > 0) {
       await tx
         .update(appMeta)

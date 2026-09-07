@@ -80,9 +80,13 @@ export function grant(
   today: string,
   want: number,
   limit: number = EODHD_DAY_LIMIT,
+  /** Spend past the day's cap at the user's explicit request; still recorded. */
+  force = false,
 ): { granted: number; nextValue: string; used: number } {
   const used = usedFrom(value, today);
-  const granted = Math.max(0, Math.min(Math.trunc(want), limit - used));
+  const granted = force
+    ? Math.max(0, Math.trunc(want))
+    : Math.max(0, Math.min(Math.trunc(want), limit - used));
   return {
     granted,
     used: used + granted,
