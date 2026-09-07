@@ -15,6 +15,7 @@ import {
   Registration,
   movementApplies,
 } from "./types";
+import { resolveTicker } from "./trade-batch";
 import { todayISO } from "./format";
 
 export type TradeType = "buy" | "sell" | "dividend" | "deposit" | "withdrawal";
@@ -430,11 +431,26 @@ export function accumulatePositions(
   };
 
   const positionFor = (row: TradeRow, accountId: string): Position => {
-    const key = `${row.ticker}|${accountId}`;
+    const key = `${resolveTicker(row.ticker, existingHoldings, accountId)}|${accountId}`;
     const found = positions.get(key);
     if (found) return found;
+    /*
+     * The spelling already held, not the one the file wrote.
+     *
+     * This matched on exact ticker equality, and a broker's export writes bare
+     * symbols where a position is held with its venue suffix -- XEQT against
+     * XEQT.TO, DVFD against DVFD.TO, TSLA against TSLA.NEO. Nothing matched, so
+     * every such row opened a second holding beside the real one and the same
+     * trade was counted twice. Seven positions were duplicated that way in a
+     * single import.
+     *
+     * resolveTicker was written for exactly this and lived one module away
+     * without ever being called from here. Identity is its question, and it is
+     * the only thing that answers it.
+     */
+    const resolved = resolveTicker(row.ticker, existingHoldings, accountId);
     const existing = existingHoldings.find(
-      (h) => h.ticker.toUpperCase() === row.ticker && h.accountId === accountId,
+      (h) => h.ticker.toUpperCase() === resolved && h.accountId === accountId,
     );
     const fresh: Position = existing
       ? {
@@ -452,7 +468,9 @@ export function accumulatePositions(
           flows: [...(existing.flows ?? [])],
         }
       : {
-          ticker: row.ticker,
+          // The resolved spelling, so a second row in the same import does not
+          // open yet another holding under the bare symbol.
+          ticker: resolveTicker(row.ticker, existingHoldings, accountId),
           accountId,
           currency: row.currency,
           shares: 0,

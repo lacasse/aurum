@@ -98,3 +98,72 @@ describe("accumulatePositions and the anchor", () => {
     assert.equal(r.cashDeltas.get("acct-1"), undefined);
   });
 });
+
+/*
+ * The duplicate-position fault, kept as a test.
+ *
+ * A broker export writes bare symbols where a position is held with its venue
+ * suffix. Matching on exact equality opened a second holding beside the real
+ * one and counted the same trade twice -- seven positions in one import.
+ */
+describe("an imported row finds the position it belongs to", () => {
+  const held = (ticker: string, accountId: string, shares = 100): Holding =>
+    ({
+      id: `h-${ticker}-${accountId}`,
+      ticker,
+      name: ticker,
+      assetClass: "US Equity",
+      shares,
+      avgCost: 20,
+      price: 25,
+      history: [],
+      dividendsReceived: 0,
+      accountId,
+      currency: "CAD",
+      priceCAD: 25,
+      avgCostCAD: 20,
+      dividendsReceivedCAD: 0,
+      historyCAD: [],
+      flows: [],
+    }) as unknown as Holding;
+
+  test("a bare symbol lands on the position held with a venue suffix", () => {
+    const r = accumulatePositions(
+      [row({ ticker: "WEQT" })],
+      accountIdFor,
+      [held("WEQT.TO", "acct-1")],
+    );
+    assert.equal(r.positions.length, 1, "one position, not two");
+    assert.equal(r.positions[0].ticker, "WEQT.TO", "kept the spelling already held");
+    assert.ok(r.positions[0].existing, "matched the existing holding");
+    assert.equal(r.positions[0].shares, 110, "the buy added to what was held");
+  });
+
+  test("two rows in one file do not open a second holding between them", () => {
+    const r = accumulatePositions(
+      [row({ ticker: "WEQT", date: "2026-09-01" }), row({ ticker: "WEQT", date: "2026-09-02" })],
+      accountIdFor,
+      [held("WEQT.TO", "acct-1")],
+    );
+    assert.equal(r.positions.length, 1);
+    assert.equal(r.positions[0].shares, 120);
+  });
+
+  test("a symbol nobody holds still opens a position, as it must", () => {
+    const r = accumulatePositions([row({ ticker: "NEWCO" })], accountIdFor, []);
+    assert.equal(r.positions.length, 1);
+    assert.equal(r.positions[0].ticker, "NEWCO");
+    assert.equal(r.positions[0].existing, undefined);
+  });
+
+  test("an exact match still wins over a suffix match", () => {
+    const r = accumulatePositions(
+      [row({ ticker: "WEQT" })],
+      accountIdFor,
+      [held("WEQT", "acct-1", 5), held("WEQT.TO", "acct-1", 900)],
+    );
+    assert.equal(r.positions.length, 1);
+    assert.equal(r.positions[0].ticker, "WEQT");
+    assert.equal(r.positions[0].shares, 15);
+  });
+});
