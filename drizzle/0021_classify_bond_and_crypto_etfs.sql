@@ -1,17 +1,18 @@
 -- Put the bond and crypto ETFs in the classes they belong to.
 --
 -- Asset class had never been load-bearing: it coloured a donut of what is
--- held today, and every one of these is a closed position. Splitting net worth
--- by class month by month makes it history, and the history was wrong —
--- XLB.TO and XGB.TO are Canadian bond funds filed as US equity, which is why
--- the Bonds band was empty for a portfolio that held bonds through 2022.
+-- held today, and the positions this corrected were all closed. Splitting net
+-- worth by class month by month makes it history, and the history was wrong --
+-- bond funds filed as US equity, so the Bonds band read empty for a portfolio
+-- that held bonds; and exchange-traded crypto funds filed by the account they
+-- sit in rather than the exposure they carry.
 --
--- The three crypto funds follow CRYX-B.TO, which was already Crypto. They are
--- exchange-traded, and they are held in registered accounts, which is where
--- they belong as accounts; but the exposure they carry is the coin, and a
--- chart of what net worth is made of is about exposure.
-UPDATE "holdings" SET "asset_class" = 'Bonds'
-WHERE upper("ticker") IN ('XLB.TO', 'XGB.TO');
-
-UPDATE "holdings" SET "asset_class" = 'Crypto'
-WHERE upper("ticker") IN ('CRYE-B.TO', 'CRYY.TO', 'BTCC.TO');
+-- The correction itself is deliberately not here. It was a list of one
+-- person's holdings, and a migration runs on every deployment, so shipping it
+-- would install those symbols into every database that ever applies it. A
+-- fresh database has no rows to reclassify, which is why this can be empty
+-- rather than conditional.
+--
+-- To correct an existing install, reclassify by hand on the investments page,
+-- or with a local script that takes its symbols as arguments.
+SELECT 1;

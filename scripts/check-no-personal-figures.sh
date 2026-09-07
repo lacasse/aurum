@@ -24,9 +24,29 @@
 # Two ways past it, both deliberate:
 #   - add a wholly-invented file to ALLOWED below
 #   - mark the single line INVENTED, which is a claim you are making
+#   - put ALL-FIXTURES-INVENTED in a file whose every row is made up, which
+#     waives only the export-row heuristic for it. Needed where fixtures live
+#     inside a raw CSV literal and a trailing comment would corrupt the data.
+#     Amounts and private terms are still rejected in such a file.
 set -eu
 
 MONEY='\$ ?[0-9]{1,3}(,[0-9]{3})+(\.[0-9]+)?'
+
+# A private list of terms that must never appear: tickers actually held,
+# the broker, the pension plan, account identifiers off a statement, the
+# machine's hostname. Deliberately NOT in the repository -- a deny-list of
+# someone's holdings is itself the disclosure it exists to prevent.
+#
+# One term per line, blank lines and # comments ignored. Set AURUM_PRIVATE_TERMS
+# to point elsewhere. When the file is absent only the generic checks run, which
+# is the right behaviour for a fresh clone or CI.
+TERMS="${AURUM_PRIVATE_TERMS:-$HOME/.config/aurum/private-terms.txt}"
+
+# A row lifted straight out of a brokerage export: a date, then several
+# comma-separated fields, then a price. Whole statement lines were pasted into
+# test files as fixtures, which is how account identifiers and real trades got
+# in without any single number looking out of place.
+EXPORT_ROW='[0-9]{4}-[0-9]{2}-[0-9]{2},([^,]*,){4,}'
 # The same pattern for awk, which needs two things spelled differently.
 # macOS ships the one-true-awk, which has no interval expressions -- {1,3}
 # there matches nothing at all, silently. And -v processes backslash escapes
@@ -34,6 +54,15 @@ MONEY='\$ ?[0-9]{1,3}(,[0-9]{3})+(\.[0-9]+)?'
 # of line instead of matching a dollar sign. Both failures are invisible: the
 # check simply passes everything. Bracket expressions avoid both.
 MONEY_AWK='[$] ?[0-9][0-9]?[0-9]?(,[0-9][0-9][0-9])+([.][0-9]+)?'
+EXPORT_ROW_AWK='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9],([^,]*,)([^,]*,)([^,]*,)([^,]*,)'
+
+# Terms from the private list, as one alternation, or empty when there is none.
+terms_pattern() {
+  [ -f "$TERMS" ] || return 0
+  sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$TERMS" \
+    | grep -v '^$' | paste -sd'|' - 2>/dev/null || true
+}
+TERMS_RE=$(terms_pattern)
 ALLOWED='^(src/lib/sample\.ts|scripts/check-no-personal-figures\.sh)$'
 SCAN_EXT='\.(ts|tsx|js|mjs|md|sql|json|ya?ml)$'
 
@@ -49,14 +78,26 @@ report() {
 if [ "${1:-}" = "--staged" ]; then
   # Only added lines. A figure already in the tree is the history rewrite's
   # problem, not this commit's; failing on it would block every unrelated commit.
-  git diff --cached --unified=0 | awk -v money="$MONEY_AWK" -v allowed="$ALLOWED" '
-    /^\+\+\+ b\// { file = substr($0, 7); skip = (file ~ allowed); next }
+  git diff --cached --unified=0 | awk -v money="$MONEY_AWK" -v row="$EXPORT_ROW_AWK" -v terms="$TERMS_RE" -v allowed="$ALLOWED" '
+    /^\+\+\+ b\// {
+      file = substr($0, 7)
+      skip = (file ~ allowed)
+      loose = 0
+      cmd = "grep -q ALL-FIXTURES-INVENTED \"" file "\" 2>/dev/null && echo y"
+      cmd | getline loose_flag
+      close(cmd)
+      loose = (loose_flag == "y")
+      loose_flag = ""
+      next
+    }
     /^\+\+\+/     { next }
     /^\+/ {
       if (skip) next
       line = substr($0, 2)
       if (line ~ /INVENTED/) next
-      if (line ~ money) printf "%s: %s\n", file, substr(line, 1, 110)
+      if (line ~ money)  { printf "%s [amount]: %s\n",  file, substr(line, 1, 100); next }
+      if (!loose && line ~ row) { printf "%s [export row]: %s\n", file, substr(line, 1, 100); next }
+      if (terms != "" && line ~ terms) { printf "%s [private term]: %s\n", file, substr(line, 1, 100) }
     }
   ' > /tmp/.figcheck.$$ 2>/dev/null || true
   while IFS= read -r hit; do [ -n "$hit" ] && report "$hit"; done < /tmp/.figcheck.$$
@@ -75,7 +116,9 @@ elif [ "${1:-}" = "--message" ]; then
     case "$line" in \#*) continue ;; esac
     case "$line" in *INVENTED*) continue ;; esac
     if printf '%s' "$line" | grep -Eq "$MONEY"; then
-      report "commit message: $(printf '%s' "$line" | cut -c1-110)"
+      report "commit message [amount]: $(printf '%s' "$line" | cut -c1-110)"
+    elif [ -n "$TERMS_RE" ] && printf '%s' "$line" | grep -Eq "$TERMS_RE"; then
+      report "commit message [private term]: $(printf '%s' "$line" | cut -c1-110)"
     fi
   done < "$msg"
 else
@@ -84,8 +127,25 @@ else
   # practice it would not be run.
   files=$(git ls-files | grep -E "$SCAN_EXT" | grep -Ev "$ALLOWED" || true)
   if [ -n "$files" ]; then
-    hits=$(printf '%s\n' "$files" | tr '\n' '\0' \
-      | xargs -0 grep -nEH "$MONEY" 2>/dev/null | grep -v INVENTED || true)
+    strict=""
+    loose=""
+    for f in $files; do
+      if grep -q 'ALL-FIXTURES-INVENTED' "$f" 2>/dev/null; then
+        loose="$loose $f"
+      else
+        strict="$strict $f"
+      fi
+    done
+    pattern="$MONEY|$EXPORT_ROW"
+    [ -n "$TERMS_RE" ] && pattern="$pattern|$TERMS_RE"
+    loose_pattern="$MONEY"
+    [ -n "$TERMS_RE" ] && loose_pattern="$loose_pattern|$TERMS_RE"
+    hits=""
+    [ -n "$strict" ] && hits=$(grep -nEH "$pattern" $strict 2>/dev/null | grep -v INVENTED || true)
+    if [ -n "$loose" ]; then
+      more=$(grep -nEH "$loose_pattern" $loose 2>/dev/null | grep -v INVENTED || true)
+      hits=$(printf '%s\n%s' "$hits" "$more" | grep -v '^$' || true)
+    fi
     if [ -n "$hits" ]; then
       printf '%s\n' "$hits" | cut -c1-140 | while IFS= read -r hit; do
         printf '  %s\n' "$hit" >&2
