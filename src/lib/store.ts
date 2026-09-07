@@ -20,7 +20,7 @@ import { generateSampleData } from "./sample";
 import { HISTORY_MONTHS } from "./types";
 import { currentMonthKey } from "./format";
 import type { SnapshotHistory } from "./analytics";
-import { api } from "./api";
+import { api, NotAuthenticatedError } from "./api";
 
 export function uid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -64,6 +64,12 @@ export type AccountInput = {
 
 interface FinanceStore extends FinanceData {
   hydrated: boolean;
+  /**
+   * Why the record could not be read, if it could not. "auth" means the
+   * session expired and signing in again fixes it; "failed" is anything else.
+   * Null once a load has succeeded.
+   */
+  loadError: "auth" | "failed" | null;
   /** Loads the full state from the API (Postgres via /api/data). */
   loadFromServer: () => Promise<void>;
   /** USD/CAD exchange rate, fetched from /api/fx. */
@@ -224,6 +230,10 @@ function computeCadFields(
   h: Pick<Holding, "price" | "avgCost" | "dividendsReceived" | "history" | "currency"> & {
     avgCostCADOverride?: number;
     dividendsReceivedCADOverride?: number;
+    /** The basis already on the holding, which a write must not restate. */
+    storedAvgCostCAD?: number;
+    /** Likewise for dividends already converted at the rates they were paid at. */
+    storedDividendsCAD?: number;
   },
   rate: number,
 ) {
@@ -238,27 +248,65 @@ function computeCadFields(
   const perShare = (v: number) => Math.round(v * 1e6) / 1e6;
   return {
     priceCAD: isUSD ? convert(h.price) : h.price,
-    // An imported cost basis is the rate that was actually paid, so it beats
-    // re-converting at today's rate. Only used when one was supplied.
+    /*
+     * A cost base is a fact about the day the shares were bought, not about
+     * today's exchange rate.
+     *
+     * This used to fall through to `avgCost * rate` whenever no override was
+     * supplied, which meant every write restated a US position's Canadian basis
+     * at whatever the rate happened to be — a price refresh, an unrelated edit,
+     * a checklist run. Four positions ended up carrying a basis stamped with one
+     * afternoon's rate, one of them 38% above what it had been, with no trade
+     * behind the change.
+     *
+     * So a stored basis is kept. The rate is used only to convert a basis that
+     * does not exist yet, which is the one moment it is the right rate to use.
+     */
     avgCostCAD:
       h.avgCostCADOverride != null && h.avgCostCADOverride > 0
         ? perShare(h.avgCostCADOverride)
-        : isUSD
-          ? perShare(h.avgCost * rate)
-          : h.avgCost,
+        : h.storedAvgCostCAD != null && h.storedAvgCostCAD > 0
+          ? h.storedAvgCostCAD
+          : isUSD
+            ? perShare(h.avgCost * rate)
+            : h.avgCost,
+    // Same rule: dividends were converted at the rates they were paid at.
     dividendsReceivedCAD:
       h.dividendsReceivedCADOverride != null && h.dividendsReceivedCADOverride > 0
         ? Math.round(h.dividendsReceivedCADOverride * 100) / 100
-        : isUSD
-          ? convert(h.dividendsReceived)
+        : h.storedDividendsCAD != null && h.storedDividendsCAD > 0
+          ? h.storedDividendsCAD
+          : isUSD
+            ? convert(h.dividendsReceived)
           : h.dividendsReceived,
     historyCAD: isUSD ? h.history.map(convert) : h.history,
+  };
+}
+
+/**
+ * A record with nothing in it.
+ *
+ * What the store falls back to when the real one cannot be read. It has to be
+ * empty rather than sampled: a page with no data must look like a page with no
+ * data, and never like somebody's finances.
+ */
+function emptyData(): FinanceData & { merchantRules: Record<string, string>; demoPresent: boolean } {
+  return {
+    accounts: [],
+    transactions: [],
+    holdings: [],
+    budgets: [],
+    categories: [],
+    recurring: [],
+    merchantRules: {},
+    demoPresent: false,
   };
 }
 
 export const useFinance = create<FinanceStore>()((set, get) => ({
   ...generateSampleData(),
   hydrated: false,
+  loadError: null,
   usdCadRate: 1.37,
   merchantRules: {},
   demoPresent: false,
@@ -280,13 +328,30 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
     }
   },
 
+  /**
+   * Load the real record, or say plainly that it could not be loaded.
+   *
+   * This used to catch every failure and leave the bundled sample data on
+   * screen. What that produced was a complete, plausible dashboard of somebody
+   * else's money — net worth, investments, debt, cash and every holding wrong
+   * at once — which is indistinguishable from the records having been
+   * destroyed, and was read that way. An expired session is the common case,
+   * and it rendered as catastrophe.
+   *
+   * So the sample data is cleared before anything else. Whatever happens next,
+   * no figure on screen is demo data pretending to be the owner's.
+   */
   loadFromServer: async () => {
     try {
       const [data] = await Promise.all([api.loadData(), get().refreshFxRate()]);
-      set({ ...data, hydrated: true });
+      set({ ...data, hydrated: true, loadError: null });
     } catch (err) {
       report(err);
-      set({ hydrated: true }); // offline: keep bundled sample data
+      set({
+        ...emptyData(),
+        hydrated: true,
+        loadError: err instanceof NotAuthenticatedError ? "auth" : "failed",
+      });
     }
   },
 
@@ -505,7 +570,21 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
             if (h.id !== id) return h;
             const history = h.history.slice();
             if (history.length > 0) history[history.length - 1] = input.price;
-            const cadFields = computeCadFields({ ...h, ...input, history }, rate);
+            /*
+             * The basis and dividends already on the holding are handed in, so
+             * an edit that does not mention them leaves them exactly as they
+             * are rather than re-converting at today's rate.
+             */
+            const cadFields = computeCadFields(
+              {
+                ...h,
+                ...input,
+                history,
+                storedAvgCostCAD: h.avgCostCAD,
+                storedDividendsCAD: h.dividendsReceivedCAD,
+              },
+              rate,
+            );
             const { avgCostCADOverride: _a, dividendsReceivedCADOverride: _d, ...rest } = input;
             // Flows are only replaced when the caller supplies them, so an
             // edit through the holding form does not wipe the trade history.

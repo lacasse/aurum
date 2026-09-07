@@ -17,6 +17,20 @@ export interface ServerState extends FinanceData {
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
+/**
+ * A request the server refused because nobody is signed in.
+ *
+ * Distinguished from every other failure because the answer is different: an
+ * expired session is fixed by signing in again, and until this existed the
+ * store treated it like being offline and left demo data on screen.
+ */
+export class NotAuthenticatedError extends Error {
+  constructor() {
+    super("not signed in");
+    this.name = "NotAuthenticatedError";
+  }
+}
+
 async function send<T>(url: string, method: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
     method,
@@ -24,6 +38,7 @@ async function send<T>(url: string, method: string, body?: unknown): Promise<T> 
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
   });
+  if (res.status === 401 || res.status === 403) throw new NotAuthenticatedError();
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`${method} ${url} failed: ${res.status} ${text}`);
