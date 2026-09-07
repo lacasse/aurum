@@ -50,6 +50,17 @@ These are the calls the app makes, so you can tell early whether they suit you:
 - **Not financial advice**, and not a broker. It records what you tell it.
 - A personal project, shared in case it is useful. There is no support and no roadmap.
 
+## Licence
+
+**GNU Affero General Public License v3.0** — see [`LICENSE`](LICENSE).
+
+The Affero clause is why: if you run a modified version as a network service, you owe your
+users the source of your modifications, not only of what you were given. For an app about
+somebody's money, that seemed like the case where it matters.
+
+Contributions are welcome under the terms in [`CONTRIBUTING.md`](CONTRIBUTING.md), which
+includes a contributor licence agreement.
+
 Two themes: a warm cream light theme and a near-black dark one, both from the same set of
 semantic tokens, with a toggle in the sidebar.
 
