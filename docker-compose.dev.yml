@@ -53,8 +53,19 @@ services:
       # aurum_dev, not aurum. This is the whole point of the file.
       DATABASE_URL: postgres://${POSTGRES_USER:-aurum}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/aurum_dev
       # Invented credentials for an invented database.
+      #
+      # AUTH_PASSWORD_HASH is pinned empty on purpose. `next dev` loads the .env
+      # file out of the bind-mounted working tree, which carries the real
+      # deployment's settings, and auth.ts prefers a hash over a plaintext
+      # password -- so without this the dev app silently demanded the production
+      # password. Compose values are already in the environment, and Next does
+      # not overwrite a variable that is set, so naming it here is what stops
+      # .env supplying it. The same reasoning applies to the keys below: named
+      # explicitly, defaulting to empty, so the dev container never quietly
+      # inherits real credentials from a file it happens to have mounted.
       AUTH_USERNAME: dev
       AUTH_PASSWORD: dev
+      AUTH_PASSWORD_HASH: ""
       AUTH_SECRET: dev-only-not-a-secret-and-never-reused
       TWELVEDATA_API_KEY: ${TWELVEDATA_API_KEY:-}
       EODHD_API_KEY: ${EODHD_API_KEY:-}
