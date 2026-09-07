@@ -16,7 +16,9 @@
     "test:db": "tsx scripts/db-integration.ts",
     "hash-password": "tsx scripts/hash-password.ts",
     "check:security": "node scripts/check-security.mjs",
-    "test:smoke": "node scripts/smoke.mjs"
+    "test:smoke": "node scripts/smoke.mjs",
+    "check:figures": "./scripts/check-no-personal-figures.sh",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
     "clsx": "^2.1.1",

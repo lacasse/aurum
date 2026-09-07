@@ -350,7 +350,7 @@ export function monthSummary(
 
 export interface FloorItem {
   category: string;
-  /** The middle month, not the mean: one [figure redacted] vet bill is not a commitment. */
+  /** The middle month, not the mean: one large vet bill is not a commitment. */
   typical: number;
   months: number;
 }

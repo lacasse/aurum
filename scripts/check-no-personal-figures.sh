@@ -1,0 +1,109 @@
+#!/bin/sh
+# Reject real financial figures before they reach the repository.
+#
+# The app's whole subject is one person's money, and their figures kept arriving
+# in places that felt like documentation rather than data: the comment
+# explaining why a bug mattered, the test asserting the fix, the commit message
+# describing the symptom. GitHub renders commit messages inside the pull
+# request, so a balance sheet ends up on a page anyone can read. It happened
+# four times, three of them after it had supposedly been learned, which is why
+# this is mechanical now rather than a rule to remember.
+#
+# Written in shell on purpose: node is not on this machine's PATH (it lives in
+# the dev container), and a guard that silently does nothing is worse than no
+# guard. The first version of this was a .mjs file, and the hook failed open
+# with "node: not found" while reporting success.
+#
+#   scripts/check-no-personal-figures.sh            scan tracked files
+#   scripts/check-no-personal-figures.sh --staged   scan staged changes + message
+#
+# What counts is a comma-grouped currency figure -- [figure redacted] and up. Below a
+# thousand there is nothing identifying; above it, a precise amount is almost
+# always copied from something real.
+#
+# Two ways past it, both deliberate:
+#   - add a wholly-invented file to ALLOWED below
+#   - mark the single line INVENTED, which is a claim you are making
+set -eu
+
+MONEY='\$ ?[0-9]{1,3}(,[0-9]{3})+(\.[0-9]+)?'
+# The same pattern for awk, which needs two things spelled differently.
+# macOS ships the one-true-awk, which has no interval expressions -- {1,3}
+# there matches nothing at all, silently. And -v processes backslash escapes
+# before the value is assigned, so a \$ arrives as a bare $ and anchors to end
+# of line instead of matching a dollar sign. Both failures are invisible: the
+# check simply passes everything. Bracket expressions avoid both.
+MONEY_AWK='[$] ?[0-9][0-9]?[0-9]?(,[0-9][0-9][0-9])+([.][0-9]+)?'
+ALLOWED='^(src/lib/sample\.ts|scripts/check-no-personal-figures\.sh)$'
+SCAN_EXT='\.(ts|tsx|js|mjs|md|sql|json|ya?ml)$'
+
+found=0
+report() {
+  if [ "$found" -eq 0 ]; then
+    printf '\nReal financial figures must not enter the repository.\n\n' >&2
+    found=1
+  fi
+  printf '  %s\n' "$1" >&2
+}
+
+if [ "${1:-}" = "--staged" ]; then
+  # Only added lines. A figure already in the tree is the history rewrite's
+  # problem, not this commit's; failing on it would block every unrelated commit.
+  git diff --cached --unified=0 | awk -v money="$MONEY_AWK" -v allowed="$ALLOWED" '
+    /^\+\+\+ b\// { file = substr($0, 7); skip = (file ~ allowed); next }
+    /^\+\+\+/     { next }
+    /^\+/ {
+      if (skip) next
+      line = substr($0, 2)
+      if (line ~ /INVENTED/) next
+      if (line ~ money) printf "%s: %s\n", file, substr(line, 1, 110)
+    }
+  ' > /tmp/.figcheck.$$ 2>/dev/null || true
+  while IFS= read -r hit; do [ -n "$hit" ] && report "$hit"; done < /tmp/.figcheck.$$
+  rm -f /tmp/.figcheck.$$
+
+elif [ "${1:-}" = "--message" ]; then
+  # The message, with no allowance at all. Prose explaining a change never
+  # needs an amount in it -- naming the mechanism says more and cannot leak.
+  #
+  # Its own mode because the file only exists once git has collected the
+  # message: pre-commit runs earlier and would read the *previous* commit's
+  # message, failing on text that is no longer being written.
+  msg="${2:-}"
+  [ -n "$msg" ] && [ -f "$msg" ] || { echo "usage: --message <file>" >&2; exit 2; }
+  while IFS= read -r line; do
+    case "$line" in \#*) continue ;; esac
+    case "$line" in *INVENTED*) continue ;; esac
+    if printf '%s' "$line" | grep -Eq "$MONEY"; then
+      report "commit message: $(printf '%s' "$line" | cut -c1-110)"
+    fi
+  done < "$msg"
+else
+  # One grep over every tracked file of interest. The line-at-a-time version
+  # spawned a process per line and took minutes on this repo, which meant in
+  # practice it would not be run.
+  files=$(git ls-files | grep -E "$SCAN_EXT" | grep -Ev "$ALLOWED" || true)
+  if [ -n "$files" ]; then
+    hits=$(printf '%s\n' "$files" | tr '\n' '\0' \
+      | xargs -0 grep -nEH "$MONEY" 2>/dev/null | grep -v INVENTED || true)
+    if [ -n "$hits" ]; then
+      printf '%s\n' "$hits" | cut -c1-140 | while IFS= read -r hit; do
+        printf '  %s\n' "$hit" >&2
+      done
+      found=1
+      printf '\nReal financial figures must not enter the repository.\n' >&2
+    fi
+  fi
+fi
+
+if [ "$found" -ne 0 ]; then
+  cat >&2 <<'MSG'
+
+Describe the mechanism instead of the amount. If the figures really are
+invented, mark the line INVENTED or add the file to ALLOWED in
+scripts/check-no-personal-figures.sh. Never use --no-verify.
+MSG
+  exit 1
+fi
+
+echo "No real financial figures found."
