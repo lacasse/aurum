@@ -152,7 +152,7 @@ export default function AccountsPage() {
    *
    * The version this replaced fell back to the *oldest* recorded value
    * whenever a month was missing — and the current month is missing until
-   * something writes it. So the chequing account compared today's [figure redacted]
+   * something writes it. So the chequing account compared today's balance
    * against its balance in February 2020 and reported the difference as one
    * month's movement: −$688 a month, every month, for six years.
    */
@@ -246,7 +246,8 @@ export default function AccountsPage() {
               * Repeating it here buried the answer, because next to half a
               * million dollars of portfolio a few thousand of cash and debt
               * is a flat line on the floor — the student loan reaching
-              * [figure redacted] and being paid down to [figure redacted] was invisible.
+              * its opening figure and being paid down to a fraction of it
+              * was invisible.
               *
               * At their own scale they are legible, and they are the pair
               * that decides whether a month is comfortable.

@@ -315,8 +315,8 @@ export default function GuidePage() {
             not consumption: the money leaves chequing and lands on the other
             side of the balance sheet as debt that no longer exists. Counted as
             spending it both overstates what living costs and understates what
-            was saved — it is what made 2024 read as a year that spent [figure redacted]
-            and kept nothing.
+            was saved — it is what made a whole year read as having spent
+            everything and kept nothing.
           </p>
           <p>
             The split is a default rather than a rule — donations may feel less

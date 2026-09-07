@@ -1101,7 +1101,7 @@ export interface AverageMonth {
    *
    * It once subtracted only the *committed* costs, so a month's dining,
    * travel and shopping were reported as still available when they had
-   * already been spent — about [figure redacted] a month too much on this record.
+   * already been spent, which on a real record is a large monthly overstatement.
    */
   uncommittedLiquid: number;
 }

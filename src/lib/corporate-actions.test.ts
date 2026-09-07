@@ -38,7 +38,7 @@ const demerger: CorporateAction = {
 
 describe("applyAction · demerger", () => {
   test("moves the published share of the cost basis to the new holding", () => {
-    // 16 shares at $500 is [figure redacted] of basis; a 10% allocation carries $800.
+    // INVENTED: 16 shares at $500 is [figure redacted] of basis; a 10% allocation carries $800.
     const applied = applyAction({ ...demerger, allocationPct: 10 }, parent);
     assert.ok(applied);
     assert.equal(applied.movedBasis, 800);
