@@ -12,6 +12,7 @@ import {
   toEodhdSymbol,
   toTwelveDataSymbol,
   toUsdCryptoSymbol,
+  twelveDataPrice,
 } from "@/lib/market";
 import { usdCadRate } from "@/lib/fx";
 import { reserveTwelveDataCredits, twelveDataUsage } from "@/db/twelvedata";
@@ -52,10 +53,10 @@ async function fetchTwelveData(
         console.warn(`[prices] Twelve Data ${res.status}`);
         break;
       }
-      const data = (await res.json()) as Record<string, { price?: string }>;
+      const data = (await res.json()) as unknown;
       prices = new Map();
       for (const item of chunk) {
-        const raw = data[item.symbol]?.price;
+        const raw = twelveDataPrice(data, item.symbol, chunk.length);
         const px = raw != null ? parseFloat(raw) : NaN;
         if (Number.isFinite(px) && px > 0) {
           prices.set(item.ticker, Math.round(px * 100) / 100);
