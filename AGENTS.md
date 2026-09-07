@@ -8,6 +8,96 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
+# Personal Data — CRITICAL RULES
+
+This app's subject is one person's money. Their figures and facts must never
+enter this repository. This has gone wrong four times, each time after the
+previous one was supposedly learned, and twice it cost a full history rewrite.
+Treat it as a hard constraint.
+
+## What must never appear
+
+Not in code, comments, tests, fixtures, migrations, scripts, docs, **commit
+messages**, PR titles or bodies, review comments, tag messages or release notes.
+"Attached text" is part of the repo: GitHub renders commit messages inside a
+pull request, which is how a balance sheet ended up on a public page.
+
+- **Amounts.** Any real balance, net worth, cost base, income, spending, debt or
+  contribution.
+- **Rows lifted from a statement or export.** Never paste a real CSV line into a
+  test. Retype it: keep the shape, change every field.
+- **Account and institution identifiers** — broker account codes, the broker's
+  name, the pension plan's name, the loan servicer, the bank.
+- **Tickers actually held.** Example tickers are fine; theirs are not. The
+  benchmark ticker the app fetches is a public index and is allowed.
+- **Names, emails, hostnames, LAN IPs, home directory paths.**
+- **The commit identity.** Use the GitHub noreply address, not a personal one
+  with a machine hostname. Check `git config user.email` in any fresh clone.
+
+## The number is never necessary
+
+A comment or commit message explaining why a bug mattered reads as if it needs
+the real figure. It does not. "It read gross purchases as the amount invested"
+says more than any amount would, and cannot leak anything. If magnitude matters,
+say "roughly double" or "an order of magnitude", never the number.
+
+## Invented data
+
+Fixtures may hold numbers, and they must be obviously invented — round figures,
+made-up symbols and names. If a value could be mistaken for real, it is as bad
+as real. Demo data is invented end to end, in a portfolio *shape* unlike the
+owner's: a demo that merely resembles the real thing is nearly as bad as one
+that copies it.
+
+Mark a single fixture line `INVENTED`. Mark a file whose every row is made up
+`ALL-FIXTURES-INVENTED` — that waives only the export-row heuristic, because
+some fixtures sit in raw CSV literals where a trailing comment would corrupt the
+data. Amounts and private terms are still rejected in such a file.
+
+## The guard
+
+`scripts/check-no-personal-figures.sh` runs from a `pre-commit` hook, a
+`commit-msg` hook and CI. It rejects comma-grouped currency figures, lines shaped
+like an export row, and any term from a private deny-list.
+
+The deny-list lives **outside the repository**, at
+`~/.config/aurum/private-terms.txt` (override with `AURUM_PRIVATE_TERMS`) —
+holdings, broker, plan, account codes, hostname. It has to be outside, because a
+list of someone's holdings committed to their own repo is the disclosure it
+exists to prevent. When the file is absent only the generic checks run, which is
+correct for CI and a fresh clone.
+
+**Never bypass it with `--no-verify`, and never weaken it to make a commit
+pass.** Rewrite the text instead. If it fires, it is right.
+
+Hooks are wired by `npm install` (`prepare` sets `core.hooksPath`). In a fresh
+clone, run `git config core.hooksPath .githooks` if you skipped install.
+
+## One-off operations on the owner's data belong outside this repo
+
+A script or migration that only makes sense for one installation is not part of
+the product. Two of the four incidents were exactly this: month-end portfolio
+history shipped as a *migration*, so every deployment would have installed those
+holdings; and an importer whose column map named a servicer and three people.
+Such work takes its input from a file argument, or lives outside the repo
+entirely.
+
+## Before publishing, audit — do not grep the working tree
+
+A working-tree grep is what let this survive four times.
+
+1. `git clone --mirror` the remote, then also fetch `+refs/pull/*/head:refs/pull/*/head`.
+2. Dump every blob once, scan that for amounts, export rows, private terms,
+   secrets, names, hostnames and IPs.
+3. Scan commit messages separately — a blob scan misses them.
+4. Check the GitHub side: PR titles and bodies, review comments, issues, release
+   notes, repo description, and the author/committer identity on every commit.
+
+**GitHub pull-request refs are permanent.** `refs/pull/N/head` is read-only and
+survives any force-push, so a PR pins the commits it was opened from forever.
+Where PRs exist, a history rewrite is **not** enough — the repository has to be
+deleted and recreated.
+
 # Data Safety — CRITICAL RULES
 
 The PostgreSQL database is the single source of truth for all personal finance data. Data
