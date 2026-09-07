@@ -13,9 +13,7 @@ import {
 } from "./activities";
 import { accountForHint } from "./import-router";
 import type { Account } from "./types";
-
-const HEADER =
-  "effective_date,effective_time,settlement_date,account_id,account_type,activity_type,activity_sub_type,description,direction,symbol,name,currency,quantity,unit_price,commission,net_cash_amount";
+import { ACTIVITY_HEADER as HEADER, activityRow, cashRow, tradeRow } from "./activities.fixture";
 
 function parse(...rows: string[]) {
   return parseActivitiesCsv(
@@ -51,7 +49,7 @@ describe("the account a row names", () => {
 
   test("a chequing row says so, rather than saying nothing", () => {
     const res = parse(
-      '2026-08-12,22:31:55,,AA1,Chequing,MoneyMovement,AFT_OUT,Pre-authorized Debit,,,,CAD,-175,,,-175',
+      cashRow({ date: "2026-08-12", subType: "AFT_OUT", description: "Pre-authorized Debit", netCash: -175 }),
     );
     assert.equal(res.cash.length, 1);
     assert.equal(res.cash[0].accountHint, CHEQUING_HINT);
@@ -60,7 +58,11 @@ describe("the account a row names", () => {
 
   test("a withholding tax belongs to the plan that paid it", () => {
     const res = parse(
-      '2026-08-05,00:00:00,,BB2,RRSP,Tax,NRT,Non-resident tax,,,,USD,-2.15,,,-2.15',
+      activityRow({
+        date: "2026-08-05", accountId: "BB2", accountType: "RRSP",
+        activityType: "Tax", subType: "NRT", description: "Non-resident tax",
+        currency: "USD", netCash: -2.15,
+      }),
     );
     assert.equal(res.cash[0].accountHint, "RRSP");
     assert.equal(accountForHint(res.cash[0].accountHint, accounts), "rrsp");
@@ -78,7 +80,12 @@ describe("the account a row names", () => {
 describe("parseActivitiesCsv", () => {
   test("a buy becomes a trade in the account it settled in", () => {
     const res = parse(
-      '2026-08-17,11:31:02,2026-08-18,CC3,Non-registered margin,Trade,BUY,WEQT - Broadline: Bought 270.5512 shares at $46.21 per share,LONG,WEQT,Broadline Global Equity Index ETF,CAD,270.5512,46.21,0,-12503.17',
+      tradeRow({
+        date: "2026-08-17", settled: "2026-08-18", accountId: "CC3",
+        accountType: "Non-registered margin", side: "BUY", symbol: "WEQT",
+        name: "Broadline Global Equity Index ETF",
+        quantity: 270.5512, unitPrice: 46.21, commission: 0, netCash: -12503.17,
+      }),
     );
     assert.equal(res.trades.length, 1);
     const [t] = res.trades;
@@ -90,7 +97,12 @@ describe("parseActivitiesCsv", () => {
 
   test("a US trade converts at the rate on the row, not today's", () => {
     const res = parse(
-      '2026-06-30,11:52:08,2026-07-01,BB2,RRSP,Trade,SELL,"ZLMN: Sold 5.0000 shares at [figure redacted] per share, FX Rate: 1.3800",LONG,ZLMN,Zellmann Instruments N.V.,USD,-5,842.605,0,4213.03',
+      tradeRow({
+        date: "2026-06-30", settled: "2026-07-01", accountId: "BB2", accountType: "RRSP",
+        side: "SELL", symbol: "ZLMN", name: "Zellmann Instruments N.V.",
+        quantity: 5, unitPrice: 842.6, fxRate: 1.38,
+        currency: "USD", commission: 0, netCash: 4213.03,
+      }),
     );
     const [t] = res.trades;
     assert.equal(t.type, "sell");
@@ -110,8 +122,8 @@ describe("parseActivitiesCsv", () => {
 
   test("salary is income and a pre-authorized debit is spending", () => {
     const res = parse(
-      "2026-06-02,10:00:53,,AA1,Chequing,MoneyMovement,AFT_IN,Direct deposit received,,,,CAD,2870.55,,,2870.55",
-      "2026-06-01,22:34:02,,AA1,Chequing,MoneyMovement,AFT_OUT,Pre-authorized Debit,,,,CAD,-58.20,,,-58.20",
+      cashRow({ date: "2026-06-02", subType: "AFT_IN", description: "Direct deposit received", netCash: 2870.55 }),
+      cashRow({ date: "2026-06-01", subType: "AFT_OUT", description: "Pre-authorized Debit", netCash: -58.2 }),
     );
     assert.equal(res.cash.length, 2);
     assert.equal(res.cash[0].type, "income");
@@ -124,8 +136,8 @@ describe("parseActivitiesCsv", () => {
     // The same amount leaving chequing and arriving in the RRSP. Counted, it
     // would read as a month of spending followed by a deposit.
     const res = parse(
-      "2026-07-15,12:02:02,,AA1,Chequing,MoneyMovement,TRANSFER,Money transfer out of the account,,,,CAD,-500,,,-500",
-      "2026-07-15,12:02:02,,BB2,RRSP,MoneyMovement,EFT,Deposit,,,,CAD,500,,,500",
+      cashRow({ date: "2026-07-15", subType: "TRANSFER", description: "Money transfer out of the account", netCash: -500 }),
+      cashRow({ date: "2026-07-15", accountId: "BB2", accountType: "RRSP", subType: "EFT", description: "Deposit", netCash: 500 }),
     );
     assert.equal(res.cash.length, 0);
     assert.equal(
@@ -136,7 +148,7 @@ describe("parseActivitiesCsv", () => {
 
   test("a credit card payment is dropped, since the card's own export has the spending", () => {
     const res = parse(
-      "2026-08-05,17:48:56,,AA1,Chequing,MoneyMovement,TRANSFER,Credit card payment,,,,CAD,-1240.00,,,-1240.00",
+      cashRow({ date: "2026-08-05", subType: "TRANSFER", description: "Credit card payment", netCash: -1240 }),
     );
     assert.equal(res.cash.length, 0);
     assert.equal(res.skipped.find((s) => s.reason === "credit card payments")?.count, 1);
@@ -171,7 +183,10 @@ describe("parseActivitiesCsv", () => {
 
   test("the journalling fee is money even though the journal is not", () => {
     const res = parse(
-      "2026-07-03,09:30:03,,BB2,RRSP,ListingSwap,-,,,,,CAD,-9.75,,,-9.75",
+      activityRow({
+        date: "2026-07-03", accountId: "BB2", accountType: "RRSP",
+        activityType: "ListingSwap", subType: "-", currency: "CAD", netCash: -9.75,
+      }),
     );
     assert.equal(res.cash.length, 1);
     assert.equal(res.cash[0].type, "expense");

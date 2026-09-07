@@ -209,11 +209,29 @@ Checksum the tables rather than counting them: a dump can carry every row and st
 lost a column. `holdings.flows` is the one worth checking by hand — it is JSON, it holds
 every trade, and every return figure in the app is derived from it.
 
+## Develop against invented data
+
+Development runs against `aurum_dev`, a separate database that holds nothing real:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev up -d
+```
+
+The app is then on <http://127.0.0.1:3002>, running from the working tree, with unreleased
+pages visible. `aurum_dev` is created empty, and an empty database is seeded from
+`generateSampleData()`, so it comes up full of invented accounts, holdings and transactions
+with no seeding step of its own.
+
+It is a separate database on purpose. Development used to run against the production one,
+which meant real balances were on screen while writing every test, comment and commit
+message — and that is where they kept ending up. Reaching real data is still possible and
+now has to be deliberate: pass `DATABASE_URL` explicitly for the one command that needs it.
+
 ## Run it (local, no Docker)
 
 ```bash
 npm install
-DATABASE_URL=postgres://aurum:aurum@localhost:5432/aurum npm run dev
+DATABASE_URL=postgres://aurum:aurum@localhost:5432/aurum_dev npm run dev
 ```
 
 Without a reachable database the app still renders using bundled sample data (writes are
@@ -383,9 +401,12 @@ its ids are derived from month, category and payee, so a second run corrects the
 rather than duplicating them.
 
 ```bash
-docker exec -e DATABASE_URL=... aurum-dev \
+docker exec -e DATABASE_URL=<the real one> aurum-dev \
   npx tsx scripts/import-monthly-totals.ts rows.json --map my.map.json
 ```
+
+`aurum-dev` points at the dev database, so a script meant to touch real data has to be
+given the real `DATABASE_URL` explicitly. That is deliberate.
 
 Without `--commit` it prints what it would write and changes nothing. `rows.json` is an
 array of `{ date, kind, sheetCategory, amount }`; a negative amount in a spending column is

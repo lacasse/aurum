@@ -1,0 +1,80 @@
+# Development stack: the app running from the working tree, against a database
+# that holds nothing real.
+#
+# The point of the separate database is that development used to run against
+# the production one. Everything on screen while writing a test, a comment or a
+# commit message was the owner's actual money, and their figures kept ending up
+# in the repository because they were what was in front of whoever was writing.
+# See "Personal Data" in AGENTS.md. A rule cannot beat an arrangement; this
+# changes the arrangement.
+#
+# `aurum_dev` is empty on creation, and ensureDb() seeds an empty database from
+# generateSampleData(), so the dev app comes up full of invented data with no
+# seeding step of its own.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev up -d
+#
+# Reaching the real database from here is still possible and now has to be
+# deliberate: pass DATABASE_URL explicitly for the one command that needs it.
+name: finance
+
+services:
+  # Creates the dev database if it is not there, then exits. Postgres only runs
+  # its own init scripts on a fresh volume, which this deliberately is not.
+  dev-db-init:
+    image: postgres:17-alpine
+    profiles: ["dev"]
+    restart: "no"
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        psql -h db -U ${POSTGRES_USER:-aurum} -d postgres -tc
+        "SELECT 1 FROM pg_database WHERE datname = 'aurum_dev'"
+        | grep -q 1
+        || psql -h db -U ${POSTGRES_USER:-aurum} -d postgres -c "CREATE DATABASE aurum_dev"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  dev:
+    image: node:22-alpine
+    profiles: ["dev"]
+    container_name: aurum-dev
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "npm ci --no-audit --no-fund
+      && npx tsx scripts/seed-dev.ts
+      && npm run dev -- -p 3000 -H 0.0.0.0"
+    environment:
+      # aurum_dev, not aurum. This is the whole point of the file.
+      DATABASE_URL: postgres://${POSTGRES_USER:-aurum}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/aurum_dev
+      # Invented credentials for an invented database.
+      AUTH_USERNAME: dev
+      AUTH_PASSWORD: dev
+      AUTH_SECRET: dev-only-not-a-secret-and-never-reused
+      TWELVEDATA_API_KEY: ${TWELVEDATA_API_KEY:-}
+      EODHD_API_KEY: ${EODHD_API_KEY:-}
+      NEXT_PUBLIC_SHOW_UNRELEASED: "1"
+    ports:
+      - "127.0.0.1:3002:3000"
+    volumes:
+      - .:/app
+      - dev_modules:/app/node_modules
+      # Turbopack's persistent cache panics when it lives on the bind mount --
+      # it loses its own .sst files across a container restart and aborts on
+      # start. Keeping the build cache inside the container fixes it, and it is
+      # build output rather than source, so nothing is lost by not sharing it.
+      - dev_next:/app/.next
+    depends_on:
+      db:
+        condition: service_healthy
+      dev-db-init:
+        condition: service_completed_successfully
+
+volumes:
+  dev_modules:
+  dev_next:

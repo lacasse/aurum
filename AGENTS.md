@@ -82,6 +82,32 @@ holdings; and an importer whose column map named a servicer and three people.
 Such work takes its input from a file argument, or lives outside the repo
 entirely.
 
+## Develop against the dev database, never production
+
+`docker-compose.dev.yml` runs the app from the working tree against `aurum_dev`,
+a database that holds nothing real. It is empty on creation and `ensureDb()`
+seeds an empty database from `generateSampleData()`, so it comes up full of
+invented data with no seeding step.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev up -d
+```
+
+This is architecture, not convenience. Development used to run against the
+production database, so the owner's real balances were on screen while writing
+every test, comment and commit message — and that is where they kept ending up.
+A rule cannot beat an arrangement. Reaching real data is still possible and now
+has to be deliberate: pass `DATABASE_URL` explicitly for the one command that
+needs it.
+
+## Build export fixtures, do not paste them
+
+`src/lib/activities.fixture.ts` builds activity-export rows from named fields.
+Use `activityRow`, `cashRow` and `tradeRow` in tests rather than writing a CSV
+line by hand, because writing one by hand meant having a real export open and
+copying from it. There is nothing to copy from a builder. The export-row check
+in the guard is a backstop for this, not the primary defence.
+
 ## Before publishing, audit — do not grep the working tree
 
 A working-tree grep is what let this survive four times.
