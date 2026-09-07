@@ -51,3 +51,6 @@ next-env.d.ts
 # Column maps for scripts/import-monthly-totals.ts name real lenders, landlords
 # and people. Keep them beside the spreadsheet, not in the repo.
 /scripts/*.map.json
+
+# One-off operations on this installation's own data. See ops/README.md.
+/ops/
