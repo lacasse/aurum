@@ -640,7 +640,7 @@ describe("consolidateHoldings", () => {
     const rows = consolidateHoldings([
       lot({ id: "a", ticker: "XEQT", shares: 10 }),
       lot({ id: "b", ticker: "XEQT", accountId: "acc-rrsp", shares: 10 }),
-      lot({ id: "c", ticker: "VFV", shares: 20 }),
+      lot({ id: "c", ticker: "USLG", shares: 20 }),
     ]);
     assert.equal(rows.length, 2);
     assert.equal(Math.round(rows.reduce((s, r) => s + r.weightPct, 0)), 100);

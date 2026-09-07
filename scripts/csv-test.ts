@@ -1,3 +1,9 @@
+/*
+ * ALL-FIXTURES-INVENTED. Every row below has the shape of a real export and
+ * none of its content: account codes, symbols, names, quantities, prices and
+ * amounts are all made up. Statement rows were once pasted in here verbatim,
+ * which put account identifiers and real trades into a public repository.
+ */
 import Papa from "papaparse";
 import { parseCsvRecords, parseAmount, parseFlexibleDate, ImportedRow } from "../src/lib/csv";
 

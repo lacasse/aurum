@@ -119,7 +119,7 @@ describe("resolveTicker", () => {
   });
 
   test("a symbol nobody holds is still new", () => {
-    assert.equal(resolveTicker("NVDA", [holding()], "acct-1"), "NVDA");
+    assert.equal(resolveTicker("OMNI", [holding()], "acct-1"), "OMNI");
   });
 });
 

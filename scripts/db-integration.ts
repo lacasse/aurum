@@ -312,10 +312,10 @@ async function main() {
       );
 
       // Per-ticker fetch dates drive which holdings spend tomorrow's calls.
-      await eodhd.recordEodhdFetched(["XEQT.TO", "VFV.TO"], day);
+      await eodhd.recordEodhdFetched(["XEQT.TO", "USLG.TO"], day);
       const seen = await eodhd.eodhdLastFetched();
       expect(
-        seen.get("XEQT.TO") === "2026-08-28" && seen.get("VFV.TO") === "2026-08-28",
+        seen.get("XEQT.TO") === "2026-08-28" && seen.get("USLG.TO") === "2026-08-28",
         "records which tickers were priced today",
       );
       await eodhd.__resetEodhdLedgerForTests();
