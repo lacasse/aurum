@@ -1873,7 +1873,7 @@ describe("incomeBySource", () => {
   });
 
   test("averages over the window, not over the months it arrived in", () => {
-    // INVENTED: one bonus in a twelve-month window is $100 a month, not [figure redacted].
+    // INVENTED: one bonus in a twelve-month window is $100 a month, not $1,200.
     const b = incomeBySource([pay("2026-08-31", 1200, "Additional Income")], 12, "2026-08");
     assert.equal(b.sources[0].average, 100);
     assert.equal(b.sources[0].months, 1);
