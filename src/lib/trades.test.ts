@@ -1,3 +1,7 @@
+/*
+ * ALL-FIXTURES-INVENTED. The CSV rows below have the shape of a broker
+ * export and none of its content -- symbols, quantities and prices are made up.
+ */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -89,8 +93,8 @@ describe("parseTradeCsv", () => {
     const csv = [
       header,
       "2025-01-05,buy,XEQT,10,30,300,TFSA,",
-      "2025-01-06,buy,VFV,5,100,500,Taxable,",
-      "2025-01-07,buy,ZAG,2,15,30,RRSP,",
+      "2025-01-06,buy,USLG,5,100,500,Taxable,",
+      "2025-01-07,buy,CBND,2,15,30,RRSP,",
     ].join("\n");
     assert.deepEqual(
       parseTradeCsv("t.csv", csv).map((r) => r.registration),
@@ -101,7 +105,7 @@ describe("parseTradeCsv", () => {
   test("a manual CAD conversion marks the security as US-listed", () => {
     const csv = [
       header,
-      "2025-01-05,buy,NVDA,2,100,200,TFSA,272.50",
+      "2025-01-05,buy,OMNI,2,100,200,TFSA,272.50",
       "2025-01-05,buy,XEQT,10,30,300,TFSA,",
     ].join("\n");
     const [nvda, xeqt] = parseTradeCsv("t.csv", csv);
@@ -280,7 +284,7 @@ describe("accumulatePositions", () => {
 
   test("a US position keeps the CAD it actually cost", () => {
     const { positions } = accumulatePositions(
-      [row({ ticker: "NVDA", currency: "USD", quantity: 2, transactedAmount: 200, amountCad: 272.5 })],
+      [row({ ticker: "OMNI", currency: "USD", quantity: 2, transactedAmount: 200, amountCad: 272.5 })],
       resolve,
       [],
     );
