@@ -25,8 +25,12 @@ import {
 export async function reserveTwelveDataCredits(
   credits: number,
   now: Date = new Date(),
+  /** Spend past the plan's limits at the user's explicit request. */
+  force = false,
 ): Promise<boolean> {
   if (!Number.isFinite(credits) || credits <= 0) return false;
+  // A limit of zero is a switch, not a budget: it means do not call this
+  // provider at all, and a forced refresh does not override a switch.
   if (TWELVEDATA_MINUTE_LIMIT <= 0 || TWELVEDATA_DAY_LIMIT <= 0) return false;
 
   await db
@@ -41,7 +45,9 @@ export async function reserveTwelveDataCredits(
       .where(eq(appMeta.key, TWELVEDATA_QUOTA_KEY))
       .for("update");
 
-    const { granted, nextValue } = grantCredits(row?.value, now, credits);
+    const { granted, nextValue } = grantCredits(
+      row?.value, now, credits, TWELVEDATA_MINUTE_LIMIT, TWELVEDATA_DAY_LIMIT, force,
+    );
     if (granted) {
       await tx
         .update(appMeta)

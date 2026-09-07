@@ -26,6 +26,7 @@ const EODHD_TOKEN = process.env.EODHD_API_KEY ?? "";
 
 async function fetchTwelveData(
   items: { ticker: string; symbol: string }[],
+  force = false,
 ): Promise<Map<string, number>> {
   if (items.length === 0 || !TWELVE_DATA_KEY) return new Map();
   const out = new Map<string, number>();
@@ -34,7 +35,7 @@ async function fetchTwelveData(
   const CHUNK = 8;
   for (let start = 0; start < items.length; start += CHUNK) {
     const chunk = items.slice(start, start + CHUNK);
-    if (!(await reserveTwelveDataCredits(chunk.length))) {
+    if (!(await reserveTwelveDataCredits(chunk.length, new Date(), force))) {
       console.warn(
         `[prices] Twelve Data skipped (rate/quota): ${chunk.length} credit(s)`,
       );
@@ -169,6 +170,20 @@ export async function GET(req: Request) {
     const currenciesRaw = url.searchParams.get("currencies") ?? "";
     const classes = classesRaw.split(",").map((c) => c.trim());
     const currencies = currenciesRaw.split(",").map((c) => c.trim());
+    /*
+     * A refresh the user asked for, rather than one the page asked for on its
+     * own schedule.
+     *
+     * Three things hold an automatic refresh back, and this lifts all three:
+     * the per-process price cache, the rule that EOD data is only worth buying
+     * after the close, and the providers' daily and per-minute allowances. Each
+     * exists to stop the app spending an allowance quietly; none is a reason to
+     * refuse someone who has been shown the cost and asked for it anyway.
+     *
+     * The spend is still written to both ledgers, so what it took is visible
+     * and the next automatic refresh sees a smaller allowance.
+     */
+    const force = url.searchParams.get("force") === "1";
 
     if (tickers.length === 0) {
       return { prices: {} as Record<string, number>, ts: Date.now() };
@@ -194,7 +209,7 @@ export async function GET(req: Request) {
       const cached = priceCache.get(tickers[i]);
       const source = priceSource(tickers[i]);
       const ttl = CACHE_TTL[source] ?? 60_000;
-      if (cached && now - cached.at < ttl) {
+      if (!force && cached && now - cached.at < ttl) {
         cachedPrices[tickers[i]] = cached.price;
         continue;
       }
@@ -226,12 +241,17 @@ export async function GET(req: Request) {
     const eodhdDue = selectEodhdDue(eodhdItems, lastFetched, utcDay(nowDate));
 
     // EOD data only changes after the close, so before it there is nothing new
-    // to buy with the allowance.
-    const budget = afterClose ? await reserveEodhdCalls(eodhdDue.length) : 0;
+    // to buy with the allowance -- unless the refresh was asked for, in which
+    // case the person asking may want yesterday's close on a ticker that has
+    // never been priced at all.
+    const budget =
+      afterClose || force
+        ? await reserveEodhdCalls(eodhdDue.length, nowDate, undefined, force)
+        : 0;
     const eodhdToFetch = eodhdDue.slice(0, budget);
 
     const [twelvePrices, eodhdPrices] = await Promise.all([
-      fetchTwelveData(twelveDataItems),
+      fetchTwelveData(twelveDataItems, force),
       fetchEodhd(eodhdToFetch),
     ]);
 
@@ -248,6 +268,7 @@ export async function GET(req: Request) {
       const { rate } = await usdCadRate();
       const usdPrices = await fetchTwelveData(
         cryptoMissing.map((i) => ({ ...i, symbol: toUsdCryptoSymbol(i.ticker) })),
+        force,
       );
       for (const [ticker, usd] of usdPrices) {
         twelvePrices.set(ticker, Math.round(usd * rate * 100) / 100);
@@ -277,6 +298,9 @@ export async function GET(req: Request) {
       twelveData: await twelveDataUsage(nowDate),
       ts: now,
       afterClose,
+      forced: force,
+      /** What the call actually asked the providers for, so the UI can say. */
+      spent: { twelveData: twelveDataItems.length, eodhd: eodhdToFetch.length },
     };
   });
 }
