@@ -87,3 +87,49 @@ describe("a trade already recorded is not imported again", () => {
     assert.equal(mark([row()], [held()])[0].duplicate, false);
   });
 });
+
+describe("dates and distributions, where the two records disagree", () => {
+  test("a trade date and a settlement date are the same trade", () => {
+    // A spreadsheet records the day it was made; an export the day it settled.
+    const out = mark(
+      [row({ type: "buy", date: "2026-08-17", quantity: 21.45, amountCad: 500 })],
+      [held({ flows: [{ date: "2026-08-15", kind: "buy", amount: 500, shares: 21.45 }] as never })],
+    );
+    assert.equal(out[0].duplicate, true);
+  });
+
+  test("a fortnight apart is a different trade, however alike", () => {
+    const out = mark(
+      [row({ type: "buy", date: "2026-08-31", quantity: 21.45, amountCad: 500 })],
+      [held({ flows: [{ date: "2026-08-15", kind: "buy", amount: 500, shares: 21.45 }] as never })],
+    );
+    assert.equal(out[0].duplicate, false, "a monthly purchase must still import");
+  });
+
+  test("one distribution split in the export matches the total on record", () => {
+    // The export writes 1.58 and 80.75; the database holds 82.33.
+    const stored = held({
+      flows: [{ date: "2026-07-06", kind: "dividend", amount: 82.33, shares: 0 }] as never,
+    });
+    for (const amt of [1.58, 80.75]) {
+      const out = mark([row({ type: "dividend", quantity: 0, date: "2026-07-06", amountCad: amt })], [stored]);
+      assert.equal(out[0].duplicate, true, `component ${amt} is part of the same payment`);
+    }
+  });
+
+  test("a distribution written in the security's own currency still matches", () => {
+    const out = mark(
+      [row({ type: "dividend", quantity: 0, date: "2026-06-10", amountCad: 15.52 })],
+      [held({ flows: [{ date: "2026-06-10", kind: "dividend", amount: 22.04, shares: 0 }] as never })],
+    );
+    assert.equal(out[0].duplicate, true, "the same payment, one side unconverted");
+  });
+
+  test("the next quarter's distribution is not the last one", () => {
+    const out = mark(
+      [row({ type: "dividend", quantity: 0, date: "2026-09-10", amountCad: 22.04 })],
+      [held({ flows: [{ date: "2026-06-10", kind: "dividend", amount: 22.04, shares: 0 }] as never })],
+    );
+    assert.equal(out[0].duplicate, false, "three months apart is a different payment");
+  });
+});
