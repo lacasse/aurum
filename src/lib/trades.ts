@@ -15,7 +15,7 @@ import {
   Registration,
   movementApplies,
 } from "./types";
-import { resolveTicker } from "./trade-batch";
+import { baseTicker, resolveTicker } from "./trade-batch";
 import { todayISO } from "./format";
 
 export type TradeType = "buy" | "sell" | "dividend" | "deposit" | "withdrawal";
@@ -278,19 +278,61 @@ export function parseTradeCsv(
 /* ------------------------------------------------------------------ */
 
 /**
- * Identity of a trade as it ends up stored: the security, the account it
- * landed in, the day, the direction and the money. Deliberately excludes the
- * share count, because a sale clamped by an oversell stores fewer shares than
- * the row asked for and would otherwise fail to match itself.
+ * Which security, account, day and direction a trade belongs to — but not how
+ * much it was for.
+ *
+ * The money is deliberately not in the key, and neither is the exact ticker
+ * spelling, because both differ between two records of one event:
+ *
+ *   - a position held as DVFD.TO meets an export that writes DVFD, so an exact
+ *     ticker made every such row look new;
+ *   - the same sale converted by hand into Canadian dollars and converted again
+ *     by the broker disagree by a few dollars, so an exact amount made the row
+ *     fail to match itself.
+ *
+ * Both defeated the duplicate check that was already here, and the same trades
+ * were imported a second time into positions that already held them. What
+ * distinguishes two genuine trades on one day in one security is compared
+ * separately, with tolerance, in `sameEvent`.
  */
-function flowKey(
-  ticker: string,
-  accountId: string,
-  date: string,
-  kind: string,
-  amount: number,
-): string {
-  return `${ticker.toUpperCase()}|${accountId}|${date}|${kind}|${amount.toFixed(2)}`;
+function flowKey(ticker: string, accountId: string, date: string, kind: string): string {
+  return `${baseTicker(ticker)}|${accountId}|${date}|${kind}`;
+}
+
+/** One recorded flow, reduced to what identifies it within its day. */
+interface FlowMark {
+  /** Unsigned. Zero for a distribution, which has no share count to compare. */
+  quantity: number;
+  amount: number;
+}
+
+/**
+ * Whether two records on the same security, account, day and direction are the
+ * same event rather than two trades that happen to coincide.
+ *
+ * Share count decides where there is one: two records of one purchase agree on
+ * how many shares changed hands even when they disagree on the money, and two
+ * genuine purchases on one day almost never agree on both. A hair of tolerance
+ * covers a fractional quantity written to different precision.
+ *
+ * A distribution has no share count, so the money decides, and it is given more
+ * room: the same dividend is commonly recorded gross in one place and net of
+ * withholding tax in another, which is a real difference of about fifteen
+ * percent for a US payer.
+ */
+function sameEvent(a: FlowMark, b: FlowMark): boolean {
+  const near = (x: number, y: number, tol: number) => {
+    const scale = Math.max(Math.abs(x), Math.abs(y));
+    return scale === 0 ? true : Math.abs(x - y) / scale <= tol;
+  };
+  // A distribution has no share count, so the money is all there is.
+  if (a.quantity === 0 && b.quantity === 0) return near(a.amount, b.amount, 0.2);
+  // Either half is enough. The share count carries a trade whose money was
+  // converted differently in the two records; the money carries a sale that
+  // was clamped by an oversell, which stores fewer shares than the row asked
+  // for and so cannot be recognised by its quantity.
+  if (a.quantity > 0 && b.quantity > 0 && near(a.quantity, b.quantity, 0.005)) return true;
+  return near(a.amount, b.amount, 0.005);
 }
 
 /** The same, for the transfers a deposit or withdrawal turns into. */
@@ -319,12 +361,21 @@ export function markAlreadyImported(
   }[],
   investmentAccountIds: ReadonlySet<string>,
 ): TradeRow[] {
-  const seen = new Set<string>();
+  /*
+   * Grouped rather than a flat set, because matching needs tolerance: the key
+   * says which day and security, and `sameEvent` decides whether a row is one
+   * of the flows already recorded there.
+   */
+  const seenFlows = new Map<string, FlowMark[]>();
   for (const h of existingHoldings) {
     for (const f of h.flows ?? []) {
-      seen.add(flowKey(h.ticker, h.accountId, f.date, f.kind, f.amount));
+      const key = flowKey(h.ticker, h.accountId, f.date, f.kind);
+      const marks = seenFlows.get(key) ?? [];
+      marks.push({ quantity: Math.abs(f.shares), amount: f.amount });
+      seenFlows.set(key, marks);
     }
   }
+  const seen = new Set<string>();
   for (const t of existingTransfers) {
     // The investment side is the one a deposit or withdrawal names.
     const into = t.destinationAccountId && investmentAccountIds.has(t.destinationAccountId);
@@ -337,11 +388,13 @@ export function markAlreadyImported(
     if (r.duplicate || r.registration === null || r.type === null) return r;
     const accountId = accountIdFor(r.registration);
     if (!accountId) return r;
-    const key =
-      r.type === "deposit" || r.type === "withdrawal"
-        ? transferKey(r.date, r.amountCad, accountId, r.type === "deposit")
-        : flowKey(r.ticker, accountId, r.date, r.type, r.amountCad);
-    if (!seen.has(key)) return r;
+    if (r.type === "deposit" || r.type === "withdrawal") {
+      if (!seen.has(transferKey(r.date, r.amountCad, accountId, r.type === "deposit"))) return r;
+    } else {
+      const marks = seenFlows.get(flowKey(r.ticker, accountId, r.date, r.type));
+      const mark: FlowMark = { quantity: Math.abs(r.quantity), amount: r.amountCad };
+      if (!marks?.some((m) => sameEvent(m, mark))) return r;
+    }
     return {
       ...r,
       duplicate: true,
