@@ -110,3 +110,31 @@ export function staleTickers(
 ): string[] {
   return tickers.filter((ticker) => prices[ticker] === undefined);
 }
+
+/**
+ * Read one price out of a Twelve Data response.
+ *
+ * The shape depends on how many symbols were asked for, which is easy to miss
+ * and was: a batch comes back keyed by symbol,
+ *
+ *   {"BTC/USD":{"price":"79189.72"},"ETH/USD":{"price":"2497.71"}}
+ *
+ * and a single symbol comes back flat, with no key at all.
+ *
+ *   {"price":"79180.59"}
+ *
+ * Reading only the keyed form meant any request that happened to carry one
+ * symbol silently returned nothing. Crypto suffered worst, because the retry
+ * that re-asks in USD for coins with no CAD pair usually carries exactly one —
+ * so a portfolio's coins went unpriced for weeks while the rest refreshed, and
+ * the credits were spent either way.
+ */
+export function twelveDataPrice(data: unknown, symbol: string, asked: number): string | undefined {
+  if (data === null || typeof data !== "object") return undefined;
+  const flat = (data as { price?: unknown }).price;
+  // Trusted only when one symbol was asked for; a batch response has no
+  // top-level price, and reading one would attribute it to the wrong symbol.
+  if (asked === 1 && typeof flat === "string") return flat;
+  const keyed = (data as Record<string, { price?: unknown }>)[symbol];
+  return typeof keyed?.price === "string" ? keyed.price : undefined;
+}
