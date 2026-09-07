@@ -295,12 +295,29 @@ export function parseTradeCsv(
  * distinguishes two genuine trades on one day in one security is compared
  * separately, with tolerance, in `sameEvent`.
  */
-function flowKey(ticker: string, accountId: string, date: string, kind: string): string {
-  return `${baseTicker(ticker)}|${accountId}|${date}|${kind}`;
+function flowKey(ticker: string, accountId: string, kind: string): string {
+  return `${baseTicker(ticker)}|${accountId}|${kind}`;
 }
+
+/** Whole days between two ISO dates, unsigned. */
+function daysApart(a: string, b: string): number {
+  const ms = Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`));
+  return Number.isFinite(ms) ? ms / 86_400_000 : Infinity;
+}
+
+/**
+ * How far apart two records of one event may be dated.
+ *
+ * The date is not stable across sources either. A spreadsheet records the day a
+ * trade was made and an export records the day it settled; a distribution is
+ * dated by its payable date in one place and the day it landed in another. Three
+ * days covers a weekend, which is the usual size of the gap.
+ */
+const DATE_SLACK_DAYS = 3;
 
 /** One recorded flow, reduced to what identifies it within its day. */
 interface FlowMark {
+  date: string;
   /** Unsigned. Zero for a distribution, which has no share count to compare. */
   quantity: number;
   amount: number;
@@ -326,7 +343,19 @@ function sameEvent(a: FlowMark, b: FlowMark): boolean {
     return scale === 0 ? true : Math.abs(x - y) / scale <= tol;
   };
   // A distribution has no share count, so the money is all there is.
-  if (a.quantity === 0 && b.quantity === 0) return near(a.amount, b.amount, 0.2);
+  /*
+   * A distribution matches on nothing but its date, because neither the money
+   * nor a share count survives the trip. One payment arrives as a single row in
+   * one record and as several in another -- gross and withholding split apart,
+   * or per-lot -- so the amounts are not comparable; and one source writes the
+   * figure in the security's own currency where the other has converted it,
+   * which is a difference of the exchange rate rather than of the event.
+   *
+   * A company pays one distribution per security per period, so two records
+   * within a few days of each other are that one payment however each side
+   * chose to write it down.
+   */
+  if (a.quantity === 0 && b.quantity === 0) return true;
   // Either half is enough. The share count carries a trade whose money was
   // converted differently in the two records; the money carries a sale that
   // was clamped by an oversell, which stores fewer shares than the row asked
@@ -369,9 +398,9 @@ export function markAlreadyImported(
   const seenFlows = new Map<string, FlowMark[]>();
   for (const h of existingHoldings) {
     for (const f of h.flows ?? []) {
-      const key = flowKey(h.ticker, h.accountId, f.date, f.kind);
+      const key = flowKey(h.ticker, h.accountId, f.kind);
       const marks = seenFlows.get(key) ?? [];
-      marks.push({ quantity: Math.abs(f.shares), amount: f.amount });
+      marks.push({ date: f.date, quantity: Math.abs(f.shares), amount: f.amount });
       seenFlows.set(key, marks);
     }
   }
@@ -391,9 +420,12 @@ export function markAlreadyImported(
     if (r.type === "deposit" || r.type === "withdrawal") {
       if (!seen.has(transferKey(r.date, r.amountCad, accountId, r.type === "deposit"))) return r;
     } else {
-      const marks = seenFlows.get(flowKey(r.ticker, accountId, r.date, r.type));
-      const mark: FlowMark = { quantity: Math.abs(r.quantity), amount: r.amountCad };
-      if (!marks?.some((m) => sameEvent(m, mark))) return r;
+      const marks = seenFlows.get(flowKey(r.ticker, accountId, r.type));
+      const mark: FlowMark = { date: r.date, quantity: Math.abs(r.quantity), amount: r.amountCad };
+      const found = marks?.some(
+        (m) => daysApart(m.date, mark.date) <= DATE_SLACK_DAYS && sameEvent(m, mark),
+      );
+      if (!found) return r;
     }
     return {
       ...r,
