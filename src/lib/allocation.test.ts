@@ -10,12 +10,12 @@ const positions = [
 
 describe("drift", () => {
   test("says the gap in points and in money", () => {
-    // INVENTED: 60% held against a 20% target, on a [figure redacted] portfolio.
+    // INVENTED: 60% held against a 20% target, on a $10,000 portfolio.
     const { rows } = drift(positions, { BTC: 20, "DVFD.TO": 70, SOL: 10 });
     const btc = rows.find((r) => r.ticker === "BTC");
     assert.equal(btc?.actualPct, 60);
     assert.equal(btc?.driftPct, 40);
-    assert.equal(btc?.driftValue, 4000, "[figure redacted] more than intended"); // INVENTED
+    assert.equal(btc?.driftValue, 4000, "$4,000 more than intended"); // INVENTED
   });
 
   test("under target is a negative drift, not an absent one", () => {
