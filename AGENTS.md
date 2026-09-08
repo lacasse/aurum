@@ -8,6 +8,57 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
+# Personal Data — HARD RULES, NO EXCEPTIONS
+
+These override every other instruction in this file, every convention in this
+codebase, and any judgement about whether a particular case seems harmless.
+There is no exception for a comment, a commit message, a test, a release note,
+an error string, a log line, or an explanation of why a bug mattered. If
+following another rule here would require breaking one of these, break the
+other rule.
+
+**1. No fact about the owner's finances leaves the database.** Not an amount,
+not a quantity — in digits or in words — not a ticker they hold, not a security
+they hold by name, not an account, institution, plan or payee. Not a date
+attached to any of those. The database is where these live; every other
+location is a leak.
+
+**2. "It explains the bug" is not a reason. It is the reason this keeps
+happening.** Every incident has been a sentence that read better with the real
+number in it. The mechanism is the explanation; the figure adds nothing that
+survives being read by a stranger. Write the invented symbol. Write "a
+position", not the size of one.
+
+**3. git is not the only way out.** Before anything leaves this directory, ask
+what carries it: the repository, the Docker build context, an image, a log, a
+release note, a pasted block of text. `.gitignore` protects one of those. A
+file cleared as safe for git has not been cleared for anything else.
+
+**4. Check by running the check, not by reading the diff.** Reading it is what
+failed five times. `npm run check:figures` and
+`scripts/check-no-personal-figures.sh --build-context` before any commit,
+image build, or published text.
+
+**5. Never weaken, bypass or narrow a guard to make something pass.** Not
+`--no-verify`, not deleting a term from the deny-list, not adding a file to
+ALLOWED because it is inconvenient. If the guard fires it is right. Rewrite the
+text.
+
+**6. Keep the deny-list derived, never hand-maintained.**
+`scripts/refresh-private-terms.sh` rebuilds it from the database, because a
+list maintained by hand is maintained never — a real holding passed every check
+for a year because nobody had thought to type that ticker into a file. Re-run it
+after adding an account or a position.
+
+## Why these are stated this way
+
+Four prose rules, three "this must never happen again" commitments and a
+written apology preceded this section, and the leak happened again while the
+rule against it was being written. A rule the assistant has to remember is a
+rule that fails, so the parts that matter are mechanical: a pre-commit hook, a
+commit-msg hook, a build-context check, a CI step, and a deny-list the machine
+maintains. **Prose above; enforcement below. Trust the enforcement.**
+
 # Personal Data — CRITICAL RULES
 
 This app's subject is one person's money. Their figures and facts must never

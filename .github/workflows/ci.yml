@@ -56,6 +56,12 @@ jobs:
       - name: No real financial figures
         run: npm run check:figures
 
+      # git is not the only way out of the directory: the Docker builder copies
+      # the working tree and never consults .gitignore, which is how a script
+      # holding real figures was shipped inside an image.
+      - name: No personal data in the build context
+        run: ./scripts/check-no-personal-figures.sh --build-context
+
       - name: Unit tests
         run: npm test
 

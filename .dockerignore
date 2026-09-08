@@ -11,6 +11,26 @@ README.md
 tsconfig.tsbuildinfo
 *.sql.gz
 *.sql
+
+# One-off operations on this installation's data. Gitignored, which is not the
+# same as excluded from a build: the builder does `COPY . .` and never consults
+# git, so a script holding real figures was copied into the image and shipped
+# with it. Note that `*.sql` above matches root-level files only, which is why
+# ops/*.sql got through.
+#
+# The migrations under drizzle/ are deliberately NOT excluded — the image runs
+# them on startup.
+ops/
+
+# The development stack. A release has no business carrying the means to run a
+# second instance of itself.
+docker-compose.dev.yml
+docker-compose.*.yml
+
+# Instructions to whoever works on this, not to whoever runs it.
+AGENTS.md
+CLAUDE.md
+CONTRIBUTING.md
 backup/
 nginx/
 # Secrets: never bake into image layers / build context
