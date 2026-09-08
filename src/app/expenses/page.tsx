@@ -136,11 +136,19 @@ export default function ExpensesPage() {
   const data = useMemo(() => {
     if (!selected) return null;
     const g = settings.groups;
-    const series = monthlySpend(transactions, g);
+    /*
+     * How far the record is worth reading: the month the page opens on, or a
+     * later one if that is what was asked for. Everything after it is a month
+     * still in progress, which holds a few days of spending and so draws as a
+     * cliff at the right-hand edge of every chart while dragging the rolling
+     * average and the rankings down with it.
+     */
+    const readThrough = latest && selected < latest ? latest : selected;
+    const series = monthlySpend(transactions, g, readThrough);
     const avg = rollingAverage(series.map((m) => m.total), 12);
     const trend = series.map((m, i) => ({ ...m, average: avg[i] ?? undefined }));
     const rows = categoryRows(transactions, selected, g);
-    const summary = monthSummary(transactions, selected, g);
+    const summary = monthSummary(transactions, selected, g, 12, readThrough);
     const floor = recurringFloor(transactions, g, 12, latest ?? undefined);
     const car = settings.car
       ? runningCost(

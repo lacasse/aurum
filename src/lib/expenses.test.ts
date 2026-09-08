@@ -112,6 +112,48 @@ describe("the month the expenses page opens on", () => {
   });
 });
 
+/*
+ * The charts kept drawing the month in progress after the page had stopped
+ * opening on it: a few days of spending beside finished months, which is a
+ * cliff at the right-hand edge and an average dragged down by an artefact of
+ * the calendar rather than by anything that happened.
+ */
+describe("charts stop at the month being read", () => {
+  const txns = [
+    txn("2026-07-14", 260, "Groceries"),
+    txn("2026-08-14", 240, "Groceries"),
+    txn("2026-09-01", 1300, "Housing"),
+  ];
+
+  test("a bound drops the months after it", () => {
+    assert.deepEqual(
+      monthlySpend(txns, {}, "2026-08").map((m) => m.key),
+      ["2026-07", "2026-08"],
+    );
+  });
+
+  test("no bound is the whole record, as before", () => {
+    assert.deepEqual(
+      monthlySpend(txns).map((m) => m.key),
+      ["2026-07", "2026-08", "2026-09"],
+    );
+  });
+
+  test("the bound month itself is kept", () => {
+    const last = monthlySpend(txns, {}, "2026-09").at(-1);
+    assert.equal(last?.key, "2026-09");
+  });
+
+  test("a part month is not counted as the cheapest month on record", () => {
+    const bounded = monthSummary(txns, "2026-08", {}, 12, "2026-08");
+    const unbounded = monthSummary(txns, "2026-08", {}, 12);
+    assert.equal(bounded.months, 2);
+    assert.equal(unbounded.months, 3);
+    // Ranked against finished months only, August is the cheaper of two.
+    assert.equal(bounded.rank, 2);
+  });
+});
+
 describe("monthlySpend", () => {
   const txns = [
     txn("2025-01-04", 1000, "Housing"),

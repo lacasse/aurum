@@ -158,10 +158,16 @@ export interface MonthSpend {
  * Every month on record, split three ways. Months with no spending in them
  * are left out rather than drawn as zero: they are months that were never
  * entered, and a zero says something the record does not know.
+ *
+ * `until` drops anything after a given month. A month still in progress holds
+ * a few days of spending, so drawn beside finished months it is a cliff at the
+ * right-hand edge of every chart and a figure that drags the rolling average
+ * down — an artefact of the calendar rather than anything that happened.
  */
 export function monthlySpend(
   transactions: Transaction[],
   overrides: Record<string, SpendGroup> = {},
+  until?: string,
 ): MonthSpend[] {
   const byMonth = new Map<
     string,
@@ -170,6 +176,7 @@ export function monthlySpend(
   for (const t of transactions) {
     if (t.type !== "expense") continue;
     const key = monthKeyOf(t.date);
+    if (until && key > until) continue;
     const slot =
       byMonth.get(key) ??
       { total: 0, necessity: 0, discretionary: 0, excluded: 0 };
@@ -333,8 +340,15 @@ export function monthSummary(
   month: string,
   overrides: Record<string, SpendGroup> = {},
   window = 12,
+  until?: string,
 ): MonthSummary {
-  const all = monthlySpend(transactions, overrides);
+  /*
+   * `until` bounds the record this month is ranked against, for the same
+   * reason the charts are bounded: a month still running is the cheapest month
+   * on record every time, so counting it makes every finished month look one
+   * place worse than it was.
+   */
+  const all = monthlySpend(transactions, overrides, until);
   const byKey = new Map(all.map((m) => [m.key, m]));
   const here = byKey.get(month);
   const keys = lastMonthKeys(window, previousMonthKey(month));
