@@ -309,6 +309,67 @@ already correct, and rewriting `main` to fix a commit message is a far larger
 risk than the inaccurate message. Amend what is still editable, leave what is
 not, and state plainly which is which.
 
+# Versions and Releases
+
+Semantic versioning, read for an application rather than a library. Nobody
+imports this code, so there is no API to break in the usual sense. The
+compatibility surface is **the deployment and the data already stored**, and
+that gives one test:
+
+> **Major means the operator has to do something, or figures already in their
+> database change meaning. Everything else is minor or patch.**
+
+Before tagging, ask what a stranger pulling this and restarting would need told:
+
+- Nothing beyond what changed — **patch**
+- A new capability, or behaviour worth reading about — **minor**
+- A sentence beginning "before upgrading, you must…" — **major**
+
+## What a major actually is here
+
+- **A migration that cannot apply unattended.** Adding a column, backfilling and
+  installing a constraint is a minor, even when it refuses bad data afterwards,
+  because it runs on its own. One that stops and waits for a human to clean the
+  database first is a major.
+- **Reinterpreting a stored field.** Changing a cost base from the listing
+  currency to Canadian dollars edits nobody's rows and makes everybody's rows
+  wrong. This is the most dangerous kind and the least visible.
+- **Changing the deployment contract** — an env var renamed or dropped, a port
+  moved, a newer PostgreSQL required, the Compose project name touched.
+- **Dropping an import format**, which breaks a monthly routine while the app
+  itself runs perfectly.
+
+## What is not a major, though it can feel like one
+
+A behaviour change that leaves stored data valid and needs nothing done to
+upgrade is a minor, however much it alters what the app decides. Ceasing to
+match a depositary receipt to the share it tracks changed how every future
+import resolves a ticker, and anyone holding both had a wrong position before
+it — a minor, with a release note saying plainly what to check.
+
+The line is who does the correcting. Shipping a *migration* that rewrote
+everyone's holdings to split receipts from underlyings would have been a major,
+because it edits other people's records on a guess about what their tickers
+mean. Repairing one installation by hand is not a release at all.
+
+## Cutting one
+
+A release marks a deployment, not a merge. Several changes may sit on `main`
+between releases; a fix worth deploying on its own is worth a release on its
+own.
+
+1. `package.json` **and** `package-lock.json` — both the top-level `version` and
+   the one under `packages.""`. Never by replacing the old version string across
+   the file: the lockfile's project version has been stale before now, so the
+   only matches were dependencies that happened to share it, and two had their
+   versions rewritten to a release of this app. Never by regenerating the
+   lockfile either — that re-resolves every range, which is not what setting a
+   version does.
+2. Commit, tag `vX.Y.Z`, push both.
+3. Release notes that lead with the fault, not the fix, and say what a reader
+   should check in their own data.
+4. Deploy, and say whether the deployed image matches the tag.
+
 # Data Safety — CRITICAL RULES
 
 The PostgreSQL database is the single source of truth for all personal finance data. Data
