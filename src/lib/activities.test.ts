@@ -41,7 +41,7 @@ describe("isActivityExport", () => {
 
 describe("the account a row names", () => {
   const accounts = [
-    { id: "chq", name: "[redacted]", kind: "checking" },
+    { id: "chq", name: "Everyday", kind: "checking" },
     { id: "visa", name: "Visa", kind: "credit" },
     { id: "rrsp", name: "RRSP", kind: "investment", registration: "RRSP" },
     { id: "tfsa", name: "TFSA", kind: "investment", registration: "TFSA" },
@@ -221,7 +221,7 @@ describe("parseActivitiesCsv", () => {
       "2026-06-01,04:00:00,,AA1,Chequing,MoneyMovement,E_TRFOUT,Interac e-Transfer® Out,,,,CAD,-1450,,,-1450",
       "2026-07-01,04:00:00,,AA1,Chequing,MoneyMovement,E_TRFOUT,Interac e-Transfer® Out,,,,CAD,-1450,,,-1450",
       "2026-08-01,04:00:00,,AA1,Chequing,MoneyMovement,E_TRFOUT,Interac e-Transfer® Out,,,,CAD,-1450,,,-1450",
-      "2026-08-05,20:54:09,,AA1,Chequing,MoneyMovement,E_TRFOUT,Interac e-Transfer® Out,,,,CAD,-80,,,-80",
+      "2026-08-05,12:00:00,,AA1,Chequing,MoneyMovement,E_TRFOUT,Interac e-Transfer® Out,,,,CAD,-80,,,-80",
     );
     const rent = res.cash.filter((r) => r.category === "Housing");
     assert.equal(rent.length, 3);
