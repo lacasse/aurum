@@ -72,6 +72,12 @@ export const transactions = pgTable(
     payee: text("payee").notNull(),
     note: text("note"),
     recurringId: text("recurring_id"),
+    /*
+     * One event, or a month's total for its category. A database trigger
+     * refuses a month that holds both — see drizzle/0024. Enforced there and
+     * not only here because the import screen is not the only writer.
+     */
+    granularity: text("granularity").notNull().default("individual"),
   },
   (t) => [
     /*
