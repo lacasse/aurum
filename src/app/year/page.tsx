@@ -276,27 +276,6 @@ export default function YearPage() {
             <div className="px-3 pb-4">
               <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} />
             </div>
-            <div className="grid grid-cols-2 gap-px border-t border-line bg-line sm:grid-cols-4">
-              {[
-                { label: "Opened at", value: shape.openingNetWorth, tone: "" },
-                { label: "Saved", value: shape.saved, tone: shape.saved >= 0 ? "text-positive" : "text-negative" },
-                {
-                  label: shape.revaluation >= 0 ? "Growth" : "Decline",
-                  value: shape.revaluation,
-                  tone: shape.revaluation >= 0 ? "text-positive" : "text-negative",
-                },
-                { label: "Closed at", value: shape.netWorth, tone: "" },
-              ].map((c) => (
-                <div key={c.label} className="bg-surface px-4 py-2.5">
-                  <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
-                    {c.label}
-                  </p>
-                  <p className={cn("mt-0.5 text-sm font-semibold tabular-nums", c.tone)}>
-                    {fmtCAD(c.value)}
-                  </p>
-                </div>
-              ))}
-            </div>
             <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
               Growth is everything that moved net worth without passing through
               income or spending — the market mostly, but also the pension

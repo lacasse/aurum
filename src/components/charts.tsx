@@ -981,7 +981,7 @@ export function RoomGauge({
 export function Waterfall({
   steps,
   format,
-  height = 260,
+  height = 300,
 }: {
   steps: { label: string; delta: number; base: number; top: number; kind: "total" | "up" | "down" }[];
   format: (n: number) => string;
@@ -994,31 +994,54 @@ export function Waterfall({
     kind: s.kind,
     delta: s.delta,
     top: s.top,
+    /** What the label above the column says: a total states itself, a step states its change. */
+    shown: s.kind === "total" ? s.top : s.delta,
   }));
 
-  const colourFor = (kind: string) =>
-    kind === "total" ? accent("brand") : kind === "up" ? accent("positive") : accent("negative");
+  /*
+   * The two totals are told apart from each other, not just from the steps
+   * between them. They are the same kind of quantity a year apart, and giving
+   * them one colour makes the chart read as three categories when it is really
+   * two endpoints and a path between them.
+   */
+  const colourFor = (kind: string, i: number) =>
+    kind === "total"
+      ? i === 0
+        ? accent("market")
+        : accent("brand")
+      : kind === "up"
+        ? accent("positive")
+        : accent("negative");
 
   return (
     <div style={{ width: "100%", height }}>
       <ResponsiveContainer>
-        <ComposedChart data={rows} margin={{ top: 16, right: 8, left: 8, bottom: 4 }}>
-          <CartesianGrid stroke="var(--line)" strokeDasharray="3 3" vertical={false} />
+        <ComposedChart
+          data={rows}
+          margin={{ top: 28, right: 4, left: 4, bottom: 0 }}
+          /*
+           * Wide columns close together. A waterfall is read as one shape — the
+           * path from the first pillar to the last — and thin bars marooned in
+           * whitespace read as five separate facts instead.
+           */
+          barCategoryGap="12%"
+        >
+          {/*
+            * No y-axis and no grid. Every column already carries its own figure
+            * above it, so an axis repeats in a coarser form what the labels say
+            * exactly — and the space it takes is the space the columns need to
+            * be worth reading.
+            */}
           <XAxis
             dataKey="label"
-            tick={{ fill: "var(--ink-faint)", fontSize: 11 }}
-            axisLine={false}
+            tick={{ fill: "var(--ink-dim)", fontSize: 11 }}
+            axisLine={{ stroke: "var(--line)" }}
             tickLine={false}
+            interval={0}
           />
-          <YAxis
-            tick={{ fill: "var(--ink-faint)", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            width={64}
-            tickFormatter={(v: number) => format(v)}
-          />
+          <YAxis hide domain={[0, "dataMax"]} />
           <Tooltip
-            cursor={{ fill: "var(--line)", opacity: 0.25 }}
+            cursor={{ fill: "var(--line)", opacity: 0.2 }}
             content={({ active, payload }) => {
               if (!active || !payload?.length) return null;
               const r = payload[0]?.payload as (typeof rows)[number] | undefined;
@@ -1026,34 +1049,59 @@ export function Waterfall({
               return (
                 <div className="rounded-xl border border-line bg-surface px-3 py-2 shadow-xl">
                   <p className="mb-1 text-[0.6875rem] font-medium text-ink-faint">{r.label}</p>
-                  <div className="flex items-center gap-2 text-xs">
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{ background: colourFor(r.kind) }}
-                    />
-                    <span className="text-ink-dim">
-                      {r.kind === "total" ? "Net worth" : "Change"}
-                    </span>
-                    <span className="ml-auto font-medium tabular-nums text-ink">
-                      {format(r.kind === "total" ? r.top : r.delta)}
-                    </span>
-                  </div>
+                  <p className="text-xs font-medium tabular-nums text-ink">{format(r.shown)}</p>
                   {r.kind !== "total" && (
-                    <div className="mt-0.5 flex items-center gap-2 text-xs">
-                      <span className="h-2 w-2 shrink-0" />
-                      <span className="text-ink-faint">Running</span>
-                      <span className="ml-auto tabular-nums text-ink-dim">{format(r.top)}</span>
-                    </div>
+                    <p className="mt-0.5 text-[0.6875rem] tabular-nums text-ink-faint">
+                      Running {format(r.top)}
+                    </p>
                   )}
                 </div>
               );
             }}
           />
-          {/* The lift. Transparent, and excluded from the tooltip by drawing it first. */}
           <Bar dataKey="lift" stackId="w" fill="transparent" isAnimationActive={false} />
-          <Bar dataKey="size" stackId="w" radius={[3, 3, 0, 0]} maxBarSize={64}>
+          <Bar
+            dataKey="size"
+            stackId="w"
+            radius={[2, 2, 0, 0]}
+            maxBarSize={140}
+            /*
+             * A step small beside the totals still has to be visible. Without a
+             * floor a rounding-error month is drawn as nothing at all, which
+             * reads as "this did not happen" rather than "this was small".
+             */
+            minPointSize={3}
+            isAnimationActive={false}
+            label={{
+              position: "top",
+              offset: 8,
+              content: (props: unknown) => {
+                const { x, y, width, index } = props as {
+                  x: number;
+                  y: number;
+                  width: number;
+                  index: number;
+                };
+                const r = rows[index];
+                if (!r) return null;
+                const negative = r.shown < 0;
+                return (
+                  <text
+                    x={x + width / 2}
+                    y={y - 8}
+                    textAnchor="middle"
+                    fontSize={11}
+                    fontWeight={500}
+                    fill={negative ? accent("negative") : "var(--ink)"}
+                  >
+                    {format(r.shown)}
+                  </text>
+                );
+              },
+            }}
+          >
             {rows.map((r, i) => (
-              <Cell key={i} fill={colourFor(r.kind)} />
+              <Cell key={i} fill={colourFor(r.kind, i)} />
             ))}
           </Bar>
         </ComposedChart>
