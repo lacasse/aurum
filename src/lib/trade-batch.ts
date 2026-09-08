@@ -59,6 +59,13 @@ export interface TradeBatch {
   trades: number;
   /** How many of the changes open a position that did not exist. */
   created: number;
+  /**
+   * Faults in the positions this batch would leave behind — see
+   * `holdingProblems`. Carried rather than thrown: the batch is still valid
+   * arithmetic, and the caller is the one that can put the warning in front of
+   * someone before it is committed.
+   */
+  warnings: string[];
 }
 
 export type TradePlan =
@@ -95,6 +102,55 @@ export function baseTicker(ticker: string): string {
 }
 
 /**
+ * The suffix this app writes on a Canadian Depositary Receipt.
+ *
+ * A CDR is not the US share on another venue. It is a separate instrument with
+ * its own price, its own currency and its own cost base — Mastercard's CDR
+ * trades near thirty Canadian dollars while the share it tracks trades near
+ * five hundred US. Holding one says nothing about holding the other, and a
+ * trade in one has no bearing on the basis of the other.
+ */
+const CDR_SUFFIX = ".NEO";
+
+/**
+ * Whether a security row from a broker export describes a CDR.
+ *
+ * The export is not as clear as it looks: it writes a CDR under the **bare**
+ * symbol, so `TSLA` in an activity file is the CAD-hedged receipt, not the US
+ * share. The symbol alone therefore cannot tell them apart, and matching on it
+ * is wrong the moment someone holds both.
+ *
+ * The name can. Every CDR is named as one — "Tesla CDR (CAD Hedged)" — and the
+ * currency corroborates it. The name is the test rather than the currency
+ * because plenty of ordinary securities trade in Canadian dollars; only a
+ * receipt says CDR.
+ */
+export function isCdr(name: string, currency?: string): boolean {
+  if (!/\bCDR\b/i.test(name)) return false;
+  // A row naming itself a CDR but settling in US dollars is not one this app
+  // knows how to file, so it is left as an ordinary US listing.
+  return currency === undefined || currency.trim().toUpperCase() === "CAD";
+}
+
+/**
+ * The ticker a broker's security row should be filed under.
+ *
+ * This is where the export's own information is used instead of discarded. A
+ * CDR becomes `SYMBOL.NEO`, matching how the position is kept; anything else
+ * keeps the symbol as written.
+ */
+export function tickerForSecurity(
+  symbol: string,
+  name = "",
+  currency?: string,
+): string {
+  const s = symbol.trim().toUpperCase();
+  if (!s) return s;
+  if (!isCdr(name, currency)) return s;
+  return s.endsWith(CDR_SUFFIX) ? s : `${s}${CDR_SUFFIX}`;
+}
+
+/**
  * The ticker an imported row is really about, in the spelling already held.
  *
  * A broker's activity export writes the venue into the symbol — TSLA.NEO,
@@ -112,17 +168,81 @@ export function resolveTicker(
   raw: string,
   holdings: Holding[],
   accountId?: string,
+  currency?: string,
 ): string {
   const t = raw.trim().toUpperCase();
-  if (holdings.some((h) => h.ticker.toUpperCase() === t)) return t;
+  /*
+   * A match may never cross currencies.
+   *
+   * Stripping the venue is right for a venue — a broker writing XEQT where the
+   * position is XEQT.TO — and wrong for a CDR, because `.NEO` is not a venue
+   * there. `baseTicker("MA.NEO")` is "MA", so every US Mastercard trade
+   * matched the Canadian receipt and was absorbed into it: twenty-three US
+   * shares ended up filed as receipts and priced as receipts, at a twentieth
+   * of what they were worth, showing a loss that never happened.
+   *
+   * The listing currency is what separates them, and it is on every row of the
+   * export. Two securities quoted in different currencies are two securities,
+   * whatever their symbols share.
+   */
+  const cur = currency?.trim().toUpperCase();
+  const candidates = cur
+    ? holdings.filter((h) => (h.currency ?? "").toUpperCase() === cur)
+    : holdings;
+
+  if (candidates.some((h) => h.ticker.toUpperCase() === t)) return t;
 
   const base = baseTicker(t);
-  const matches = holdings.filter((h) => baseTicker(h.ticker) === base);
+  const matches = candidates.filter((h) => baseTicker(h.ticker) === base);
   if (matches.length === 0) return t;
   if (matches.length === 1) return matches[0].ticker.toUpperCase();
 
   const inAccount = matches.filter((h) => h.accountId === accountId);
   return inAccount.length === 1 ? inAccount[0].ticker.toUpperCase() : t;
+}
+
+/**
+ * Ways a set of holdings can be wrong that no single row looks wrong in.
+ *
+ * Every trade that produced the fault this checks for was individually
+ * correct: the right security, the right quantity, the right price. What was
+ * wrong was which position they landed on, and that is only visible once the
+ * positions are looked at together — which is why it went unnoticed for
+ * fourteen months and roughly seventeen thousand dollars of misvaluation.
+ *
+ * Reported rather than thrown. The caller decides whether this is a refusal
+ * (an import, which can be corrected before it commits) or a warning (a record
+ * already stored, where the fix is a repair and not a rejection).
+ */
+export function holdingProblems(holdings: Holding[]): string[] {
+  const problems: string[] = [];
+
+  // A receipt is CAD-hedged by construction. One denominated in anything else
+  // is a US listing wearing a receipt's ticker, which is exactly the fault.
+  for (const h of holdings) {
+    const t = h.ticker.trim().toUpperCase();
+    if (t.endsWith(CDR_SUFFIX) && (h.currency ?? "").toUpperCase() !== "CAD") {
+      problems.push(`${h.ticker} is a CDR ticker but is held in ${h.currency}`);
+    }
+  }
+
+  // Two positions in one account that differ only by venue are the duplicate
+  // this app already had once. Differing by currency is not a duplicate: that
+  // is a receipt and its underlying, legitimately held side by side.
+  const byKey = new Map<string, Holding[]>();
+  for (const h of holdings) {
+    const key = `${baseTicker(h.ticker)}|${(h.currency ?? "").toUpperCase()}|${h.accountId}`;
+    byKey.set(key, [...(byKey.get(key) ?? []), h]);
+  }
+  for (const [, group] of byKey) {
+    if (group.length > 1) {
+      problems.push(
+        `${group.map((h) => h.ticker).join(" and ")} are the same security in one account`,
+      );
+    }
+  }
+
+  return problems;
 }
 
 export function newPositionsNeeded(
@@ -133,7 +253,7 @@ export function newPositionsNeeded(
   const seen = new Set<string>();
   for (const row of rows) {
     if (isBlankTrade(row)) continue;
-    const ticker = resolveTicker(row.ticker, holdings, row.accountId);
+    const ticker = resolveTicker(row.ticker, holdings, row.accountId, row.currency);
     if ((row.action !== "buy" && row.action !== "reward") || seen.has(ticker)) continue;
     if (holdings.some((h) => h.ticker.toUpperCase() === ticker)) continue;
     seen.add(ticker);
@@ -221,7 +341,7 @@ export function planTrades(
   };
 
   for (const row of active) {
-    const ticker = resolveTicker(row.ticker, holdings, row.accountId);
+    const ticker = resolveTicker(row.ticker, holdings, row.accountId, row.currency);
     const qty = Number(row.quantity);
     const px = Number(row.price);
     const isUsd = row.currency === "USD";
@@ -350,6 +470,29 @@ export function planTrades(
     });
   }
 
+  /*
+   * Check the positions this batch would leave, not the rows that make it up.
+   * Every row of the import that filed US shares onto a Canadian receipt was
+   * individually correct; what was wrong was only visible once the positions
+   * were looked at together.
+   */
+  const touched = new Set(
+    changes.map((c) => c.existing?.id ?? `new|${c.ticker}|${c.accountId}`),
+  );
+  const projected: Holding[] = [
+    ...holdings.filter((h) => !touched.has(h.id)),
+    ...changes.map(
+      (c) =>
+        ({
+          id: c.existing?.id ?? `new|${c.ticker}|${c.accountId}`,
+          ticker: c.ticker,
+          accountId: c.accountId,
+          currency: c.currency,
+          shares: c.shares,
+        }) as Holding,
+    ),
+  ];
+
   return {
     ok: true,
     batch: {
@@ -360,6 +503,7 @@ export function planTrades(
       })),
       trades: active.length,
       created,
+      warnings: holdingProblems(projected),
     },
   };
 }

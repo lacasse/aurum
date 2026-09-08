@@ -2,6 +2,7 @@ import Papa from "papaparse";
 import { ImportedRow, suggestCategory, txnKey } from "./csv";
 import { TradeRow, tradeKey } from "./trades";
 import { CorporateAction } from "./corporate-actions";
+import { tickerForSecurity } from "./trade-batch";
 import { Currency, Registration } from "./types";
 
 /**
@@ -208,6 +209,7 @@ export function parseActivitiesCsv(
     const sub = (r.activity_sub_type ?? "").trim();
     const desc = (r.description ?? "").trim();
     const symbol = (r.symbol ?? "").trim().toUpperCase();
+    const securityName = (r.name ?? "").trim();
     const currency = ((r.currency ?? "CAD").trim().toUpperCase() || "CAD") as Currency;
     const amount = Number(r.net_cash_amount);
     const quantity = Number(r.quantity);
@@ -277,7 +279,14 @@ export function parseActivitiesCsv(
        * with a real cost basis, carved out of the parent's by the corporate
        * action below; selling them is an ordinary sale against that basis.
        */
-      const ticker = alias.get(symbol) ?? symbol;
+      /*
+       * The export writes a CDR under the bare symbol, so `MA` may be either
+       * the US share or the Canadian receipt and the symbol alone cannot say
+       * which. The name and currency can, and both are on the row — see
+       * `tickerForSecurity`. Reading them here is what keeps a US trade off a
+       * receipt's position.
+       */
+      const ticker = alias.get(symbol) ?? tickerForSecurity(symbol, securityName, currency);
       const row: TradeRow = {
         id: rowId("trd"),
         date,
