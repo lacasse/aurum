@@ -15,6 +15,7 @@ import {
   Account,
   AccountKind,
   FinanceData,
+  Granularity,
   Holding,
   MonthlySnapshot,
   RecurringRule,
@@ -108,6 +109,7 @@ function toTransaction(row: typeof transactions.$inferSelect): Transaction {
     payee: row.payee,
     note: row.note ?? undefined,
     recurringId: row.recurringId ?? undefined,
+    granularity: (row.granularity as Granularity) ?? "individual",
   };
 }
 
@@ -212,6 +214,7 @@ export async function seed(
         destinationAccountId: t.destinationAccountId ?? null,
         payee: t.payee,
         note: t.note ?? null,
+        granularity: t.granularity ?? "individual",
       })),
     );
   }
@@ -710,6 +713,7 @@ export async function insertTransaction(txn: Transaction): Promise<void> {
       payee: txn.payee,
       note: txn.note ?? null,
       recurringId: txn.recurringId ?? null,
+      granularity: txn.granularity ?? "individual",
     });
     await applyTxnEffect(tx, txn, 1);
   });
@@ -735,6 +739,7 @@ export async function updateTransactionRow(
         destinationAccountId: updated.destinationAccountId ?? null,
         payee: updated.payee,
         note: updated.note ?? null,
+        granularity: updated.granularity ?? "individual",
       })
       .where(eq(transactions.id, id));
     await applyTxnEffect(tx, updated, 1);
