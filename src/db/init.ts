@@ -1,8 +1,12 @@
 import path from "node:path";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { db } from "./index";
-import { isDemoDeleted, isSeeded, seed } from "./repo";
-import { generateSampleData, generateSampleSnapshots } from "@/lib/sample";
+import { isDemoDeleted, isSeeded, seed, setContributionLimits } from "./repo";
+import {
+  generateSampleData,
+  generateSampleLimits,
+  generateSampleSnapshots,
+} from "@/lib/sample";
 
 let readyPromise: Promise<void> | null = null;
 
@@ -16,6 +20,9 @@ async function init(): Promise<void> {
   if (!(await isSeeded()) && !(await isDemoDeleted())) {
     const data = generateSampleData();
     await seed(data, generateSampleSnapshots(data.holdings));
+    // Room as well as deposits: the contribution card measures one against the
+    // other, and seeding only the deposits leaves every gauge reading "not set".
+    await setContributionLimits(generateSampleLimits(data));
   }
 }
 

@@ -26,6 +26,12 @@ import {
   withBalanceRecorded,
 } from "@/lib/types";
 import { advanceRule, dueOccurrences } from "@/lib/recurrence";
+import {
+  REGISTERED_PLANS,
+  type ContributionLimits,
+  type RegisteredPlan,
+  type RoomDeferrals,
+} from "@/lib/contributions";
 import { todayISO } from "@/lib/format";
 import { addMoney } from "@/lib/money";
 import { SPEND_GROUPS, type SpendGroup } from "@/lib/expenses";
@@ -471,6 +477,16 @@ export async function deleteDemoData(): Promise<void> {
         SAMPLE_BUDGETS.map((b) => b.category),
       ),
     );
+    /*
+     * The seeded contribution room goes with the deposits it measured.
+     *
+     * Left behind it would be worse than useless: the demo's deposits are gone
+     * but its invented limits remain, so the first real contribution is drawn
+     * against room nobody has. A figure the app is not certain of, rendered as
+     * though it were a fact.
+     */
+    await tx.delete(appMeta).where(eq(appMeta.key, CONTRIBUTION_LIMITS_KEY));
+    await tx.delete(appMeta).where(eq(appMeta.key, ROOM_DEFERRALS_KEY));
     await tx
       .insert(appMeta)
       .values({ key: DEMO_DELETED_KEY, value: new Date().toISOString() })
@@ -532,6 +548,91 @@ export async function setAllocationTargets(
 /* ------------------------------------------------------------------ */
 /* Expense page settings                                               */
 /* ------------------------------------------------------------------ */
+
+const CONTRIBUTION_LIMITS_KEY = "contribution_limits";
+
+/**
+ * Registered contribution room per plan per year, as entered by hand.
+ *
+ * None of it can be derived: room depends on income, on unused room carried
+ * forward and on withdrawals made years ago, all of it stated on a notice of
+ * assessment this app has never seen. Stored per year because room is a fact
+ * about a year — a figure entered for this year must not silently restate last
+ * year's.
+ */
+export async function getContributionLimits(): Promise<ContributionLimits> {
+  const [row] = await db
+    .select()
+    .from(appMeta)
+    .where(eq(appMeta.key, CONTRIBUTION_LIMITS_KEY));
+  if (!row) return {};
+  try {
+    const parsed = JSON.parse(row.value) as ContributionLimits;
+    const out: ContributionLimits = {};
+    for (const [year, plans] of Object.entries(parsed ?? {})) {
+      if (!/^\d{4}$/.test(year) || typeof plans !== "object" || !plans) continue;
+      const kept: Partial<Record<RegisteredPlan, number>> = {};
+      for (const plan of REGISTERED_PLANS) {
+        const v = (plans as Record<string, unknown>)[plan];
+        if (typeof v === "number" && Number.isFinite(v) && v >= 0) kept[plan] = v;
+      }
+      if (Object.keys(kept).length > 0) out[year] = kept;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+const ROOM_DEFERRALS_KEY = "contribution_deferrals";
+
+/**
+ * Questions the checklist asked and was told "not yet".
+ *
+ * Kept apart from the limits themselves because they are different kinds of
+ * fact: a limit is what the CRA allows, a deferral is what the owner has not
+ * looked up. Storing them together would mean a saved limit rewrites the
+ * deferral record and vice versa.
+ */
+export async function getRoomDeferrals(): Promise<RoomDeferrals> {
+  const [row] = await db
+    .select()
+    .from(appMeta)
+    .where(eq(appMeta.key, ROOM_DEFERRALS_KEY));
+  if (!row) return {};
+  try {
+    const parsed = JSON.parse(row.value) as RoomDeferrals;
+    const out: RoomDeferrals = {};
+    for (const [year, plans] of Object.entries(parsed ?? {})) {
+      if (!/^\d{4}$/.test(year) || typeof plans !== "object" || !plans) continue;
+      const kept: Partial<Record<RegisteredPlan, string>> = {};
+      for (const plan of REGISTERED_PLANS) {
+        const v = (plans as Record<string, unknown>)[plan];
+        if (typeof v === "string" && /^\d{4}-\d{2}$/.test(v)) kept[plan] = v;
+      }
+      if (Object.keys(kept).length > 0) out[year] = kept;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export async function setRoomDeferrals(deferrals: RoomDeferrals): Promise<void> {
+  const value = JSON.stringify(deferrals);
+  await db
+    .insert(appMeta)
+    .values({ key: ROOM_DEFERRALS_KEY, value })
+    .onConflictDoUpdate({ target: appMeta.key, set: { value } });
+}
+
+export async function setContributionLimits(limits: ContributionLimits): Promise<void> {
+  const value = JSON.stringify(limits);
+  await db
+    .insert(appMeta)
+    .values({ key: CONTRIBUTION_LIMITS_KEY, value })
+    .onConflictDoUpdate({ target: appMeta.key, set: { value } });
+}
 
 const EXPENSE_SETTINGS_KEY = "expense_settings";
 

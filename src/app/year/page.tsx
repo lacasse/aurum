@@ -1,11 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, Flag, PiggyBank, Wallet } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  Flag,
+  PiggyBank,
+  SlidersHorizontal,
+  Wallet,
+} from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
-import { Badge, Card, CardHeader, EmptyState, Segmented, cn } from "@/components/ui";
-import { GroupedBars } from "@/components/charts";
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  EmptyState,
+  Modal,
+  Segmented,
+  cn,
+} from "@/components/ui";
+import { GroupedBars, RoomGauge } from "@/components/charts";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import {
@@ -17,7 +33,20 @@ import {
   portfolioSeries,
 } from "@/lib/analytics";
 import { milestones, yearRows } from "@/lib/year";
+import {
+  REGISTERED_PLANS,
+  contributionRoom,
+  type ContributionLimits,
+  type RegisteredPlan,
+} from "@/lib/contributions";
 import { fmtCAD, fmtCompact, fmtPct, fmtSignedCAD, labelMonth } from "@/lib/format";
+
+/** A colour per plan, so the same gauge is the same colour every time. */
+const PLAN_TONE = {
+  TFSA: "brand",
+  RRSP: "market",
+  FHSA: "passive",
+} as const;
 
 /**
  * A year at a time.
@@ -34,6 +63,30 @@ export default function YearPage() {
   const transactions = useFinance((s) => s.transactions);
   const usdCadRate = useFinance((s) => s.usdCadRate);
   const [year, setYear] = useState<string | null>(null);
+  const [limits, setLimits] = useState<ContributionLimits>({});
+  const [roomOpen, setRoomOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/contribution-limits", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { limits?: ContributionLimits }) => {
+        if (!cancelled) setLimits(d.limits ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveLimits = useCallback((next: ContributionLimits) => {
+    setLimits(next);
+    fetch("/api/contribution-limits", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limits: next }),
+    }).catch(() => {});
+  }, []);
 
   /*
    * Recorded month-end portfolio values, from the store: four pages draw a
@@ -110,6 +163,8 @@ export default function YearPage() {
     .reverse()
     .map((r) => ({ label: r.year, income: r.income, expenses: r.expenses }));
 
+  const room = contributionRoom(selected.year, transactions, accounts, limits);
+
   return (
     <Shell
       title="Year"
@@ -173,6 +228,56 @@ export default function YearPage() {
             icon={<Wallet size={16} />}
           />
         </div>
+
+        {/*
+          * Room is the one limit here the app cannot work out for itself. It
+          * depends on income, on room carried forward and on withdrawals made
+          * years ago, all of it stated on a notice of assessment — so the
+          * figure is entered, and what has been paid in against it is counted.
+          */}
+        <Card>
+          <CardHeader
+            title="Contribution room"
+            subtitle={`What you have paid into each registered plan in ${selected.year}`}
+            action={
+              <Button variant="ghost" size="sm" onClick={() => setRoomOpen(true)}>
+                <SlidersHorizontal size={14} /> Set room
+              </Button>
+            }
+          />
+          <div className="grid grid-cols-1 gap-6 px-4 pb-5 pt-1 sm:grid-cols-3">
+            {room.map((r) => (
+              <RoomGauge
+                key={r.plan}
+                label={r.plan}
+                used={r.used}
+                tone={PLAN_TONE[r.plan]}
+                over={r.over}
+                caption={
+                  r.limit === null
+                    ? `${fmtCAD(r.contributed)} paid in`
+                    : `${fmtCAD(r.contributed)} of ${fmtCAD(r.limit)}`
+                }
+                detail={
+                  r.limit === null
+                    ? r.held
+                      ? "Room not set for this year"
+                      : "No account of this type"
+                    : r.over
+                      ? `${fmtCAD(Math.abs(r.remaining!))} over the limit`
+                      : `${fmtCAD(r.remaining!)} left`
+                }
+              />
+            ))}
+          </div>
+          {room.some((r) => r.over) && (
+            <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] text-negative">
+              An over-contribution is charged 1% a month on the excess until it is
+              withdrawn. Check the figure against your notice of assessment before
+              acting on it.
+            </p>
+          )}
+        </Card>
 
         <Card>
           <CardHeader
@@ -329,6 +434,19 @@ export default function YearPage() {
           </p>
         </Card>
 
+        <Modal
+          open={roomOpen}
+          onClose={() => setRoomOpen(false)}
+          title="Registered contribution room"
+        >
+          <ContributionRoomForm
+            year={selected.year}
+            limits={limits}
+            onSave={saveLimits}
+            onClose={() => setRoomOpen(false)}
+          />
+        </Modal>
+
         {data.marks.length > 0 && (
           <Card>
             <CardHeader
@@ -370,4 +488,144 @@ export default function YearPage() {
       </div>
     </Shell>
   );
+}
+
+/**
+ * Entering a year's room, one field per plan.
+ *
+ * Deliberately a plain form over a wizard: this is three numbers copied off a
+ * notice of assessment once a year, and the only thing it owes the reader is
+ * saying which year they are typing into — a figure entered against the wrong
+ * year is invisible afterwards, because both years look plausible.
+ *
+ * Blank is a meaningful answer and means "not set", which the gauge draws
+ * differently from zero. Clearing a field removes the figure rather than
+ * storing a nought, because a nought is a real limit: it says you may not
+ * contribute at all.
+ */
+function ContributionRoomForm({
+  year,
+  limits,
+  onSave,
+  onClose,
+}: {
+  year: string;
+  limits: ContributionLimits;
+  onSave: (next: ContributionLimits) => void;
+  onClose: () => void;
+}) {
+  const [editYear, setEditYear] = useState(year);
+  const [draft, setDraft] = useState<Record<RegisteredPlan, string>>(() =>
+    fieldsFor(year, limits),
+  );
+  const [error, setError] = useState("");
+
+  const changeYear = (next: string) => {
+    setEditYear(next);
+    setDraft(fieldsFor(next, limits));
+    setError("");
+  };
+
+  const submit = () => {
+    const forYear: Partial<Record<RegisteredPlan, number>> = {};
+    for (const plan of REGISTERED_PLANS) {
+      const raw = draft[plan].trim().replace(/[$,\s]/g, "");
+      if (raw === "") continue;
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value < 0) {
+        setError(`${plan} room must be an amount, or left blank.`);
+        return;
+      }
+      forYear[plan] = Math.round(value * 100) / 100;
+    }
+    const next = { ...limits };
+    if (Object.keys(forYear).length === 0) delete next[editYear];
+    else next[editYear] = forYear;
+    onSave(next);
+    onClose();
+  };
+
+  const years = yearChoices(editYear);
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs leading-relaxed text-ink-dim">
+        Copy these from your notice of assessment or your CRA account. The app
+        counts what you have paid in; it cannot know what you are allowed to.
+      </p>
+
+      <label className="block">
+        <span className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+          Year
+        </span>
+        <select
+          value={editYear}
+          onChange={(e) => changeYear(e.target.value)}
+          className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm"
+        >
+          {years.map((y) => (
+            <option key={y} value={y}>
+              {y}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className="space-y-3">
+        {REGISTERED_PLANS.map((plan) => (
+          <label key={plan} className="block">
+            <span className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+              {plan} room for {editYear}
+            </span>
+            <div className="mt-1 flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 focus-within:border-ink-faint">
+              <span className="text-sm text-ink-faint">$</span>
+              <input
+                inputMode="decimal"
+                placeholder="Not set"
+                value={draft[plan]}
+                onChange={(e) => setDraft((d) => ({ ...d, [plan]: e.target.value }))}
+                className="w-full bg-transparent text-sm tabular-nums outline-none"
+              />
+            </div>
+          </label>
+        ))}
+      </div>
+
+      {error ? <p className="text-xs text-negative">{error}</p> : null}
+
+      <div className="flex items-center gap-2 pt-1">
+        <Button onClick={submit}>Save room</Button>
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function fieldsFor(
+  year: string,
+  limits: ContributionLimits,
+): Record<RegisteredPlan, string> {
+  const forYear = limits[year] ?? {};
+  return {
+    TFSA: forYear.TFSA?.toString() ?? "",
+    RRSP: forYear.RRSP?.toString() ?? "",
+    FHSA: forYear.FHSA?.toString() ?? "",
+  };
+}
+
+/**
+ * The years worth offering: a few back, and the next one.
+ *
+ * Next year is there because a TFSA limit is announced before the year it
+ * applies to, and the obvious moment to record it is when you read it.
+ */
+function yearChoices(around: string): string[] {
+  const here = new Date().getFullYear();
+  const n = Number(around);
+  const set = new Set<string>();
+  for (let y = here + 1; y >= here - 6; y--) set.add(String(y));
+  if (Number.isFinite(n)) set.add(String(n));
+  return [...set].sort((a, b) => b.localeCompare(a));
 }
