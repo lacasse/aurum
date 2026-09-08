@@ -322,6 +322,47 @@ async function main() {
     }
 
     {
+      /*
+       * The price cache has to outlive the process. Held in a module-level Map
+       * it was empty after every restart, so each deploy made every ticker look
+       * unfetched and the next page load re-bought the whole portfolio.
+       * ALL-FIXTURES-INVENTED
+       */
+      console.log("price cache survives a restart");
+      const cache = await import("../src/db/price-cache");
+      await cache.__resetPriceCacheForTests();
+
+      expect((await cache.readPriceCache()).size === 0, "starts empty");
+
+      const at = Date.UTC(2026, 7, 28, 14, 0, 0);
+      await cache.recordPrices(new Map([["WEQT.TO", 34.5], ["EXMPL", 12.25]]), at);
+
+      // A fresh read is what a restarted process does: nothing is carried over
+      // in memory, so this only passes if the cache is genuinely stored.
+      const restored = await cache.readPriceCache();
+      expect(
+        restored.get("WEQT.TO")?.price === 34.5 && restored.get("WEQT.TO")?.at === at,
+        "a stored price and its timestamp are read back",
+      );
+
+      // One request only asks about the tickers on one page, so a write must
+      // merge rather than replace — otherwise it drops every other holding.
+      await cache.recordPrices(new Map([["EXMPL", 13.0]]), at + 60_000);
+      const merged = await cache.readPriceCache();
+      expect(merged.size === 2, "writing one ticker keeps the others");
+      expect(merged.get("EXMPL")?.price === 13.0, "the written ticker is updated");
+      expect(merged.get("WEQT.TO")?.price === 34.5, "the untouched ticker is unchanged");
+
+      expect(
+        (await cache.recordPrices(new Map(), at)) === undefined &&
+          (await cache.readPriceCache()).size === 2,
+        "writing nothing changes nothing",
+      );
+
+      await cache.__resetPriceCacheForTests();
+    }
+
+    {
       console.log("twelve data credit ledger");
       const td = await import("../src/db/twelvedata");
       const { MINUTE_RESERVE, TWELVEDATA_MINUTE_LIMIT } = await import(
