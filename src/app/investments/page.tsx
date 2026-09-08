@@ -700,13 +700,22 @@ export default function InvestmentsPage() {
           <Button onClick={() => setTradesOpen(true)}>
             <Plus size={15} /> Log trades
           </Button>
+          {/*
+            * Asks before it fetches, because this is the forced refresh: the
+            * automatic one already runs on a timer and needs no button. A
+            * button that quietly re-ran the same throttled refresh was the one
+            * people pressed when prices looked wrong, and it was the one thing
+            * that could not help them — everything it asked for was cached,
+            * before the close, or out of allowance.
+            */}
           <Button
             variant="ghost"
             size="icon"
-            onClick={refreshPrices}
+            onClick={() => setForceOpen((open) => !open)}
             disabled={priceRefreshing}
-            aria-label="Refresh prices"
-            title="Refresh prices now"
+            aria-label="Refresh prices now, ignoring the usual limits"
+            title="Refresh prices now — ignores the cache and the daily limits"
+            aria-expanded={forceOpen}
           >
             <RefreshCw size={15} className={priceRefreshing ? "animate-spin" : ""} />
           </Button>
@@ -714,6 +723,48 @@ export default function InvestmentsPage() {
       }
     >
       <div className="space-y-4">
+        {forceOpen && (
+          <Card className="border-amber-500/40 bg-amber-500/5 p-4">
+            <p className="text-sm font-medium text-ink">
+              Fetch {forceCount} price{forceCount === 1 ? "" : "s"} now,
+              ignoring the usual limits?
+            </p>
+            <ul className="mt-2 space-y-1 text-xs leading-relaxed text-ink-dim">
+              <li>
+                • Asks Twelve Data and EODHD for every open position, rather
+                than only the ones due a refresh.
+              </li>
+              <li>
+                • Ignores the cache, so a price fetched minutes ago is fetched
+                again.
+              </li>
+              <li>
+                • Ignores the rule that end-of-day prices are only worth buying
+                after the market closes.
+              </li>
+              <li>
+                • Spends past the daily allowance if it has to.{" "}
+                {quota
+                  ? `EODHD has ${quota.remaining} of ${quota.limit} calls left today.`
+                  : ""}
+              </li>
+            </ul>
+            <p className="mt-2 text-xs leading-relaxed text-ink-faint">
+              What it spends is recorded, so the automatic refresh has that much
+              less for the rest of the day. Going over the allowance may mean the
+              provider refuses further calls until it resets
+              {quota ? ` at ${new Date(quota.resetsAt).toLocaleString()}` : ""}.
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <Button onClick={forceRefresh} disabled={priceRefreshing}>
+                <Zap size={14} /> Fetch now
+              </Button>
+              <Button variant="ghost" onClick={() => setForceOpen(false)}>
+                Cancel
+              </Button>
+            </div>
+          </Card>
+        )}
         {staleTickers.size > 0 && (
           <Card className="border-amber-500/40 bg-amber-500/5 p-4">
             <p className="text-sm font-medium text-amber-400">
@@ -735,13 +786,12 @@ export default function InvestmentsPage() {
             </p>
 
             {/*
-              * Offered here rather than beside the refresh button, because this
-              * is the only moment it is worth offering: an ordinary refresh has
-              * already been tried and left these prices as they were. A second
-              * button in the header meant two icons that both said "refresh"
-              * and differed only in a tooltip.
+              * Both entry points open the same panel above: this one, offered
+              * at the moment an ordinary refresh has already been tried and
+              * left these prices as they were, and the button in the header.
+              * One confirmation, one place, so the two cannot drift apart.
               */}
-            {!forceOpen ? (
+            {!forceOpen && (
               <button
                 type="button"
                 onClick={() => setForceOpen(true)}
@@ -750,47 +800,6 @@ export default function InvestmentsPage() {
               >
                 <Zap size={13} /> Fetch them anyway
               </button>
-            ) : (
-              <div className="mt-3 rounded-md border border-amber-500/40 bg-surface/60 p-3">
-                <p className="text-xs font-medium text-ink">
-                  Fetch {forceCount} price{forceCount === 1 ? "" : "s"} now,
-                  ignoring the usual limits?
-                </p>
-                <ul className="mt-2 space-y-1 text-xs leading-relaxed text-ink-dim">
-                  <li>
-                    • Asks Twelve Data and EODHD for every open position, rather
-                    than only the ones due a refresh.
-                  </li>
-                  <li>
-                    • Ignores the cache, so a price fetched minutes ago is fetched
-                    again.
-                  </li>
-                  <li>
-                    • Ignores the rule that end-of-day prices are only worth
-                    buying after the market closes.
-                  </li>
-                  <li>
-                    • Spends past the daily allowance if it has to.{" "}
-                    {quota
-                      ? `EODHD has ${quota.remaining} of ${quota.limit} calls left today.`
-                      : ""}
-                  </li>
-                </ul>
-                <p className="mt-2 text-xs leading-relaxed text-ink-faint">
-                  What it spends is recorded, so the automatic refresh has that
-                  much less for the rest of the day. Going over the allowance may
-                  mean the provider refuses further calls until it resets
-                  {quota ? ` at ${new Date(quota.resetsAt).toLocaleString()}` : ""}.
-                </p>
-                <div className="mt-3 flex items-center gap-2">
-                  <Button onClick={forceRefresh} disabled={priceRefreshing}>
-                    <Zap size={14} /> Fetch now
-                  </Button>
-                  <Button variant="ghost" onClick={() => setForceOpen(false)}>
-                    Cancel
-                  </Button>
-                </div>
-              </div>
             )}
           </Card>
         )}
