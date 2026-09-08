@@ -251,3 +251,75 @@ describe("parseActivitiesCsv", () => {
     assert.equal(res.cash[0].include, false);
   });
 });
+
+/*
+ * The export writes a depositary receipt under the bare symbol, so `ZQX` may be
+ * either the CAD-hedged receipt or the US share and the symbol cannot say
+ * which. Only the name and currency can, and the parser used to read neither —
+ * so US trades were filed onto the receipt's position and priced as receipts.
+ *
+ * ALL-FIXTURES-INVENTED
+ */
+describe("a receipt and its underlying, as the export writes them", () => {
+  const CDR_NAME = "Zephyr Industries CDR (CAD Hedged)";
+  const US_NAME = "Zephyr Industries Incorporated (Class A)";
+
+  test("a CAD receipt row is filed under the suffixed ticker", () => {
+    const res = parse(
+      tradeRow({
+        date: "2026-04-01",
+        accountType: "RRSP",
+        symbol: "ZQX",
+        name: CDR_NAME,
+        currency: "CAD",
+        quantity: 10,
+        unitPrice: 30,
+        side: "BUY",
+      }),
+    );
+    assert.equal(res.trades[0].ticker, "ZQX.NEO");
+    assert.equal(res.trades[0].currency, "CAD");
+  });
+
+  test("a USD row under the same symbol stays the US listing", () => {
+    const res = parse(
+      tradeRow({
+        date: "2026-04-02",
+        accountType: "RRSP",
+        symbol: "ZQX",
+        name: US_NAME,
+        currency: "USD",
+        quantity: 4,
+        unitPrice: 500,
+        side: "BUY",
+      }),
+    );
+    assert.equal(res.trades[0].ticker, "ZQX");
+    assert.equal(res.trades[0].currency, "USD");
+  });
+
+  test("both in one file stay apart", () => {
+    const res = parse(
+      tradeRow({
+        date: "2026-04-01", accountType: "RRSP", symbol: "ZQX", name: CDR_NAME,
+        currency: "CAD", quantity: 10, unitPrice: 30, side: "SELL",
+      }),
+      tradeRow({
+        date: "2026-04-01", accountType: "RRSP", symbol: "ZQX", name: US_NAME,
+        currency: "USD", quantity: 4, unitPrice: 500, side: "BUY",
+      }),
+    );
+    assert.deepEqual(res.trades.map((t) => t.ticker), ["ZQX.NEO", "ZQX"]);
+  });
+
+  test("an ordinary Canadian security is not mistaken for a receipt", () => {
+    const res = parse(
+      tradeRow({
+        date: "2026-04-03", accountType: "TFSA", symbol: "BMIX",
+        name: "Broad Market Index ETF Portfolio",
+        currency: "CAD", quantity: 5, unitPrice: 40, side: "BUY",
+      }),
+    );
+    assert.equal(res.trades[0].ticker, "BMIX");
+  });
+});

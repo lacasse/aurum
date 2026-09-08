@@ -2,7 +2,10 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   baseTicker,
+  holdingProblems,
   isBlankTrade,
+  isCdr,
+  tickerForSecurity,
   newPositionsNeeded,
   resolveTicker,
   planTrades,
@@ -98,8 +101,11 @@ describe("resolveTicker", () => {
   });
 
   test("an exact match wins over a venue-less one", () => {
-    const held = [holding({ id: "a", ticker: "MA" }), holding({ id: "b", ticker: "MA.NEO" })];
-    assert.equal(resolveTicker("MA.NEO", held, "acct-1"), "MA.NEO");
+    const held = [
+      holding({ id: "a", ticker: "ZQX", currency: "USD" }),
+      holding({ id: "b", ticker: "ZQX.NEO" }),
+    ];
+    assert.equal(resolveTicker("ZQX.NEO", held, "acct-1"), "ZQX.NEO");
   });
 
   test("two spellings in different accounts are decided by the account", () => {
@@ -120,6 +126,120 @@ describe("resolveTicker", () => {
 
   test("a symbol nobody holds is still new", () => {
     assert.equal(resolveTicker("OMNI", [holding()], "acct-1"), "OMNI");
+  });
+});
+
+/*
+ * A depositary receipt is not the underlying share on another venue. It has its
+ * own price, currency and cost base, and `.NEO` is therefore not a venue
+ * suffix the way `.TO` is.
+ *
+ * Stripping it made every trade in the US listing match the receipt and be
+ * absorbed into it — the same rule that stops duplicates, merging two genuinely
+ * different securities. The export makes this easy to get wrong: it writes a
+ * receipt under the *bare* symbol, so the symbol alone can never tell them
+ * apart. The name and the currency can.
+ *
+ * ALL-FIXTURES-INVENTED
+ */
+describe("a receipt and the share it tracks are two securities", () => {
+  const CDR_NAME = "Zephyr Industries CDR (CAD Hedged)";
+  const US_NAME = "Zephyr Industries Incorporated (Class A)";
+
+  test("the name is what says it is a receipt", () => {
+    assert.equal(isCdr(CDR_NAME, "CAD"), true);
+    assert.equal(isCdr(US_NAME, "USD"), false);
+    // Plenty of ordinary securities trade in Canadian dollars.
+    assert.equal(isCdr("Broad Market Index ETF", "CAD"), false);
+  });
+
+  test("a receipt row is filed under the suffixed ticker", () => {
+    assert.equal(tickerForSecurity("ZQX", CDR_NAME, "CAD"), "ZQX.NEO");
+    assert.equal(tickerForSecurity("ZQX", US_NAME, "USD"), "ZQX");
+  });
+
+  test("an already-suffixed symbol is not suffixed twice", () => {
+    assert.equal(tickerForSecurity("ZQX.NEO", CDR_NAME, "CAD"), "ZQX.NEO");
+  });
+
+  test("a row with no name is left as written", () => {
+    assert.equal(tickerForSecurity("ZQX"), "ZQX");
+  });
+
+  test("a US trade does not match the receipt already held", () => {
+    const held = [holding({ id: "a", ticker: "ZQX.NEO", currency: "CAD" })];
+    assert.equal(resolveTicker("ZQX", held, "acct-1", "USD"), "ZQX");
+  });
+
+  test("a CAD trade still matches the receipt", () => {
+    const held = [holding({ id: "a", ticker: "ZQX.NEO", currency: "CAD" })];
+    assert.equal(resolveTicker("ZQX", held, "acct-1", "CAD"), "ZQX.NEO");
+  });
+
+  test("both held at once, each trade goes to its own position", () => {
+    const held = [
+      holding({ id: "a", ticker: "ZQX.NEO", currency: "CAD" }),
+      holding({ id: "b", ticker: "ZQX", currency: "USD" }),
+    ];
+    assert.equal(resolveTicker("ZQX", held, "acct-1", "USD"), "ZQX");
+    assert.equal(resolveTicker("ZQX", held, "acct-1", "CAD"), "ZQX.NEO");
+  });
+
+  test("a US buy beside a receipt opens a position rather than joining it", () => {
+    const held = [holding({ id: "a", ticker: "ZQX.NEO", currency: "CAD" })];
+    const needed = newPositionsNeeded(
+      [row({ ticker: "ZQX", currency: "USD", cadAmount: "1400" })],
+      held,
+    );
+    assert.deepEqual(needed.map((n) => n.ticker), ["ZQX"]);
+  });
+
+  test("without a currency the old behaviour is unchanged", () => {
+    const held = [holding({ id: "a", ticker: "ZQX.NEO", currency: "CAD" })];
+    assert.equal(resolveTicker("ZQX", held, "acct-1"), "ZQX.NEO");
+  });
+});
+
+describe("faults only visible across positions", () => {
+  test("a receipt ticker held in US dollars is reported", () => {
+    const problems = holdingProblems([
+      holding({ id: "a", ticker: "ZQX.NEO", currency: "USD" }),
+    ]);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0], /ZQX\.NEO/);
+  });
+
+  test("a receipt and its underlying side by side are not a duplicate", () => {
+    assert.deepEqual(
+      holdingProblems([
+        holding({ id: "a", ticker: "ZQX.NEO", currency: "CAD" }),
+        holding({ id: "b", ticker: "ZQX", currency: "USD" }),
+      ]),
+      [],
+    );
+  });
+
+  test("two spellings of one security in one account still are", () => {
+    const problems = holdingProblems([
+      holding({ id: "a", ticker: "VNTR", currency: "CAD" }),
+      holding({ id: "b", ticker: "VNTR.TO", currency: "CAD" }),
+    ]);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0], /same security/);
+  });
+
+  test("the same security in two accounts is ordinary", () => {
+    assert.deepEqual(
+      holdingProblems([
+        holding({ id: "a", ticker: "VNTR", accountId: "acct-1" }),
+        holding({ id: "b", ticker: "VNTR", accountId: "acct-2" }),
+      ]),
+      [],
+    );
+  });
+
+  test("nothing held is nothing wrong", () => {
+    assert.deepEqual(holdingProblems([]), []);
   });
 });
 

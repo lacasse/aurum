@@ -1408,6 +1408,20 @@ export function TradeEntry({
       return;
     }
 
+    /*
+     * A batch that would leave the positions in a state that cannot be right is
+     * refused rather than recorded and mentioned. The arithmetic is fine; where
+     * the trades landed is not, and committing it is how twenty-three US shares
+     * came to be held and priced as Canadian receipts for fourteen months.
+     */
+    if (plan.batch.warnings.length > 0) {
+      setError(
+        `These trades would leave positions that cannot be right: ${plan.batch.warnings.join("; ")}. ` +
+          `Check the ticker and currency on each row.`,
+      );
+      return;
+    }
+
     apply(plan.batch);
     setOk(
       `Recorded ${plan.batch.trades} trade${plan.batch.trades !== 1 ? "s" : ""}` +
