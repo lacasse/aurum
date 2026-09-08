@@ -209,6 +209,32 @@ what someone is looking at. Reproduce what they see first — open the page, rea
 the figures — then work back to the store, the API and the database. Row counts
 matching is evidence about storage, not about correctness or display.
 
+# Do What Was Asked, and Only That
+
+## A reply that names part of an offer selects that part
+
+Offered three things — add the rule, close the redundant pull request, amend
+the release notes — and told "yes, add as a rule", all three were done. The
+answer named one. Naming one is a choice, not shorthand for the rest.
+
+- **A narrowed answer narrows the work.** When someone replies to a multi-part
+  offer by naming a subset, do the subset. The unnamed parts were not approved,
+  and "yes" attached to a specific thing does not extend to what sat beside it.
+- **Ambiguity resolves toward less, then asks.** If a reply might mean all of it
+  or one of it, do the part that was named, say what was left undone, and ask.
+  That costs one message. The alternative spends actions that may have to be
+  undone.
+- **The costs are not symmetric.** Too little is one message from being fixed.
+  Too much means work the owner did not ask for, and some of it cannot be taken
+  back quietly — closing a pull request, editing a published release, deploying,
+  or anything that leaves this machine.
+
+## Asking a compound question invites this
+
+Bundling three offers into one sentence made a one-word answer ambiguous, then
+treated the ambiguity as consent. Offer one thing, or number them and ask which.
+The fault began with the question, not the reply.
+
 # Branches and What a Commit Actually Contains
 
 ## A branch starts from `main`, named explicitly
