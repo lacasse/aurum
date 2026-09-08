@@ -209,6 +209,54 @@ what someone is looking at. Reproduce what they see first — open the page, rea
 the figures — then work back to the store, the API and the database. Row counts
 matching is evidence about storage, not about correctness or display.
 
+# Branches and What a Commit Actually Contains
+
+## A branch starts from `main`, named explicitly
+
+```bash
+git checkout -b <name> main     # not: git checkout -b <name>
+```
+
+`git checkout -b` without a base uses whatever happens to be checked out. On
+8 Sep 2026 that was another feature branch with an open pull request, so the
+new branch carried that branch's commit as well as its own. The pull request
+was squash-merged, and one commit landed on `main` containing two unrelated
+changes under a message describing only one of them — a UI change nobody had
+approved, shipped inside a database migration, and a release note that
+described two changes for a release that held three.
+
+Nothing about this is visible while working. The branch looks right, the tests
+pass, the diff against the *branch point* is correct, and a squash merge
+collapses the evidence into a single commit. It surfaced days later only
+because a question about rebasing prompted reading the merged diff.
+
+The base is one word. Type it.
+
+## Read what a pull request contains, not what it says it contains
+
+Before merging, list the files the diff actually touches and account for every
+one:
+
+```bash
+git diff --stat main...<branch>
+```
+
+A file that has nothing to do with the change is the signal — `investments/`
+had no business in a migration. The commit message is what the author
+*intended*; the file list is what will happen. Only the second one merges.
+
+The same check after the fact tells the truth about what shipped:
+`git show --stat <merge-commit>`.
+
+## When a commit turns out to carry more than it claimed
+
+Say so, and correct the record where the record is wrong: the release notes for
+that version, and the pull request that was silently made redundant. Do not
+rewrite the merged history to tidy it — the change is already deployed and
+already correct, and rewriting `main` to fix a commit message is a far larger
+risk than the inaccurate message. Amend what is still editable, leave what is
+not, and state plainly which is which.
+
 # Data Safety — CRITICAL RULES
 
 The PostgreSQL database is the single source of truth for all personal finance data. Data
