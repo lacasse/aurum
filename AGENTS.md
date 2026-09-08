@@ -18,10 +18,20 @@ following another rule here would require breaking one of these, break the
 other rule.
 
 **1. No fact about the owner's finances leaves the database.** Not an amount,
-not a quantity — in digits or in words — not a ticker they hold, not a security
-they hold by name, not an account, institution, plan or payee. Not a date
-attached to any of those. The database is where these live; every other
-location is a leak.
+not a quantity — in digits or in words — not an account, an institution, a plan
+or a payee. Not a date attached to any of those. The database is where these
+live; every other location is a leak.
+
+**1a. A ticker is not one of those facts.** A symbol and the company behind it
+are public: anyone can look up what MSFT is. What is private is the
+*combination* — which securities this person holds, how many, at what cost, in
+which account. So real symbols may be used freely as examples, in tests and in
+the demo data, and a coincidental overlap with the owner's holdings is not a
+disclosure. What must never appear is a holding *with its size, its cost or its
+account attached*, or a demo portfolio assembled to mirror the real one. The
+owner said this plainly, and it makes the fixtures better: real symbols cover
+the edge cases the app actually has to handle — a receipt and its underlying, a
+venue suffix, a coin — which invented ones only gesture at.
 
 **2. "It explains the bug" is not a reason. It is the reason this keeps
 happening.** Every incident has been a sentence that read better with the real

@@ -74,6 +74,9 @@ function loadMapping(path: string): Mapping {
   }
   const out: Mapping = {};
   for (const [column, value] of Object.entries(raw as Record<string, unknown>)) {
+    // JSON has no comments, and a column map is the one file a stranger has to
+    // write by hand. A leading underscore marks a note rather than a column.
+    if (column.startsWith("_")) continue;
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
       throw new Error(`${path}: "${column}" should be { expense?, income? }`);
     }

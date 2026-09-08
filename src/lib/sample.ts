@@ -229,30 +229,51 @@ export function generateSampleData(): FinanceData {
   /*
    * Invented securities, not real ones — and a deliberately ordinary shape.
    *
-   * The sample is a fiction from end to end and reads nobody's records, but a
-   * demo that happens to *look* like the real portfolio is nearly as bad as
-   * one that copies it: a screenshot is then hard to tell from a statement.
-   * So the names are made up and the composition is chosen to be the textbook
-   * one rather than anyone's in particular — an index fund at the centre, a
-   * bond fund beside it, a handful of single names, and crypto as a rounding
-   * error rather than the largest thing owned.
+   * Real symbols, invented everything else.
+   *
+   * A ticker is public — anyone can look up what VTI is — so using real ones
+   * discloses nothing, and it makes the demo do a job invented ones could not:
+   * cover the cases the app actually has to handle. MSFT beside MSFT.NEO is a
+   * US share held alongside its Canadian depositary receipt, which is the pair
+   * that read as one position until recently. VFV.TO carries a venue suffix.
+   * LTC is a coin, priced through a different provider than a listing.
+   *
+   * What must not be copied is the *shape*: which securities someone holds, in
+   * what proportion. That is why the composition here is the textbook one and
+   * not anybody's — an index fund at the centre, a bond fund beside it, a
+   * handful of single names, and crypto as a rounding error rather than the
+   * largest thing owned. A screenshot of this should be recognisable as a
+   * demonstration, not mistakable for a statement.
    */
   const seeds: (Seed & { currency: "CAD" | "USD" })[] = [
-    { ticker: "MTMX", name: "Meridian Total Market Index", assetClass: "US Equity", shares: 148, avgCost: 0, price: 292.15, drift: 1.22, vol: 0.045, dividends: 402.10, currency: "USD" },
-    { ticker: "NGIX", name: "Northgate International Index", assetClass: "Intl Equity", shares: 210, avgCost: 0, price: 66.84, drift: 1.16, vol: 0.055, dividends: 288.40, currency: "USD" },
-    { ticker: "KCBF", name: "Kestrel Core Bond Fund", assetClass: "Bonds", shares: 165, avgCost: 0, price: 72.92, drift: 1.01, vol: 0.018, dividends: 431.75, currency: "USD" },
-    { ticker: "HLCN", name: "Halcyon Systems", assetClass: "US Equity", shares: 24, avgCost: 0, price: 231.44, drift: 1.34, vol: 0.075, dividends: 61.20, currency: "USD" },
-    { ticker: "VNTR", name: "Vantara Software", assetClass: "US Equity", shares: 11, avgCost: 0, price: 418.92, drift: 1.41, vol: 0.07, dividends: 39.60, currency: "USD" },
-    { ticker: "ORBS", name: "Orbital Semiconductor", assetClass: "US Equity", shares: 14, avgCost: 0, price: 174.22, drift: 1.62, vol: 0.12, dividends: 8.40, currency: "USD" },
-    { ticker: "RVBD", name: "Riverbend Retail Group", assetClass: "US Equity", shares: 16, avgCost: 0, price: 186.53, drift: 1.28, vol: 0.085, dividends: 0, currency: "USD" },
-    { ticker: "LMNH", name: "Lumen Media Holdings", assetClass: "US Equity", shares: 13, avgCost: 0, price: 191.34, drift: 1.19, vol: 0.08, dividends: 0, currency: "USD" },
-    { ticker: "ARDM", name: "Ardent Motors", assetClass: "US Equity", shares: 9, avgCost: 0, price: 232.11, drift: 0.94, vol: 0.13, dividends: 0, currency: "USD" },
+    { ticker: "VTI", name: "Vanguard Total Stock Market ETF", assetClass: "US Equity", shares: 148, avgCost: 0, price: 292.15, drift: 1.22, vol: 0.045, dividends: 402.10, currency: "USD" },
+    { ticker: "VXUS", name: "Vanguard Total International Stock ETF", assetClass: "Intl Equity", shares: 210, avgCost: 0, price: 66.84, drift: 1.16, vol: 0.055, dividends: 288.40, currency: "USD" },
+    { ticker: "BND", name: "Vanguard Total Bond Market ETF", assetClass: "Bonds", shares: 165, avgCost: 0, price: 72.92, drift: 1.01, vol: 0.018, dividends: 431.75, currency: "USD" },
+    /*
+     * A Canadian listing, so the holdings table has a venue suffix in it and
+     * the price feed has to route one row differently from its neighbours.
+     */
+    { ticker: "VFV.TO", name: "Vanguard S&P 500 Index ETF", assetClass: "US Equity", shares: 32, avgCost: 0, price: 141.30, drift: 1.24, vol: 0.05, dividends: 61.20, currency: "CAD" },
+    /*
+     * A US share and its Canadian depositary receipt, held at once.
+     *
+     * The two look like one position to anything matching on the symbol
+     * without its suffix, which is exactly how a receipt came to absorb every
+     * trade in the share it tracks. Having both here means the case is on
+     * screen the first time anyone opens the demo, in the currencies that
+     * distinguish them.
+     */
+    { ticker: "MSFT", name: "Microsoft Corporation", assetClass: "US Equity", shares: 11, avgCost: 0, price: 418.92, drift: 1.41, vol: 0.07, dividends: 39.60, currency: "USD" },
+    { ticker: "MSFT.NEO", name: "Microsoft CDR (CAD Hedged)", assetClass: "US Equity", shares: 26, avgCost: 0, price: 31.40, drift: 1.38, vol: 0.07, dividends: 9.10, currency: "CAD" },
+    { ticker: "NVDA", name: "NVIDIA Corporation", assetClass: "US Equity", shares: 14, avgCost: 0, price: 174.22, drift: 1.62, vol: 0.12, dividends: 8.40, currency: "USD" },
+    { ticker: "KO", name: "The Coca-Cola Company", assetClass: "US Equity", shares: 42, avgCost: 0, price: 62.53, drift: 1.08, vol: 0.035, dividends: 78.40, currency: "USD" },
+    { ticker: "COST", name: "Costco Wholesale Corporation", assetClass: "US Equity", shares: 6, avgCost: 0, price: 891.34, drift: 1.19, vol: 0.06, dividends: 0, currency: "USD" },
     /*
      * A deliberately small position. Crypto is the whole story in some real
      * portfolios; making it the whole story here too would mean the demo and
-     * the real thing had the same silhouette, which is what this is avoiding.
+     * a real one had the same silhouette, which is what this is avoiding.
      */
-    { ticker: "NMBT", name: "Nimbus Token", assetClass: "Crypto", shares: 0.06, avgCost: 0, price: 91400, drift: 1.55, vol: 0.16, dividends: 0, currency: "USD" },
+    { ticker: "LTC", name: "Litecoin", assetClass: "Crypto", shares: 12, avgCost: 0, price: 108.40, drift: 1.55, vol: 0.16, dividends: 0, currency: "USD" },
   ];
 
   /*
@@ -266,8 +287,8 @@ export function generateSampleData(): FinanceData {
    * a sheltered one would leave the tax page just as empty.
    */
   const CLOSED: Seed & { currency: "CAD" | "USD" } = {
-    ticker: "FRGX",
-    name: "Frontier Growth Fund",
+    ticker: "DIS",
+    name: "The Walt Disney Company",
     assetClass: "US Equity",
     shares: 0,
     avgCost: 0,
@@ -287,7 +308,7 @@ export function generateSampleData(): FinanceData {
   };
 
   /** Positions trimmed but not closed, so a gain can be realized and open at once. */
-  const TRIMMED = new Set(["ORBS", "HLCN"]);
+  const TRIMMED = new Set(["NVDA", "KO"]);
 
   /**
    * The trades that built a position, in CAD.

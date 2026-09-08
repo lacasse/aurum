@@ -7,9 +7,11 @@
 # had never been typed into the list, and nobody thinks to add a ticker to a
 # deny-list at the moment they are writing prose about it.
 #
-# So the list is derived instead. Every ticker held, every account and
-# institution name, every payee the record knows: if it is in the database it is
-# a fact about this person, and it has no business in the source.
+# So the list is derived instead — from the parts of the database that identify
+# a person rather than a market: account and institution names, and the payees
+# off their statement. Tickers are deliberately left out: a symbol is public,
+# and blocking the ones this person happens to hold only makes the fixtures
+# worse, since real symbols are what cover the edge cases the app must handle.
 #
 #   DATABASE_URL=... scripts/refresh-private-terms.sh
 #
@@ -40,18 +42,37 @@ tmp="$OUT.tmp.$$"
   echo "# the machine's hostname, a lender, people named in a shared expense."
   echo
 
-  # Tickers, and their venue-less form -- a comment is as likely to write MA as
-  # MA.NEO, and either one identifies the position.
-  query "SELECT DISTINCT ticker FROM holdings WHERE ticker <> ''"
-  query "SELECT DISTINCT regexp_replace(upper(ticker), '\.[A-Z]+\$', '') FROM holdings WHERE ticker <> ''"
-
-  # Account and institution names, which name the broker and the plan.
+  # Deliberately NOT the tickers, nor the security names behind them.
+  #
+  # A symbol is public: anyone can look up what MSFT is, and blocking the ones
+  # this person happens to hold makes the test fixtures worse — real symbols are
+  # what cover the edge cases the app has to handle, a receipt beside its
+  # underlying, a venue suffix, a coin. What is private is the *combination*:
+  # the holding with its size, its cost and its account attached. Amounts and
+  # export rows are caught by the patterns in the guard, which is where that
+  # belongs.
+  #
+  # What is left here is what genuinely identifies a person rather than a
+  # market: where they bank, what their accounts are called, and who they pay.
   query "SELECT DISTINCT name FROM accounts WHERE name <> '' AND name <> '—'"
   query "SELECT DISTINCT institution FROM accounts WHERE institution <> '' AND institution <> '—'"
 
-  # Security names: "Mastercard Incorporated (Class A)" identifies as surely as
-  # the symbol does. Split to words so a partial mention is caught too.
-  query "SELECT DISTINCT name FROM holdings WHERE name <> '' AND name <> ticker"
+  # Merchants and counterparties off the statement. A payee names a person's
+  # habits, their landlord, their lender — and unlike a ticker it is not a
+  # public fact about a market.
+  #
+  # Excluding any payee that is really a category name. The monthly spreadsheet
+  # import writes the category into the payee column, so "Groceries", "Interest"
+  # and "Dividends" arrive here looking like merchants — and they are the app's
+  # own vocabulary, printed in a dozen source files. Blocking those would make
+  # the guard fire on ordinary code, and a guard that always fires gets switched
+  # off.
+  query "SELECT DISTINCT t.payee FROM transactions t
+           WHERE t.payee <> '' AND length(t.payee) > 4
+             AND NOT EXISTS (SELECT 1 FROM categories c WHERE lower(c.name) = lower(t.payee))
+             AND lower(t.payee) NOT IN (
+               SELECT lower(category) FROM transactions
+             )"
 } | tr -d '\r' \
   | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
   | grep -v '^$' \
@@ -67,8 +88,40 @@ tmp="$OUT.tmp.$$"
 # the benchmark it charts against, and the major coins its asset-class
 # detection tests for. Holding those does not make the app unable to mention
 # them; blocking them would make `isCoinTicker` unwritable.
-STOP='^(CAD|USD|TFSA|RRSP|FHSA|Pension|Cash|Chequing|Savings|Inc|Inc\.|The|and|of|ETF|Portfolio|Class|A|B|BTC|ETH|SOL|XEQT|XEQT\.TO)$'
-awk 'length($0) >= 3' "$tmp.raw" | grep -Evi "$STOP" > "$tmp"
+# Payees this app writes itself.
+#
+# A circular match, and a subtle one: the importer labels a broker row "Cash
+# back" or "Margin interest", that label lands in the payee column, the list is
+# derived from payees, and the guard then refuses to let the source contain the
+# very string the source produces. These name the broker's export format, which
+# the parser has to name to read it — they say nothing about whose statement it
+# was.
+APP_PAYEES='Cash back|Bonus|Margin interest|Withholding tax|Interest|Interest & cashback|Pension|Net pay|Deposit|Withdrawal|Rent'
+# The bank's and broker's own words for a row. The parser has to contain them to
+# recognise them, and they describe a transaction type rather than a person.
+FORMAT_WORDS='Interac e-Transfer® Out|Interac e-Transfer® Received|Direct deposit received|Pre-authorized Debit|Credit card payment|Cash sent|Giveaway received|Spend'
+
+STOP='^(CAD|USD|TFSA|RRSP|FHSA|Pension|Cash|Chequing|Savings|Inc|Inc\.|The|and|of|ETF|Portfolio|Class|A|B|BTC|ETH|SOL|XEQT|XEQT\.TO|Non-registered|non-registered|Margin|margin)$'
+# Retail chains the app already recognises are public businesses, not personal
+# counterparties, and the same reasoning applies to them as to a ticker: anyone
+# can look up what Canadian Tire is. What identifies a person is who they owe —
+# a lender, a landlord, a servicer, an individual — which the app's keyword
+# lists do not contain and never will.
+#
+# Taken from those lists rather than typed here, so the two cannot drift: if
+# the matcher learns a chain, the deny-list stops blocking it in the same
+# breath.
+CHAINS="$tmp.chains"
+sed -n '/^  \["/,/^\]/p' src/lib/csv.ts 2>/dev/null \
+  | grep -oE '"[^"]{4,}"' | tr -d '"' | tr 'A-Z' 'a-z' \
+  | sort -u > "$CHAINS" || : > "$CHAINS"
+
+awk 'length($0) >= 3' "$tmp.raw" \
+  | grep -Evi "$STOP" \
+  | grep -Evxi "$APP_PAYEES" \
+  | grep -Evxi "$FORMAT_WORDS" \
+  | { if [ -s "$CHAINS" ]; then grep -ivFf "$CHAINS"; else cat; fi } > "$tmp"
+rm -f "$CHAINS"
 rm -f "$tmp.raw"
 
 # Anything hand-added last time, kept.

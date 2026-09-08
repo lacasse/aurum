@@ -57,30 +57,36 @@ describe("suggestCategory", () => {
   test("keyword rules survive a rename too", () => {
     // No category column at all: the merchant name is all there is to go on,
     // and the rule that recognises it names a category the user has renamed.
-    const s = suggestCategory("Starbucks #123", "", "", undefined, "expense", {}, renamed);
+    const s = suggestCategory("Starbucks #200", "", "", undefined, "expense", {}, renamed);
     assert.equal(s.category, "Drinks & Dining");
   });
 
+  /*
+   * The chain names are the product's own matching vocabulary and have to be
+   * real. The branch numbers are round and invented on purpose: which outlet
+   * someone shops at, on which day, is a fact about them, and these were
+   * originally retyped off a statement.
+   */
   test("knows the shops on a Canadian statement", () => {
     const canadian = [...stock, "Household", "Dog"];
     const by = (payee: string) =>
       suggestCategory(payee, "", "", undefined, "expense", {}, canadian).category;
-    assert.equal(by("Food Basics 663"), "Groceries");
-    assert.equal(by("Marsha's Yig 7971"), "Groceries");
-    assert.equal(by("Tim Hortons #482"), "Dining");
-    assert.equal(by("Petro-Canada 10565"), "Transport");
-    assert.equal(by("Canadian Tire #422"), "Household");
-    assert.equal(by("Pet Valu #2316"), "Dog");
+    assert.equal(by("Food Basics 1100"), "Groceries");
+    assert.equal(by("Yig 1000"), "Groceries");
+    assert.equal(by("Tim Hortons #400"), "Dining");
+    assert.equal(by("Petro-Canada 2000"), "Transport");
+    assert.equal(by("Canadian Tire #300"), "Household");
+    assert.equal(by("Pet Valu #500"), "Dog");
   });
 
   test("what the user taught beats what the file says", () => {
     const s = suggestCategory(
-      "Mossy Earth",
+      "Rewild Fund",
       "Other personal",
       "",
       "Other personal",
       "expense",
-      { "mossy earth": "Donations" },
+      { "rewild fund": "Donations" },
       [...stock, "Donations"],
     );
     assert.equal(s.category, "Donations");
