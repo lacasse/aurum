@@ -11,6 +11,12 @@ import {
 } from "./types";
 import { lastMonthKeys } from "./format";
 import { replayFlows } from "./flows";
+import {
+  REGISTERED_PLANS,
+  contributedIn,
+  type ContributionLimits,
+  type RegisteredPlan,
+} from "./contributions";
 
 /*
  * Every row this generator creates carries an id with one of these prefixes,
@@ -789,4 +795,57 @@ export function generateSampleSnapshots(
     });
   }
   return out;
+}
+
+/**
+ * Contribution room for the demo, derived from what the demo paid in.
+ *
+ * Seeded rather than left blank, because a card whose figures are all "not
+ * set" demonstrates only its own empty state — the deposits alone are half the
+ * picture, and the half that matters is what they are measured against.
+ *
+ * Derived rather than written down. The sample's months move with the calendar
+ * and its contributions are generated, so a fixed limit would drift: readable
+ * this month, over-contributed by a third of a year, absurd after a year. Each
+ * plan is given the room that leaves it at a chosen fraction of full, so the
+ * card always shows the three states worth showing — comfortable, nearly out,
+ * and barely started — whenever anyone happens to open it.
+ *
+ * Rounded to the nearest five hundred so it reads like a figure off a notice of
+ * assessment rather than the arithmetic it is.
+ */
+const DEMO_FULLNESS: Record<RegisteredPlan, number> = {
+  TFSA: 0.6,
+  RRSP: 0.98,
+  FHSA: 0.35,
+};
+
+/** A plausible limit for a plan nothing was paid into, so the gauge still reads. */
+const DEMO_FALLBACK: Record<RegisteredPlan, number> = {
+  TFSA: 7000,
+  RRSP: 15000,
+  FHSA: 8000,
+};
+
+export function generateSampleLimits(
+  data: FinanceData,
+  now: Date = new Date(),
+): ContributionLimits {
+  const limits: ContributionLimits = {};
+  const thisYear = now.getFullYear();
+
+  // This year and last, so the Year page's own year picker has room to show on
+  // whichever year it lands on rather than only the newest.
+  for (const year of [thisYear - 1, thisYear].map(String)) {
+    const forYear: Partial<Record<RegisteredPlan, number>> = {};
+    for (const plan of REGISTERED_PLANS) {
+      if (!data.accounts.some((a) => a.registration === plan)) continue;
+      const paid = contributedIn(year, plan, data.transactions, data.accounts);
+      const room =
+        paid > 0 ? Math.ceil(paid / DEMO_FULLNESS[plan] / 500) * 500 : DEMO_FALLBACK[plan];
+      forYear[plan] = room;
+    }
+    if (Object.keys(forYear).length > 0) limits[year] = forYear;
+  }
+  return limits;
 }

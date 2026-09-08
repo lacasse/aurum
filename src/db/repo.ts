@@ -477,6 +477,16 @@ export async function deleteDemoData(): Promise<void> {
         SAMPLE_BUDGETS.map((b) => b.category),
       ),
     );
+    /*
+     * The seeded contribution room goes with the deposits it measured.
+     *
+     * Left behind it would be worse than useless: the demo's deposits are gone
+     * but its invented limits remain, so the first real contribution is drawn
+     * against room nobody has. A figure the app is not certain of, rendered as
+     * though it were a fact.
+     */
+    await tx.delete(appMeta).where(eq(appMeta.key, CONTRIBUTION_LIMITS_KEY));
+    await tx.delete(appMeta).where(eq(appMeta.key, ROOM_DEFERRALS_KEY));
     await tx
       .insert(appMeta)
       .values({ key: DEMO_DELETED_KEY, value: new Date().toISOString() })

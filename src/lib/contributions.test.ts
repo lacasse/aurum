@@ -7,9 +7,11 @@ import {
   deferAsks,
   roomAsks,
   triggeredAsks,
+  REGISTERED_PLANS,
   type ContributionLimits,
 } from "./contributions";
 import type { Account, Transaction } from "./types";
+import { generateSampleData, generateSampleLimits } from "./sample";
 
 /* ALL-FIXTURES-INVENTED */
 
@@ -253,5 +255,43 @@ describe("putting the question off", () => {
     const deferred = deferAsks("2026-12", triggeredAsks("2026-12"), {});
     const limits: ContributionLimits = { "2027": { TFSA: 7000, FHSA: 8000 } };
     assert.deepEqual(clearAnswered(limits, deferred), {});
+  });
+});
+
+/*
+ * The demo seeds room as well as deposits. A card whose figures all read "not
+ * set" demonstrates only its own empty state, and the deposits alone are half
+ * the picture — the half that matters is what they are measured against.
+ */
+describe("the demo's own contribution room", () => {
+  const data = generateSampleData();
+  const limits = generateSampleLimits(data);
+  const year = String(new Date().getFullYear());
+
+  test("every plan the demo holds is given room", () => {
+    for (const plan of REGISTERED_PLANS) {
+      if (!data.accounts.some((a) => a.registration === plan)) continue;
+      assert.equal(typeof limits[year]?.[plan], "number", plan);
+    }
+  });
+
+  test("the gauges land where they were meant to, not wherever the data fell", () => {
+    const room = contributionRoom(year, data.transactions, data.accounts, limits);
+    const used = (plan: string) => room.find((r) => r.plan === plan)?.used ?? 0;
+    // Comfortable, nearly out, and barely started — the three states worth
+    // showing. Loose bounds because the limits are rounded to a real-looking
+    // figure rather than to whatever hits the ratio exactly.
+    assert.ok(used("TFSA") > 45 && used("TFSA") <= 60, `TFSA ${used("TFSA")}`);
+    assert.ok(used("RRSP") > 80 && used("RRSP") <= 98, `RRSP ${used("RRSP")}`);
+    assert.ok(used("FHSA") > 20 && used("FHSA") <= 40, `FHSA ${used("FHSA")}`);
+  });
+
+  test("nothing is drawn as over-contributed", () => {
+    const room = contributionRoom(year, data.transactions, data.accounts, limits);
+    assert.deepEqual(room.filter((r) => r.over), []);
+  });
+
+  test("last year is seeded too, so the year picker has somewhere to go", () => {
+    assert.ok(limits[String(Number(year) - 1)]);
   });
 });
