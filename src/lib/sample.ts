@@ -11,6 +11,12 @@ import {
 } from "./types";
 import { lastMonthKeys } from "./format";
 import { replayFlows } from "./flows";
+import {
+  REGISTERED_PLANS,
+  contributedIn,
+  type ContributionLimits,
+  type RegisteredPlan,
+} from "./contributions";
 
 /*
  * Every row this generator creates carries an id with one of these prefixes,
@@ -171,6 +177,11 @@ export function generateSampleData(): FinanceData {
     [
       { id: "acc-tfsa", name: "TFSA", registration: "TFSA" as const },
       { id: "acc-rrsp", name: "RRSP", registration: "RRSP" as const },
+      /*
+       * An FHSA, so the contribution-room card has all three plans to draw
+       * rather than two gauges and a gap where the third should be.
+       */
+      { id: "acc-fhsa", name: "FHSA", registration: "FHSA" as const },
       {
         id: "acc-nonreg",
         name: "Non-registered",
@@ -616,6 +627,26 @@ export function generateSampleData(): FinanceData {
 
     /* Two of your own accounts, so the transfer filter has something to find. */
     move(m, 16, 900, "acc-checking", "acc-savings", "To savings");
+
+    /*
+     * Contributions into the shelters, which is what the contribution-room
+     * card measures. Without them every gauge reads nothing used and the card
+     * demonstrates only its own empty state.
+     *
+     * Deliberately uneven: the TFSA is filled steadily and ends the year close
+     * to its limit, the RRSP is contributed to in bursts, and the FHSA takes a
+     * single lump. Three different-looking gauges say more about what the card
+     * is for than three identical ones.
+     */
+    move(m, 3, 500, "acc-checking", "acc-tfsa", "Deposit to TFSA");
+    if (chance(rng, 0.5)) {
+      move(m, randInt(rng, 8, 20), rand(rng, 400, 1600), "acc-checking", "acc-rrsp", "Deposit to RRSP");
+    }
+    // Late in the series, so the lump lands in the year the card opens on
+    // rather than in one the reader has to go looking for.
+    if (mi === months.length - 5) {
+      move(m, 12, 4000, "acc-checking", "acc-fhsa", "Deposit to FHSA");
+    }
     if (chance(rng, 0.4)) {
       move(m, randInt(rng, 18, 26), rand(rng, 300, 1200), "acc-checking", "acc-nonreg", "To brokerage");
     }
@@ -764,4 +795,57 @@ export function generateSampleSnapshots(
     });
   }
   return out;
+}
+
+/**
+ * Contribution room for the demo, derived from what the demo paid in.
+ *
+ * Seeded rather than left blank, because a card whose figures are all "not
+ * set" demonstrates only its own empty state — the deposits alone are half the
+ * picture, and the half that matters is what they are measured against.
+ *
+ * Derived rather than written down. The sample's months move with the calendar
+ * and its contributions are generated, so a fixed limit would drift: readable
+ * this month, over-contributed by a third of a year, absurd after a year. Each
+ * plan is given the room that leaves it at a chosen fraction of full, so the
+ * card always shows the three states worth showing — comfortable, nearly out,
+ * and barely started — whenever anyone happens to open it.
+ *
+ * Rounded to the nearest five hundred so it reads like a figure off a notice of
+ * assessment rather than the arithmetic it is.
+ */
+const DEMO_FULLNESS: Record<RegisteredPlan, number> = {
+  TFSA: 0.6,
+  RRSP: 0.98,
+  FHSA: 0.35,
+};
+
+/** A plausible limit for a plan nothing was paid into, so the gauge still reads. */
+const DEMO_FALLBACK: Record<RegisteredPlan, number> = {
+  TFSA: 7000,
+  RRSP: 15000,
+  FHSA: 8000,
+};
+
+export function generateSampleLimits(
+  data: FinanceData,
+  now: Date = new Date(),
+): ContributionLimits {
+  const limits: ContributionLimits = {};
+  const thisYear = now.getFullYear();
+
+  // This year and last, so the Year page's own year picker has room to show on
+  // whichever year it lands on rather than only the newest.
+  for (const year of [thisYear - 1, thisYear].map(String)) {
+    const forYear: Partial<Record<RegisteredPlan, number>> = {};
+    for (const plan of REGISTERED_PLANS) {
+      if (!data.accounts.some((a) => a.registration === plan)) continue;
+      const paid = contributedIn(year, plan, data.transactions, data.accounts);
+      const room =
+        paid > 0 ? Math.ceil(paid / DEMO_FULLNESS[plan] / 500) * 500 : DEMO_FALLBACK[plan];
+      forYear[plan] = room;
+    }
+    if (Object.keys(forYear).length > 0) limits[year] = forYear;
+  }
+  return limits;
 }

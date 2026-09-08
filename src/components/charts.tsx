@@ -23,7 +23,7 @@ import {
   YAxis,
 } from "recharts";
 import { cn } from "./ui";
-import { accent, spectrumAt } from "@/lib/palette";
+import { accent, spectrumAt, type AccentName } from "@/lib/palette";
 
 export { spectrumAt } from "@/lib/palette";
 
@@ -867,6 +867,98 @@ export function ChartLegend({
           {it.label}
         </span>
       ))}
+    </div>
+  );
+}
+
+/* ---------------- Contribution room gauge ---------------- */
+
+/**
+ * A ring showing how much of a year's contribution room has been used.
+ *
+ * Drawn by hand rather than with a chart library. A gauge is one arc and a
+ * number in the middle; routing that through a charting component costs a
+ * wrapper, a responsive container and a layout pass to draw a circle, and
+ * fights you over the one thing that matters here — the label sitting exactly
+ * in the centre at a size that reads.
+ *
+ * `used` may exceed 100. The arc stops at the full circle because there is no
+ * more circle, but the colour changes and the figure below says by how much:
+ * an over-contribution is penalised monthly and is the one state on this card
+ * that needs acting on.
+ */
+export function RoomGauge({
+  label,
+  used,
+  tone = "brand",
+  caption,
+  detail,
+  over = false,
+}: {
+  label: string;
+  /** Percentage used, or null when the room has never been entered. */
+  used: number | null;
+  tone?: AccentName;
+  caption: string;
+  detail?: string;
+  over?: boolean;
+}) {
+  const R = 42;
+  const C = 2 * Math.PI * R;
+  const known = used !== null;
+  const shown = known ? Math.max(0, Math.min(used, 100)) : 0;
+  const colour = over ? accent("negative") : accent(tone);
+
+  return (
+    <div className="flex flex-col items-center gap-2.5">
+      <div className="relative">
+        <svg width="112" height="112" viewBox="0 0 112 112" role="img"
+             aria-label={`${label}: ${known ? `${Math.round(used)}% of room used` : "room not set"}`}>
+          <circle
+            cx="56" cy="56" r={R} fill="none" strokeWidth="9"
+            className="stroke-line"
+            strokeDasharray={known ? undefined : "3 5"}
+          />
+          {known && (
+            <circle
+              cx="56" cy="56" r={R} fill="none" stroke={colour} strokeWidth="9"
+              strokeLinecap="round"
+              strokeDasharray={`${(shown / 100) * C} ${C}`}
+              /* Start at twelve o'clock rather than three, which is where a
+                 dial is read from. */
+              transform="rotate(-90 56 56)"
+              style={{ transition: "stroke-dasharray 600ms cubic-bezier(0.4, 0, 0.2, 1)" }}
+            />
+          )}
+        </svg>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          {known ? (
+            <>
+              <span className="text-xl font-semibold tabular-nums leading-none">
+                {Math.round(used)}
+                <span className="text-xs font-normal text-ink-faint">%</span>
+              </span>
+              <span className="mt-0.5 text-[0.625rem] uppercase tracking-wider text-ink-faint">
+                used
+              </span>
+            </>
+          ) : (
+            <span className="text-[0.625rem] uppercase tracking-wider text-ink-faint">
+              not set
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="text-center">
+        <p className="text-xs font-semibold tracking-wide">{label}</p>
+        <p className="mt-0.5 text-[0.6875rem] tabular-nums text-ink-dim">{caption}</p>
+        {detail ? (
+          <p className={cn("mt-0.5 text-[0.6875rem] tabular-nums",
+                           over ? "text-negative" : "text-ink-faint")}>
+            {detail}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
