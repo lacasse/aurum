@@ -1,4 +1,5 @@
 import { handle } from "@/db/http";
+import { readPriceCache, recordPrices } from "@/db/price-cache";
 import {
   eodhdLastFetched,
   eodhdUsage,
@@ -143,14 +144,13 @@ function isAfterMarketClose(now: Date): boolean {
   return hour > CLOSE_HOUR_ET || (hour === CLOSE_HOUR_ET && minute >= 0);
 }
 
-/* ── In-memory cache with per-source TTL ── */
+/* ── Persisted cache with per-source TTL ── */
 
-interface CacheEntry {
-  price: number;
-  at: number;
-}
-
-const priceCache = new Map<string, CacheEntry>();
+/*
+ * The cache lives in the database, not in this process. Held here it was empty
+ * after every restart, so each deploy made every ticker look unfetched and the
+ * next page load re-bought the whole portfolio. See `src/db/price-cache.ts`.
+ */
 
 const CACHE_TTL: Record<string, number> = {
   twelvedata: 5 * 60_000,   // 5 minutes — real-time during market hours
@@ -176,7 +176,7 @@ export async function GET(req: Request) {
      * own schedule.
      *
      * Three things hold an automatic refresh back, and this lifts all three:
-     * the per-process price cache, the rule that EOD data is only worth buying
+     * the stored price cache, the rule that EOD data is only worth buying
      * after the close, and the providers' daily and per-minute allowances. Each
      * exists to stop the app spending an allowance quietly; none is a reason to
      * refuse someone who has been shown the cost and asked for it anyway.
@@ -202,6 +202,7 @@ export async function GET(req: Request) {
     }[] = [];
     const eodhdItems: { ticker: string; symbol: string }[] = [];
     const cachedPrices: Record<string, number> = {};
+    const priceCache = await readPriceCache();
 
     for (let i = 0; i < tickers.length; i++) {
       const ac = (classes[i] ?? "US Equity") as AssetClass;
@@ -276,10 +277,7 @@ export async function GET(req: Request) {
       }
     }
 
-    for (const [ticker, price] of twelvePrices)
-      priceCache.set(ticker, { price, at: now });
-    for (const [ticker, price] of eodhdPrices)
-      priceCache.set(ticker, { price, at: now });
+    await recordPrices(new Map([...twelvePrices, ...eodhdPrices]), now);
 
     const prices: Record<string, number> = { ...cachedPrices };
     for (const [ticker, price] of twelvePrices) prices[ticker] = price;
