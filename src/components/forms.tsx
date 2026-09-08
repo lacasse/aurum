@@ -1411,8 +1411,8 @@ export function TradeEntry({
     /*
      * A batch that would leave the positions in a state that cannot be right is
      * refused rather than recorded and mentioned. The arithmetic is fine; where
-     * the trades landed is not, and committing it is how twenty-three US shares
-     * came to be held and priced as Canadian receipts for fourteen months.
+     * the trades landed is not, and committing it is how a US position came to
+     * be held and priced as a Canadian receipt for over a year.
      */
     if (plan.batch.warnings.length > 0) {
       setError(
