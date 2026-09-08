@@ -70,8 +70,8 @@ export default function YearPage() {
     let cancelled = false;
     fetch("/api/contribution-limits", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((l: ContributionLimits) => {
-        if (!cancelled) setLimits(l ?? {});
+      .then((d: { limits?: ContributionLimits }) => {
+        if (!cancelled) setLimits(d.limits ?? {});
       })
       .catch(() => {});
     return () => {

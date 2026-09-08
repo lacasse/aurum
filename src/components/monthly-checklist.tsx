@@ -13,11 +13,13 @@ import {
 import { Badge, Button, Field, Input, Modal, Select, cn } from "@/components/ui";
 import { TradeEntry, type TradeDraft } from "@/components/forms";
 import {
+  clearAnswered,
   contributionRoom,
-  plansDueForUpdate,
-  roomEntered,
+  deferAsks,
+  roomAsks,
   type ContributionLimits,
-  type RegisteredPlan,
+  type RoomAsk,
+  type RoomDeferrals,
 } from "@/lib/contributions";
 import type { TradeBatch, TradeInput } from "@/lib/trade-batch";
 import { useFinance } from "@/lib/store";
@@ -1774,39 +1776,57 @@ function RoomStep({
   month,
   onNext,
   onBack,
-  plans,
+  asks,
   limits,
+  deferrals,
   onSave,
 }: StepProps & {
-  plans: RegisteredPlan[];
+  asks: RoomAsk[];
   limits: ContributionLimits;
-  onSave: (next: ContributionLimits) => void;
+  deferrals: RoomDeferrals;
+  onSave: (limits: ContributionLimits, deferrals: RoomDeferrals) => void;
 }) {
-  const year = month.slice(0, 4);
   const accounts = useFinance((s) => s.accounts);
   const transactions = useFinance((s) => s.transactions);
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(plans.map((p) => [p, limits[year]?.[p]?.toString() ?? ""])),
-  );
+  const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
 
-  const room = contributionRoom(year, transactions, accounts, limits);
-  const paidIn = (plan: RegisteredPlan) =>
-    room.find((r) => r.plan === plan)?.contributed ?? 0;
+  const key = (a: RoomAsk) => `${a.year}|${a.plan}`;
+  const paidIn = (a: RoomAsk) =>
+    contributionRoom(a.year, transactions, accounts, limits).find(
+      (r) => r.plan === a.plan,
+    )?.contributed ?? 0;
+
+  const years = [...new Set(asks.map((a) => a.year))];
+  const plans = [...new Set(asks.map((a) => a.plan))];
 
   const submit = () => {
-    const forYear = { ...(limits[year] ?? {}) };
-    for (const plan of plans) {
-      const raw = (values[plan] ?? "").trim().replace(/[$,\s]/g, "");
-      if (raw === "") continue;
+    const nextLimits: ContributionLimits = { ...limits };
+    const unanswered: RoomAsk[] = [];
+    for (const ask of asks) {
+      const raw = (values[key(ask)] ?? "").trim().replace(/[$,\s]/g, "");
+      if (raw === "") {
+        unanswered.push(ask);
+        continue;
+      }
       const value = Number(raw);
       if (!Number.isFinite(value) || value < 0) {
-        setError(`${plan} room must be an amount, or left blank to decide later.`);
+        setError(`${ask.plan} room must be an amount, or left blank.`);
         return;
       }
-      forYear[plan] = Math.round(value * 100) / 100;
+      nextLimits[ask.year] = {
+        ...(nextLimits[ask.year] ?? {}),
+        [ask.plan]: Math.round(value * 100) / 100,
+      };
     }
-    onSave({ ...limits, [year]: forYear });
+    // Anything left blank is treated as put off, so it returns next month
+    // rather than waiting a year to be asked again.
+    onSave(nextLimits, deferAsks(month, unanswered, deferrals));
+    onNext();
+  };
+
+  const askAgainNextMonth = () => {
+    onSave(limits, deferAsks(month, asks, deferrals));
     onNext();
   };
 
@@ -1814,23 +1834,30 @@ function RoomStep({
     <StepBody
       number={number}
       total={total}
-      title={`Contribution room for ${year}`}
+      title={`Contribution room for ${years.join(" and ")}`}
       lead={
         plans.length > 1
-          ? `The ${plans.join(" and ")} limits are set for the year. Enter what you are allowed to contribute, and the Year page will track what you have used.`
+          ? `The ${plans.join(" and ")} limits are set for the year. Enter what you are allowed to contribute and the Year page will track what you have used.`
           : `Your ${plans[0]} room comes off your notice of assessment. Enter it and the Year page will track what you have used.`
       }
       onBack={onBack}
       note={
         <>
-          Saved against {year}, not against {labelMonth(month)} — room is a fact
-          about a year. Leave a box empty to be asked again next time.
+          Saved against {years.join(" and ")}, not against {labelMonth(month)} —
+          room is a fact about a year. Nothing here is required to close the
+          month.
         </>
       }
       actions={
         <>
-          <Button variant="ghost" onClick={onNext}>
-            Skip for now
+          {/*
+            * Not "skip" but "ask me next month". The usual reason for having no
+            * figure is that the notice of assessment has not arrived yet, and a
+            * skip that waits a full year to ask again turns a one-month delay
+            * into a year of an empty gauge.
+            */}
+          <Button variant="ghost" onClick={askAgainNextMonth}>
+            I do not have it yet — ask next month
           </Button>
           <Button onClick={submit}>
             Next <ArrowRight size={14} />
@@ -1839,11 +1866,11 @@ function RoomStep({
       }
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {plans.map((plan) => (
+        {asks.map((ask) => (
           <Field
-            key={plan}
-            label={`${plan} room for ${year}`}
-            hint={`${fmtCAD(paidIn(plan))} paid in so far this year`}
+            key={key(ask)}
+            label={`${ask.plan} room for ${ask.year}`}
+            hint={`${fmtCAD(paidIn(ask))} paid in so far in ${ask.year}`}
           >
             <Input
               type="number"
@@ -1851,9 +1878,9 @@ function RoomStep({
               step="0.01"
               inputMode="decimal"
               placeholder="Not set"
-              value={values[plan] ?? ""}
+              value={values[key(ask)] ?? ""}
               onChange={(e) =>
-                setValues((prev) => ({ ...prev, [plan]: e.target.value }))
+                setValues((prev) => ({ ...prev, [key(ask)]: e.target.value }))
               }
             />
           </Field>
@@ -1950,13 +1977,16 @@ function Checklist({ onClose }: { onClose: () => void }) {
   const [loaded, setLoaded] = useState<Loaded>(EMPTY_LOAD);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [limits, setLimits] = useState<ContributionLimits>({});
+  const [deferrals, setDeferrals] = useState<RoomDeferrals>({});
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/contribution-limits", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((l: ContributionLimits) => {
-        if (!cancelled) setLimits(l ?? {});
+      .then((d: { limits?: ContributionLimits; deferrals?: RoomDeferrals }) => {
+        if (cancelled) return;
+        setLimits(d.limits ?? {});
+        setDeferrals(d.deferrals ?? {});
       })
       .catch(() => {});
     return () => {
@@ -1964,23 +1994,28 @@ function Checklist({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  const saveLimits = useCallback((next: ContributionLimits) => {
-    setLimits(next);
-    fetch("/api/contribution-limits", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ limits: next }),
-    }).catch(() => {});
-  }, []);
+  const saveRoom = useCallback(
+    (nextLimits: ContributionLimits, nextDeferrals: RoomDeferrals) => {
+      // A figure entered settles the question, so its deferral goes with it.
+      const tidied = clearAnswered(nextLimits, nextDeferrals);
+      setLimits(nextLimits);
+      setDeferrals(tidied);
+      fetch("/api/contribution-limits", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limits: nextLimits, deferrals: tidied }),
+      }).catch(() => {});
+    },
+    [],
+  );
 
   /*
-   * The plans this month owes an answer for, and only while it is still owed.
-   * Once the year's figures are in, the step stops appearing rather than
-   * asking again every time the month is reopened.
+   * What this month owes an answer for: the question its own month raises, and
+   * anything a previous month put off. Filtered to plans that are actually
+   * held and not already answered, so the step never appears with nothing to
+   * ask.
    */
-  const duePlans = plansDueForUpdate(month);
-  const needsRoom =
-    duePlans.length > 0 && !roomEntered(month.slice(0, 4), duePlans, limits);
+  const asks = roomAsks(month, limits, deferrals, accounts);
   /*
    * Steps the month does not need are not shown. No pension account, no
    * pension step; and the mergers step appears only once a file has actually
@@ -1991,7 +2026,7 @@ function Checklist({ onClose }: { onClose: () => void }) {
     (s) =>
       (s.key !== "pension" || hasPension) &&
       (s.key !== "actions" || loaded.actions.length > 0) &&
-      (s.key !== "room" || needsRoom),
+      (s.key !== "room" || asks.length > 0),
   );
   const at = Math.min(index, steps.length - 1);
   const step = steps[at].key;
@@ -2117,9 +2152,10 @@ function Checklist({ onClose }: { onClose: () => void }) {
       {step === "room" && (
         <RoomStep
           {...shared}
-          plans={duePlans}
+          asks={asks}
           limits={limits}
-          onSave={saveLimits}
+          deferrals={deferrals}
+          onSave={saveRoom}
         />
       )}
       {step === "review" && (

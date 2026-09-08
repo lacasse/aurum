@@ -30,6 +30,7 @@ import {
   REGISTERED_PLANS,
   type ContributionLimits,
   type RegisteredPlan,
+  type RoomDeferrals,
 } from "@/lib/contributions";
 import { todayISO } from "@/lib/format";
 import { addMoney } from "@/lib/money";
@@ -571,6 +572,48 @@ export async function getContributionLimits(): Promise<ContributionLimits> {
   } catch {
     return {};
   }
+}
+
+const ROOM_DEFERRALS_KEY = "contribution_deferrals";
+
+/**
+ * Questions the checklist asked and was told "not yet".
+ *
+ * Kept apart from the limits themselves because they are different kinds of
+ * fact: a limit is what the CRA allows, a deferral is what the owner has not
+ * looked up. Storing them together would mean a saved limit rewrites the
+ * deferral record and vice versa.
+ */
+export async function getRoomDeferrals(): Promise<RoomDeferrals> {
+  const [row] = await db
+    .select()
+    .from(appMeta)
+    .where(eq(appMeta.key, ROOM_DEFERRALS_KEY));
+  if (!row) return {};
+  try {
+    const parsed = JSON.parse(row.value) as RoomDeferrals;
+    const out: RoomDeferrals = {};
+    for (const [year, plans] of Object.entries(parsed ?? {})) {
+      if (!/^\d{4}$/.test(year) || typeof plans !== "object" || !plans) continue;
+      const kept: Partial<Record<RegisteredPlan, string>> = {};
+      for (const plan of REGISTERED_PLANS) {
+        const v = (plans as Record<string, unknown>)[plan];
+        if (typeof v === "string" && /^\d{4}-\d{2}$/.test(v)) kept[plan] = v;
+      }
+      if (Object.keys(kept).length > 0) out[year] = kept;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export async function setRoomDeferrals(deferrals: RoomDeferrals): Promise<void> {
+  const value = JSON.stringify(deferrals);
+  await db
+    .insert(appMeta)
+    .values({ key: ROOM_DEFERRALS_KEY, value })
+    .onConflictDoUpdate({ target: appMeta.key, set: { value } });
 }
 
 export async function setContributionLimits(limits: ContributionLimits): Promise<void> {

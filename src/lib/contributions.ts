@@ -109,34 +109,130 @@ export function contributionRoom(
 }
 
 /**
- * Which plans should be asked about when closing a given month.
+ * A month a plan's room was asked about and put off, per plan per year.
  *
- * Keyed off the month being closed, never off today's date: closing January
- * asks about the TFSA and FHSA whenever you get to it, and closing March asks
- * about the RRSP whenever you get to it. A checklist run late is still the
- * January checklist, and the question is still owed.
- *
- * Those two months because that is when each figure becomes knowable — the
- * checklist for a month is run in the month after it. The TFSA and FHSA limits for a year apply from 1 January
- * and are known by then; RRSP room comes off the notice of assessment, which
- * arrives after the return is filed.
- *
- * Returns the plans, and the year whose room is being set — the closed month's
- * own year in both cases.
+ * Stored because the answer is often "not yet" — the notice of assessment has
+ * not arrived, or the new limit has not been announced — and an app that asks
+ * again the following month is useful where one that gives up until next
+ * December is not.
  */
-export function plansDueForUpdate(month: string): RegisteredPlan[] {
+export type RoomDeferrals = Record<string, Partial<Record<RegisteredPlan, string>>>;
+
+export interface RoomAsk {
+  plan: RegisteredPlan;
+  /** The year whose room is being set, which is not always the month's year. */
+  year: string;
+}
+
+/**
+ * The months that raise the question, and the year each one is about.
+ *
+ * Closing **December** is the January checklist, and the TFSA and FHSA limits
+ * for the year just started are known by then — so it sets the *following*
+ * year's room, not the closed month's. Closing **March** is the April
+ * checklist, by which point the notice of assessment carrying RRSP room has
+ * arrived, and that room is for the year in progress.
+ *
+ * Keyed off the month being closed, never today's date: a checklist run late is
+ * still that month's checklist and the question is still owed.
+ */
+export function triggeredAsks(month: string): RoomAsk[] {
   const m = month.slice(5, 7);
-  if (m === "01") return ["TFSA", "FHSA"];
-  if (m === "03") return ["RRSP"];
+  const year = Number(month.slice(0, 4));
+  if (!Number.isFinite(year)) return [];
+  if (m === "12") {
+    const next = String(year + 1);
+    return [
+      { plan: "TFSA", year: next },
+      { plan: "FHSA", year: next },
+    ];
+  }
+  if (m === "03") return [{ plan: "RRSP", year: String(year) }];
   return [];
 }
 
-/** Whether a year's room has been entered for every plan being asked about. */
-export function roomEntered(
-  year: string,
-  plans: RegisteredPlan[],
+/**
+ * What this month's checklist should actually ask about.
+ *
+ * Three things have to be true. The month has to raise the question, or a
+ * previous month has to have raised it and been put off. The figure must not
+ * already be recorded. And **the account has to exist** — asking someone for
+ * their FHSA room when they have no FHSA is a step that can only be skipped,
+ * which is worse than no step at all.
+ */
+export function roomAsks(
+  month: string,
   limits: ContributionLimits,
-): boolean {
-  const forYear = limits[year] ?? {};
-  return plans.every((p) => typeof forYear[p] === "number");
+  deferrals: RoomDeferrals,
+  accounts: Account[],
+): RoomAsk[] {
+  const held = new Set(
+    accounts.map((a) => a.registration).filter(isRegisteredPlan),
+  );
+
+  const asks = new Map<string, RoomAsk>();
+  const consider = (ask: RoomAsk) => asks.set(`${ask.year}|${ask.plan}`, ask);
+
+  for (const ask of triggeredAsks(month)) consider(ask);
+
+  /*
+   * A deferral carries the question forward one month at a time. The month it
+   * was put off in is recorded, so the ask returns on the next checklist rather
+   * than immediately on the same one.
+   */
+  for (const [year, plans] of Object.entries(deferrals)) {
+    for (const plan of REGISTERED_PLANS) {
+      const deferredAt = plans[plan];
+      if (typeof deferredAt === "string" && month > deferredAt) {
+        consider({ plan, year });
+      }
+    }
+  }
+
+  return [...asks.values()]
+    .filter((a) => held.has(a.plan))
+    .filter((a) => typeof limits[a.year]?.[a.plan] !== "number")
+    /*
+     * A deferral silences its own month as well as the ones before it.
+     * Otherwise December both raises the question and records that it was put
+     * off, so reopening December's checklist asks again immediately — which is
+     * not what "ask me next month" promised.
+     */
+    .filter((a) => {
+      const deferredAt = deferrals[a.year]?.[a.plan];
+      return typeof deferredAt !== "string" || month > deferredAt;
+    })
+    .sort((a, b) => a.year.localeCompare(b.year) || a.plan.localeCompare(b.plan));
+}
+
+/** Record that a set of asks was put off in this month, to return next month. */
+export function deferAsks(
+  month: string,
+  asks: RoomAsk[],
+  deferrals: RoomDeferrals,
+): RoomDeferrals {
+  const next: RoomDeferrals = { ...deferrals };
+  for (const { plan, year } of asks) {
+    next[year] = { ...(next[year] ?? {}), [plan]: month };
+  }
+  return next;
+}
+
+/** Drop deferrals for room that has since been entered, so they cannot linger. */
+export function clearAnswered(
+  limits: ContributionLimits,
+  deferrals: RoomDeferrals,
+): RoomDeferrals {
+  const next: RoomDeferrals = {};
+  for (const [year, plans] of Object.entries(deferrals)) {
+    const kept: Partial<Record<RegisteredPlan, string>> = {};
+    for (const plan of REGISTERED_PLANS) {
+      const at = plans[plan];
+      if (typeof at === "string" && typeof limits[year]?.[plan] !== "number") {
+        kept[plan] = at;
+      }
+    }
+    if (Object.keys(kept).length > 0) next[year] = kept;
+  }
+  return next;
 }

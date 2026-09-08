@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ensureDb } from "@/db/init";
-import { getContributionLimits, setContributionLimits } from "@/db/repo";
+import {
+  getContributionLimits,
+  getRoomDeferrals,
+  setContributionLimits,
+  setRoomDeferrals,
+} from "@/db/repo";
 import { REGISTERED_PLANS } from "@/lib/contributions";
 
 const planKeys = REGISTERED_PLANS as [string, ...string[]];
@@ -17,11 +22,21 @@ const bodySchema = z.object({
     z.string().regex(/^\d{4}$/, "Year must be four digits."),
     z.record(z.enum(planKeys), z.number().min(0).max(10_000_000)),
   ),
+  /** Months a question was put off in, so it can be asked again next month. */
+  deferrals: z
+    .record(
+      z.string().regex(/^\d{4}$/, "Year must be four digits."),
+      z.record(z.enum(planKeys), z.string().regex(/^\d{4}-\d{2}$/)),
+    )
+    .optional(),
 });
 
 export async function GET() {
   await ensureDb();
-  return NextResponse.json(await getContributionLimits());
+  return NextResponse.json({
+    limits: await getContributionLimits(),
+    deferrals: await getRoomDeferrals(),
+  });
 }
 
 export async function PUT(request: Request) {
@@ -34,5 +49,9 @@ export async function PUT(request: Request) {
     );
   }
   await setContributionLimits(parsed.data.limits);
-  return NextResponse.json(await getContributionLimits());
+  if (parsed.data.deferrals) await setRoomDeferrals(parsed.data.deferrals);
+  return NextResponse.json({
+    limits: await getContributionLimits(),
+    deferrals: await getRoomDeferrals(),
+  });
 }

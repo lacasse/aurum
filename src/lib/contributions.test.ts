@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   contributedIn,
   contributionRoom,
-  plansDueForUpdate,
-  roomEntered,
+  clearAnswered,
+  deferAsks,
+  roomAsks,
+  triggeredAsks,
   type ContributionLimits,
 } from "./contributions";
 import type { Account, Transaction } from "./types";
@@ -143,38 +145,113 @@ describe("room for a year", () => {
 });
 
 /*
- * Keyed off the month being closed rather than today's date: a checklist run
- * late is still that month's checklist, and the question is still owed.
+ * The question is keyed off the month being closed, never today's date: a
+ * checklist run late is still that month's checklist and the answer is still
+ * owed. It is also only worth asking when the account exists and the figure is
+ * missing — a step that can only be skipped is worse than no step.
  */
 describe("when the checklist should ask", () => {
-  test("closing January asks about the TFSA and FHSA", () => {
-    assert.deepEqual(plansDueForUpdate("2027-01"), ["TFSA", "FHSA"]);
+  const held = accounts;
+
+  test("closing December asks about next year's TFSA and FHSA", () => {
+    // The January checklist. The limits for the year just started are known.
+    assert.deepEqual(triggeredAsks("2026-12"), [
+      { plan: "TFSA", year: "2027" },
+      { plan: "FHSA", year: "2027" },
+    ]);
   });
 
-  test("closing March asks about the RRSP", () => {
-    assert.deepEqual(plansDueForUpdate("2027-03"), ["RRSP"]);
+  test("closing March asks about this year's RRSP", () => {
+    // The April checklist, by which point the notice of assessment has come.
+    assert.deepEqual(triggeredAsks("2027-03"), [{ plan: "RRSP", year: "2027" }]);
   });
 
-  test("every other month asks nothing", () => {
-    for (const m of ["02", "04", "05", "06", "07", "08", "09", "10", "11", "12"]) {
-      assert.deepEqual(plansDueForUpdate(`2027-${m}`), [], `2027-${m}`);
+  test("every other month raises nothing", () => {
+    for (const m of ["01", "02", "04", "05", "06", "07", "08", "09", "10", "11"]) {
+      assert.deepEqual(triggeredAsks(`2027-${m}`), [], `2027-${m}`);
     }
   });
 
-  test("the year asked about is the closed month's own year", () => {
-    // Closing January 2027 happens in February 2027 and sets 2027's room.
-    assert.equal(roomEntered("2027", plansDueForUpdate("2027-01"), {
-      "2027": { TFSA: 7000, FHSA: 8000 },
-    }), true);
+  test("a plan with no account is never asked about", () => {
+    const noFhsa = held.filter((a) => a.registration !== "FHSA");
+    assert.deepEqual(
+      roomAsks("2026-12", {}, {}, noFhsa).map((a) => a.plan),
+      ["TFSA"],
+    );
   });
 
-  test("room is not entered until every plan asked about has a figure", () => {
+  test("holding nothing registered means nothing to ask", () => {
+    assert.deepEqual(roomAsks("2026-12", {}, {}, [account("cash-1", "non-registered")]), []);
+  });
+
+  test("room already entered is not asked about again", () => {
     const limits: ContributionLimits = { "2027": { TFSA: 7000 } };
-    assert.equal(roomEntered("2027", ["TFSA", "FHSA"], limits), false);
-    assert.equal(roomEntered("2027", ["TFSA"], limits), true);
+    assert.deepEqual(
+      roomAsks("2026-12", limits, {}, held).map((a) => a.plan),
+      ["FHSA"],
+    );
   });
 
-  test("zero is a figure, not a missing one", () => {
-    assert.equal(roomEntered("2027", ["RRSP"], { "2027": { RRSP: 0 } }), true);
+  test("zero is an answer, not a gap", () => {
+    const limits: ContributionLimits = { "2027": { TFSA: 0, FHSA: 0 } };
+    assert.deepEqual(roomAsks("2026-12", limits, {}, held), []);
+  });
+});
+
+/*
+ * "I do not have it yet" has to mean next month, not next year. The notice of
+ * assessment arrives when it arrives, and a skip that waits for the next
+ * trigger month turns a few weeks of not knowing into a year of an empty gauge.
+ */
+describe("putting the question off", () => {
+  const held = accounts;
+
+  test("a deferral brings the question back the following month", () => {
+    const deferred = deferAsks("2026-12", triggeredAsks("2026-12"), {});
+    // Not again in the same month it was put off in.
+    assert.deepEqual(roomAsks("2026-12", {}, deferred, held), []);
+    assert.deepEqual(
+      roomAsks("2027-01", {}, deferred, held).map((a) => a.plan),
+      ["FHSA", "TFSA"],
+    );
+  });
+
+  test("and keeps coming back until it is answered", () => {
+    const deferred = deferAsks("2026-12", triggeredAsks("2026-12"), {});
+    assert.equal(roomAsks("2027-05", {}, deferred, held).length, 2);
+    const answered: ContributionLimits = { "2027": { TFSA: 7000, FHSA: 8000 } };
+    assert.deepEqual(roomAsks("2027-05", answered, deferred, held), []);
+  });
+
+  test("deferring one plan does not defer the other", () => {
+    const deferred = deferAsks("2026-12", [{ plan: "FHSA", year: "2027" }], {});
+    const limits: ContributionLimits = { "2027": { TFSA: 7000 } };
+    assert.deepEqual(
+      roomAsks("2027-02", limits, deferred, held).map((a) => a.plan),
+      ["FHSA"],
+    );
+  });
+
+  test("a deferred question and a new one are asked together", () => {
+    const deferred = deferAsks("2026-12", [{ plan: "TFSA", year: "2027" }], {});
+    const asks = roomAsks("2027-03", {}, deferred, held);
+    assert.deepEqual(asks.map((a) => `${a.plan} ${a.year}`), [
+      "RRSP 2027",
+      "TFSA 2027",
+    ]);
+  });
+
+  test("an answered deferral is cleared rather than left to linger", () => {
+    const deferred = deferAsks("2026-12", triggeredAsks("2026-12"), {});
+    const limits: ContributionLimits = { "2027": { TFSA: 7000 } };
+    const tidied = clearAnswered(limits, deferred);
+    assert.equal(tidied["2027"]?.TFSA, undefined);
+    assert.equal(tidied["2027"]?.FHSA, "2026-12");
+  });
+
+  test("clearing every answered deferral leaves nothing behind", () => {
+    const deferred = deferAsks("2026-12", triggeredAsks("2026-12"), {});
+    const limits: ContributionLimits = { "2027": { TFSA: 7000, FHSA: 8000 } };
+    assert.deepEqual(clearAnswered(limits, deferred), {});
   });
 });
