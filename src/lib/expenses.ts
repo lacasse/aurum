@@ -1,4 +1,5 @@
 import {
+  currentMonthKey,
   labelMonth,
   lastMonthKeys,
   monthKeyOf,
@@ -110,15 +111,35 @@ export function expenseMonths(transactions: Transaction[]): string[] {
 }
 
 /**
- * The newest month that has any spending recorded.
+ * The month the expenses page opens on: the newest one that has finished.
  *
- * Not the calendar month: a record kept by hand runs behind the calendar, and
- * opening the page to a month nobody has entered yet shows a page of zeros
- * and reports a 100% collapse in spending.
+ * Not the calendar month. A record kept by hand runs behind the calendar, so
+ * opening on "now" shows a page of near-zeros and reports spending as having
+ * collapsed. Statements arrive after the month they cover, which is why the
+ * month worth reading is almost always the one just gone.
+ *
+ * "Has spending in it" is not enough on its own to make a month worth opening.
+ * A month begins with whatever recurring rules fire on the 1st — a rent
+ * payment, a subscription — so by the 2nd the current month qualifies on that
+ * test while holding one row, and the page lands on a month that has barely
+ * started. The month has to be over.
+ *
+ * The current month is still reachable from the picker, and the pace panel
+ * ("what you can spend a day for the rest of it") is written for exactly that.
+ * This decides where the page starts, not what it can show.
+ *
+ * Falls back to the newest month on record when nothing has finished yet,
+ * which is a first month of use: better to open on a partial month than on
+ * nothing at all.
  */
-export function latestExpenseMonth(transactions: Transaction[]): string | null {
+export function latestExpenseMonth(
+  transactions: Transaction[],
+  now: string = currentMonthKey(),
+): string | null {
   const months = expenseMonths(transactions);
-  return months[months.length - 1] ?? null;
+  if (months.length === 0) return null;
+  const finished = months.filter((m) => m < now);
+  return finished[finished.length - 1] ?? months[months.length - 1];
 }
 
 /* ── Month by month ── */
@@ -137,10 +158,16 @@ export interface MonthSpend {
  * Every month on record, split three ways. Months with no spending in them
  * are left out rather than drawn as zero: they are months that were never
  * entered, and a zero says something the record does not know.
+ *
+ * `until` drops anything after a given month. A month still in progress holds
+ * a few days of spending, so drawn beside finished months it is a cliff at the
+ * right-hand edge of every chart and a figure that drags the rolling average
+ * down — an artefact of the calendar rather than anything that happened.
  */
 export function monthlySpend(
   transactions: Transaction[],
   overrides: Record<string, SpendGroup> = {},
+  until?: string,
 ): MonthSpend[] {
   const byMonth = new Map<
     string,
@@ -149,6 +176,7 @@ export function monthlySpend(
   for (const t of transactions) {
     if (t.type !== "expense") continue;
     const key = monthKeyOf(t.date);
+    if (until && key > until) continue;
     const slot =
       byMonth.get(key) ??
       { total: 0, necessity: 0, discretionary: 0, excluded: 0 };
@@ -312,8 +340,15 @@ export function monthSummary(
   month: string,
   overrides: Record<string, SpendGroup> = {},
   window = 12,
+  until?: string,
 ): MonthSummary {
-  const all = monthlySpend(transactions, overrides);
+  /*
+   * `until` bounds the record this month is ranked against, for the same
+   * reason the charts are bounded: a month still running is the cheapest month
+   * on record every time, so counting it makes every finished month look one
+   * place worse than it was.
+   */
+  const all = monthlySpend(transactions, overrides, until);
   const byKey = new Map(all.map((m) => [m.key, m]));
   const here = byKey.get(month);
   const keys = lastMonthKeys(window, previousMonthKey(month));

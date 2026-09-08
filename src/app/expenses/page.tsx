@@ -41,6 +41,7 @@ import {
   categoryRows,
   expenseMonths,
   groupOf,
+  latestExpenseMonth,
   monthSummary,
   monthlySpend,
   recurringFloor,
@@ -124,21 +125,30 @@ export default function ExpensesPage() {
 
   const months = useMemo(() => expenseMonths(transactions), [transactions]);
   /*
-   * The newest month with anything in it, not the calendar month. This record
-   * is kept by hand and runs a month or two behind, so opening on "now" would
-   * show an empty page and report spending as having stopped.
+   * Where the page opens. The rule is `latestExpenseMonth`, not a line of its
+   * own: this used to take the last month in the list, which is the same answer
+   * only until a recurring rule fires on the 1st and the month in progress
+   * becomes the newest month "with spending in it".
    */
-  const latest = months[months.length - 1] ?? null;
+  const latest = useMemo(() => latestExpenseMonth(transactions), [transactions]);
   const selected = month && months.includes(month) ? month : latest;
 
   const data = useMemo(() => {
     if (!selected) return null;
     const g = settings.groups;
-    const series = monthlySpend(transactions, g);
+    /*
+     * How far the record is worth reading: the month the page opens on, or a
+     * later one if that is what was asked for. Everything after it is a month
+     * still in progress, which holds a few days of spending and so draws as a
+     * cliff at the right-hand edge of every chart while dragging the rolling
+     * average and the rankings down with it.
+     */
+    const readThrough = latest && selected < latest ? latest : selected;
+    const series = monthlySpend(transactions, g, readThrough);
     const avg = rollingAverage(series.map((m) => m.total), 12);
     const trend = series.map((m, i) => ({ ...m, average: avg[i] ?? undefined }));
     const rows = categoryRows(transactions, selected, g);
-    const summary = monthSummary(transactions, selected, g);
+    const summary = monthSummary(transactions, selected, g, 12, readThrough);
     const floor = recurringFloor(transactions, g, 12, latest ?? undefined);
     const car = settings.car
       ? runningCost(
@@ -247,7 +257,15 @@ export default function ExpensesPage() {
       <div className="space-y-4">
         {selected !== latest && (
           <p className="px-1 text-[0.6875rem] text-ink-faint">
-            Showing {labelMonth(selected)}. The record runs to {labelMonth(latest!)}.
+            {/*
+              Two different situations, and saying "the record runs to August"
+              while showing September reads as though September came first.
+              Ahead of the opening month means the month is still running; behind
+              it means looking back through history.
+            */}
+            {selected > latest!
+              ? `Showing ${labelMonth(selected)}, which is still in progress. The last full month is ${labelMonth(latest!)}.`
+              : `Showing ${labelMonth(selected)}. The record runs to ${labelMonth(latest!)}.`}
           </p>
         )}
 
