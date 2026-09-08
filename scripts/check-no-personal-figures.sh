@@ -47,13 +47,24 @@ TERMS="${AURUM_PRIVATE_TERMS:-$HOME/.config/aurum/private-terms.txt}"
 # test files as fixtures, which is how account identifiers and real trades got
 # in without any single number looking out of place.
 EXPORT_ROW='[0-9]{4}-[0-9]{2}-[0-9]{2},([^,]*,){4,}'
-# The same pattern for awk, which needs two things spelled differently.
-# macOS ships the one-true-awk, which has no interval expressions -- {1,3}
-# there matches nothing at all, silently. And -v processes backslash escapes
-# before the value is assigned, so a \$ arrives as a bare $ and anchors to end
-# of line instead of matching a dollar sign. Both failures are invisible: the
-# check simply passes everything. Bracket expressions avoid both.
-MONEY_AWK='[$] ?[0-9][0-9]?[0-9]?(,[0-9][0-9][0-9])+([.][0-9]+)?'
+
+# A quantity written as words. "twenty-three US shares" is a real position size
+# and passed every check here, because the rules all looked for digits. Spelling
+# a number out is exactly what someone does in a comment explaining why a bug
+# mattered, which is the sentence that has leaked something every single time.
+#
+# Deliberately narrow: a number word must sit next to a noun that means a real
+# holding. Prose counts things constantly -- "two securities", "three changes" --
+# and a guard that fires on those is one that gets switched off.
+# Only a compound number -- "twenty-three", "forty-two" -- next to a noun that
+# means a real holding. The first version accepted any number word and fired on
+# "ten shares cost 200" and "a million dollars of portfolio", which is prose,
+# and a guard that cries wolf is one that gets switched off. A round number in
+# an example is nobody's position; a compound one almost always is.
+TENS='(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)'
+UNITS='(one|two|three|four|five|six|seven|eight|nine)'
+SPELLED="$TENS[- ]$UNITS([- ][a-zA-Z]+){0,2}[- ](shares?|units?|coins?)"
+SPELLED_AWK="$SPELLED"
 EXPORT_ROW_AWK='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9],([^,]*,)([^,]*,)([^,]*,)([^,]*,)'
 
 # Terms from the private list, as one alternation, or empty when there is none.
@@ -78,7 +89,7 @@ report() {
 if [ "${1:-}" = "--staged" ]; then
   # Only added lines. A figure already in the tree is the history rewrite's
   # problem, not this commit's; failing on it would block every unrelated commit.
-  git diff --cached --unified=0 | awk -v money="$MONEY_AWK" -v row="$EXPORT_ROW_AWK" -v terms="$TERMS_RE" -v allowed="$ALLOWED" '
+  git diff --cached --unified=0 | awk -v money="$MONEY_AWK" -v row="$EXPORT_ROW_AWK" -v terms="$TERMS_RE" -v allowed="$ALLOWED" -v spelled="$SPELLED_AWK" '
     /^\+\+\+ b\// {
       file = substr($0, 7)
       skip = (file ~ allowed)
@@ -96,12 +107,52 @@ if [ "${1:-}" = "--staged" ]; then
       line = substr($0, 2)
       if (line ~ /INVENTED/) next
       if (line ~ money)  { printf "%s [amount]: %s\n",  file, substr(line, 1, 100); next }
+      if (line ~ spelled) { printf "%s [quantity in words]: %s\n", file, substr(line, 1, 100); next }
       if (!loose && line ~ row) { printf "%s [export row]: %s\n", file, substr(line, 1, 100); next }
       if (terms != "" && line ~ terms) { printf "%s [private term]: %s\n", file, substr(line, 1, 100) }
     }
   ' > /tmp/.figcheck.$$ 2>/dev/null || true
   while IFS= read -r hit; do [ -n "$hit" ] && report "$hit"; done < /tmp/.figcheck.$$
   rm -f /tmp/.figcheck.$$
+
+elif [ "${1:-}" = "--build-context" ]; then
+  # git is not the only way out of this directory.
+  #
+  # The Docker builder runs `COPY . .` and never consults git, so `ops/` --
+  # gitignored precisely because it holds one installation's real figures --
+  # was copied into the image and shipped inside it. `.gitignore` was checked
+  # and reported safe; `.dockerignore` was never looked at. A second exit
+  # nobody was watching.
+  #
+  # This asserts the exclusions exist rather than trying to reproduce Docker's
+  # matching rules, because the failure was a missing rule, not a subtle one.
+  [ -f .dockerignore ] || { report "no .dockerignore: the build context is unguarded"; }
+  if [ -f .dockerignore ]; then
+    for required in "ops/" ".env"; do
+      grep -qxF "$required" .dockerignore \
+        || report ".dockerignore does not exclude $required"
+    done
+  fi
+  # Anything git ignores but Docker would still copy, holding something private.
+  if [ -n "$TERMS_RE" ] || true; then
+    ignored=$(git ls-files --others --ignored --exclude-standard 2>/dev/null \
+      | grep -Ev '^(node_modules|\.next|\.test-build)/' || true)
+    for f in $ignored; do
+      [ -f "$f" ] || continue
+      case "$f" in .env*) continue ;; esac
+      excluded=0
+      while IFS= read -r rule; do
+        case "$rule" in ""|\#*) continue ;; esac
+        case "$f" in ${rule%/}/*|$rule) excluded=1; break ;; esac
+      done < .dockerignore
+      [ "$excluded" -eq 1 ] && continue
+      if grep -Eq "$MONEY" "$f" 2>/dev/null; then
+        report "$f [amount] is gitignored but would be copied into the image"
+      elif [ -n "$TERMS_RE" ] && grep -Eq "$TERMS_RE" "$f" 2>/dev/null; then
+        report "$f [private term] is gitignored but would be copied into the image"
+      fi
+    done
+  fi
 
 elif [ "${1:-}" = "--message" ]; then
   # The message, with no allowance at all. Prose explaining a change never
@@ -117,6 +168,8 @@ elif [ "${1:-}" = "--message" ]; then
     case "$line" in *INVENTED*) continue ;; esac
     if printf '%s' "$line" | grep -Eq "$MONEY"; then
       report "commit message [amount]: $(printf '%s' "$line" | cut -c1-110)"
+    elif printf '%s' "$line" | grep -Eq "$SPELLED"; then
+      report "commit message [quantity in words]: $(printf '%s' "$line" | cut -c1-110)"
     elif [ -n "$TERMS_RE" ] && printf '%s' "$line" | grep -Eq "$TERMS_RE"; then
       report "commit message [private term]: $(printf '%s' "$line" | cut -c1-110)"
     fi
@@ -136,9 +189,9 @@ else
         strict="$strict $f"
       fi
     done
-    pattern="$MONEY|$EXPORT_ROW"
+    pattern="$MONEY|$EXPORT_ROW|$SPELLED"
     [ -n "$TERMS_RE" ] && pattern="$pattern|$TERMS_RE"
-    loose_pattern="$MONEY"
+    loose_pattern="$MONEY|$SPELLED"
     [ -n "$TERMS_RE" ] && loose_pattern="$loose_pattern|$TERMS_RE"
     hits=""
     [ -n "$strict" ] && hits=$(grep -nEH "$pattern" $strict 2>/dev/null | grep -v INVENTED || true)
