@@ -235,6 +235,32 @@ Bundling three offers into one sentence made a one-word answer ambiguous, then
 treated the ambiguity as consent. Offer one thing, or number them and ask which.
 The fault began with the question, not the reply.
 
+# Say Sorry When You Get It Wrong
+
+## The apology is owed, and it is not the fix
+
+Three mistakes in one session — a branch cut from the wrong base that shipped
+an unapproved change, a confident statement about what production was running
+that was false, and three actions taken when one was asked for — were each
+explained, corrected, and written up as a rule. None of them was apologised
+for. Explaining a fault is not the same as owning it, and a rule added in place
+of an apology reads as changing the subject.
+
+- **When you get something wrong, say so and say sorry.** Plainly, in the
+  sentence where the mistake is named, not buried after a list of what else was
+  done.
+- **Do not wait to be asked.** If it surfaces because the owner noticed, the
+  apology is already late; if you found it yourself, lead with it.
+- **Name the cost to them**, not only the mechanism. "I branched from the wrong
+  place" describes the fault; "I shipped a change you had not approved"
+  describes what it did to someone.
+- **Once, and briefly.** An apology that runs on turns the owner's problem into
+  a performance about the assistant, and they still have to read past it to
+  reach the fix. Say it, correct it, carry on.
+- **A correction is not an apology, a rule is not an apology, and a fix is not
+  an apology.** They belong together, and none of them substitutes for the
+  others.
+
 # Branches and What a Commit Actually Contains
 
 ## A branch starts from `main`, named explicitly
