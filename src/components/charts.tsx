@@ -1020,11 +1020,21 @@ export function Waterfall({
           data={rows}
           margin={{ top: 28, right: 4, left: 4, bottom: 0 }}
           /*
-           * Wide columns close together. A waterfall is read as one shape — the
-           * path from the first pillar to the last — and thin bars marooned in
-           * whitespace read as five separate facts instead.
+           * Columns touching, with no gap at all.
+           *
+           * A waterfall is one shape, not five bars: each step begins at the
+           * height the last one reached, and that hand-off is the whole point.
+           * Any gap between the columns hides it — the eye has to carry the
+           * level across empty space and take on trust that it lands. Butted
+           * together, the top edge of one column meets the bottom of the next
+           * and the path is simply visible.
+           *
+           * Safe here because no two neighbours share a colour: the opening
+           * pillar, income, spending, growth and the closing pillar alternate
+           * by construction, so touching bars stay distinct without a rule
+           * between them.
            */
-          barCategoryGap="12%"
+          barCategoryGap={0}
         >
           {/*
             * No y-axis and no grid. Every column already carries its own figure
@@ -1064,7 +1074,6 @@ export function Waterfall({
             dataKey="size"
             stackId="w"
             radius={[2, 2, 0, 0]}
-            maxBarSize={140}
             /*
              * A step small beside the totals still has to be visible. Without a
              * floor a rounding-error month is drawn as nothing at all, which
