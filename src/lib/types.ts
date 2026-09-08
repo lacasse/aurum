@@ -143,6 +143,43 @@ export interface Transaction {
   note?: string;
   /** Set when this row was generated from a recurring rule. */
   recurringId?: string;
+  /**
+   * Whether this row is one event or a whole month's total for its category.
+   *
+   * A month is kept one way or the other. Mixing them counts the same money
+   * twice and reads as a plausible, larger number rather than as an error, so
+   * the database refuses it — see drizzle/0024.
+   */
+  granularity?: Granularity;
+}
+
+export type Granularity = "individual" | "monthly";
+
+/** The month a row falls in, as YYYY-MM — the unit the guard reasons about. */
+export function monthOf(date: string): string {
+  return date.slice(0, 7);
+}
+
+/**
+ * Which rows already cover a month, so an import can say what it found before
+ * the database refuses it. Same question the constraint asks, asked earlier and
+ * more helpfully.
+ */
+export function conflictingGranularity(
+  existing: Pick<Transaction, "date" | "type" | "granularity">[],
+  incoming: Pick<Transaction, "date" | "type" | "granularity">,
+): { month: string; type: TxnType; existing: Granularity; count: number } | null {
+  const kind = incoming.granularity ?? "individual";
+  const opposite: Granularity = kind === "monthly" ? "individual" : "monthly";
+  const month = monthOf(incoming.date);
+  const clashes = existing.filter(
+    (t) =>
+      t.type === incoming.type &&
+      (t.granularity ?? "individual") === opposite &&
+      monthOf(t.date) === month,
+  );
+  if (clashes.length === 0) return null;
+  return { month, type: incoming.type, existing: opposite, count: clashes.length };
 }
 
 export type AssetClass = "US Equity" | "Intl Equity" | "Bonds" | "Crypto";
