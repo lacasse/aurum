@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useMemo, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -12,6 +12,13 @@ import {
 } from "lucide-react";
 import { Badge, Button, Field, Input, Modal, Select, cn } from "@/components/ui";
 import { TradeEntry, type TradeDraft } from "@/components/forms";
+import {
+  contributionRoom,
+  plansDueForUpdate,
+  roomEntered,
+  type ContributionLimits,
+  type RegisteredPlan,
+} from "@/lib/contributions";
 import type { TradeBatch, TradeInput } from "@/lib/trade-batch";
 import { useFinance } from "@/lib/store";
 import {
@@ -56,6 +63,7 @@ type Step =
   | "actions"
   | "trades"
   | "pension"
+  | "room"
   | "review";
 
 /**
@@ -1744,6 +1752,118 @@ function PensionStep({
   );
 }
 
+/* ---------- Step: Contribution room ---------- */
+
+/**
+ * The one figure in the app that has to be looked up rather than derived.
+ *
+ * Contribution room depends on income, on room carried forward and on
+ * withdrawals made years ago — all of it on a notice of assessment. The app
+ * counts what went in and cannot know what was allowed, so once a year it
+ * asks.
+ *
+ * Shown only in the months where the answer is knowable, and only until it has
+ * been answered: closing January asks about the TFSA and FHSA, closing March
+ * asks about the RRSP. Keyed off the month being closed rather than today, so a
+ * checklist run in June for January still asks — the question is owed by the
+ * month, not by the date it is done on.
+ */
+function RoomStep({
+  number,
+  total,
+  month,
+  onNext,
+  onBack,
+  plans,
+  limits,
+  onSave,
+}: StepProps & {
+  plans: RegisteredPlan[];
+  limits: ContributionLimits;
+  onSave: (next: ContributionLimits) => void;
+}) {
+  const year = month.slice(0, 4);
+  const accounts = useFinance((s) => s.accounts);
+  const transactions = useFinance((s) => s.transactions);
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(plans.map((p) => [p, limits[year]?.[p]?.toString() ?? ""])),
+  );
+  const [error, setError] = useState("");
+
+  const room = contributionRoom(year, transactions, accounts, limits);
+  const paidIn = (plan: RegisteredPlan) =>
+    room.find((r) => r.plan === plan)?.contributed ?? 0;
+
+  const submit = () => {
+    const forYear = { ...(limits[year] ?? {}) };
+    for (const plan of plans) {
+      const raw = (values[plan] ?? "").trim().replace(/[$,\s]/g, "");
+      if (raw === "") continue;
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value < 0) {
+        setError(`${plan} room must be an amount, or left blank to decide later.`);
+        return;
+      }
+      forYear[plan] = Math.round(value * 100) / 100;
+    }
+    onSave({ ...limits, [year]: forYear });
+    onNext();
+  };
+
+  return (
+    <StepBody
+      number={number}
+      total={total}
+      title={`Contribution room for ${year}`}
+      lead={
+        plans.length > 1
+          ? `The ${plans.join(" and ")} limits are set for the year. Enter what you are allowed to contribute, and the Year page will track what you have used.`
+          : `Your ${plans[0]} room comes off your notice of assessment. Enter it and the Year page will track what you have used.`
+      }
+      onBack={onBack}
+      note={
+        <>
+          Saved against {year}, not against {labelMonth(month)} — room is a fact
+          about a year. Leave a box empty to be asked again next time.
+        </>
+      }
+      actions={
+        <>
+          <Button variant="ghost" onClick={onNext}>
+            Skip for now
+          </Button>
+          <Button onClick={submit}>
+            Next <ArrowRight size={14} />
+          </Button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {plans.map((plan) => (
+          <Field
+            key={plan}
+            label={`${plan} room for ${year}`}
+            hint={`${fmtCAD(paidIn(plan))} paid in so far this year`}
+          >
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              placeholder="Not set"
+              value={values[plan] ?? ""}
+              onChange={(e) =>
+                setValues((prev) => ({ ...prev, [plan]: e.target.value }))
+              }
+            />
+          </Field>
+        ))}
+      </div>
+      {error ? <p className="mt-3 text-xs text-negative">{error}</p> : null}
+    </StepBody>
+  );
+}
+
 /* ---------- Main Component ---------- */
 
 const STEPS: { key: Step; label: string }[] = [
@@ -1753,6 +1873,7 @@ const STEPS: { key: Step; label: string }[] = [
   { key: "actions", label: "Actions" },
   { key: "trades", label: "Trades" },
   { key: "pension", label: "Pension" },
+  { key: "room", label: "Room" },
   { key: "review", label: "Save" },
 ];
 
@@ -1828,6 +1949,38 @@ function Checklist({ onClose }: { onClose: () => void }) {
   const [index, setIndex] = useState(0);
   const [loaded, setLoaded] = useState<Loaded>(EMPTY_LOAD);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [limits, setLimits] = useState<ContributionLimits>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/contribution-limits", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((l: ContributionLimits) => {
+        if (!cancelled) setLimits(l ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveLimits = useCallback((next: ContributionLimits) => {
+    setLimits(next);
+    fetch("/api/contribution-limits", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limits: next }),
+    }).catch(() => {});
+  }, []);
+
+  /*
+   * The plans this month owes an answer for, and only while it is still owed.
+   * Once the year's figures are in, the step stops appearing rather than
+   * asking again every time the month is reopened.
+   */
+  const duePlans = plansDueForUpdate(month);
+  const needsRoom =
+    duePlans.length > 0 && !roomEntered(month.slice(0, 4), duePlans, limits);
   /*
    * Steps the month does not need are not shown. No pension account, no
    * pension step; and the mergers step appears only once a file has actually
@@ -1837,7 +1990,8 @@ function Checklist({ onClose }: { onClose: () => void }) {
   const steps = STEPS.filter(
     (s) =>
       (s.key !== "pension" || hasPension) &&
-      (s.key !== "actions" || loaded.actions.length > 0),
+      (s.key !== "actions" || loaded.actions.length > 0) &&
+      (s.key !== "room" || needsRoom),
   );
   const at = Math.min(index, steps.length - 1);
   const step = steps[at].key;
@@ -1958,6 +2112,14 @@ function Checklist({ onClose }: { onClose: () => void }) {
           {...shared}
           draft={draft.pension}
           onDraft={(pension) => setDraft((d) => ({ ...d, pension }))}
+        />
+      )}
+      {step === "room" && (
+        <RoomStep
+          {...shared}
+          plans={duePlans}
+          limits={limits}
+          onSave={saveLimits}
         />
       )}
       {step === "review" && (
