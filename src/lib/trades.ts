@@ -516,7 +516,7 @@ export function accumulatePositions(
   };
 
   const positionFor = (row: TradeRow, accountId: string): Position => {
-    const key = `${resolveTicker(row.ticker, existingHoldings, accountId)}|${accountId}`;
+    const key = `${resolveTicker(row.ticker, existingHoldings, accountId, row.currency)}|${accountId}`;
     const found = positions.get(key);
     if (found) return found;
     /*
@@ -533,7 +533,7 @@ export function accumulatePositions(
      * without ever being called from here. Identity is its question, and it is
      * the only thing that answers it.
      */
-    const resolved = resolveTicker(row.ticker, existingHoldings, accountId);
+    const resolved = resolveTicker(row.ticker, existingHoldings, accountId, row.currency);
     const existing = existingHoldings.find(
       (h) => h.ticker.toUpperCase() === resolved && h.accountId === accountId,
     );
@@ -555,7 +555,7 @@ export function accumulatePositions(
       : {
           // The resolved spelling, so a second row in the same import does not
           // open yet another holding under the bare symbol.
-          ticker: resolveTicker(row.ticker, existingHoldings, accountId),
+          ticker: resolveTicker(row.ticker, existingHoldings, accountId, row.currency),
           accountId,
           currency: row.currency,
           shares: 0,
