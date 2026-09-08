@@ -316,3 +316,61 @@ describe("what the year says", () => {
     assert.deepEqual(yearInsights(shapes, "1999"), []);
   });
 });
+
+/*
+ * The chart has to look like the same chart whether the balance is four
+ * figures or eight, and it has to survive a balance under zero — which is
+ * where a lot of records start, a student loan against very little.
+ *
+ * These pin the model rather than the drawing: every step meets the last,
+ * whatever the magnitude, and the closing column is the balance sheet's own
+ * figure. The scale that follows from it is computed in the chart.
+ */
+describe("the waterfall at any size", () => {
+  const shapeFor = (openingNetWorth: number, netWorth: number, income: number, expenses: number) =>
+    yearShapes(
+      [
+        row("2025", { netWorth: openingNetWorth }),
+        row("2026", { netWorth, income, expenses }),
+      ],
+      [cls("2025-12"), cls("2026-12")],
+    )[1];
+
+  const cases: [string, number, number, number, number][] = [
+    ["barely started", 800, 2400, 30000, 28400],
+    ["under water", -48000, -21000, 62000, 35000],
+    ["crossing zero", -9000, 14000, 60000, 37000],
+    ["comfortable", 557619, 658770, 80616, 42327],
+    ["very large", 8400000, 9100000, 400000, 180000],
+    ["a year that did not move", 500000, 500000, 0, 0],
+  ];
+
+  for (const [name, opening, closing, income, expenses] of cases) {
+    test(`${name}: the path closes on the balance sheet`, () => {
+      const steps = yearWaterfall(shapeFor(opening, closing, income, expenses));
+      let running = opening;
+      for (const step of steps.slice(1, -1)) running += step.delta;
+      assert.equal(Math.round(running), Math.round(closing));
+      assert.equal(steps[0].top, opening);
+      assert.equal(steps[steps.length - 1].top, closing);
+    });
+
+    test(`${name}: every step is a real interval`, () => {
+      const steps = yearWaterfall(shapeFor(opening, closing, income, expenses));
+      for (const step of steps) {
+        assert.ok(Number.isFinite(step.base), `${step.label} base`);
+        assert.ok(Number.isFinite(step.top), `${step.label} top`);
+        assert.ok(step.top >= step.base || step.kind === "total", `${step.label} inverted`);
+      }
+    });
+  }
+
+  test("a balance under zero still describes its columns, rather than collapsing", () => {
+    const steps = yearWaterfall(shapeFor(-48000, -21000, 62000, 35000));
+    // The old rendering took top - base and clamped a negative to nothing, so
+    // an under-water year drew an empty chart.
+    const opening = steps[0];
+    assert.equal(opening.top, -48000);
+    assert.notEqual(opening.top, 0);
+  });
+});

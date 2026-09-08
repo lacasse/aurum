@@ -987,14 +987,53 @@ export function Waterfall({
   format: (n: number) => string;
   height?: number;
 }) {
+  /*
+   * The axis starts below the lowest level the year reaches, not at zero.
+   *
+   * A year moves net worth by a fraction of what it already is, so against a
+   * zero baseline the two end pillars tower over the steps between them and
+   * the steps — the entire subject of the chart — are squeezed into a band too
+   * thin to compare.
+   *
+   * Everything here is proportional to the year's own movement, so the chart
+   * looks the same whether the balance is four figures or eight. Two cases it
+   * has to survive: a balance below zero, where the floor goes below zero with
+   * it, and a year that did not move, where there is no span to scale against
+   * and the window comes from the size of the balance instead.
+   */
+  const edges = steps.flatMap((s) => (s.kind === "total" ? [s.top] : [s.base, s.top]));
+  const low = Math.min(...edges);
+  const high = Math.max(...edges);
+  const moved = high - low;
+  const span = moved > 0 ? moved : Math.max(Math.abs(high) * 0.02, 1);
+  const raw = low - span * 0.45;
+  /*
+   * A record that sits near zero keeps a true zero baseline. Cutting the axis
+   * under a small balance would blow ordinary movement up into a cliff, which
+   * is the distortion this is meant to avoid rather than cause.
+   */
+  const floor = low >= 0 && raw < 0 ? 0 : raw;
+  const truncated = floor !== 0;
+
   const rows = steps.map((s) => ({
     label: s.label,
-    lift: s.base,
-    size: Math.max(s.top - s.base, 0),
+    /*
+     * A range, not a stack.
+     *
+     * The first version lifted each column with a transparent bar beneath it,
+     * which cannot express a column below the axis: the visible part came out
+     * as a negative height and was clamped to nothing, so anyone whose net
+     * worth was under water — a student loan against a small balance, which is
+     * where a lot of records start — got an empty chart.
+     */
+    range:
+      s.kind === "total"
+        ? ([Math.min(floor, s.top), Math.max(floor, s.top)] as [number, number])
+        : ([Math.min(s.base, s.top), Math.max(s.base, s.top)] as [number, number]),
     kind: s.kind,
     delta: s.delta,
     top: s.top,
-    /** What the label above the column says: a total states itself, a step states its change. */
+    /** What the label above the column says: a total states itself, a step its change. */
     shown: s.kind === "total" ? s.top : s.delta,
   }));
 
@@ -1012,25 +1051,6 @@ export function Waterfall({
       : kind === "up"
         ? accent("positive")
         : accent("negative");
-
-  /*
-   * The axis starts below the opening figure, not at zero.
-   *
-   * A year moves net worth by a fraction of what it already is, so against a
-   * zero baseline the two pillars tower over the steps between them and the
-   * steps — the entire subject of the chart — are squeezed into a band too
-   * thin to compare. Cutting the axis gives that band the height it needs.
-   *
-   * Every column stays on one scale, so the steps remain comparable with each
-   * other and with the pillars. Nothing is stretched to fit; only the empty
-   * distance to zero is removed, and the axis says so beneath the chart.
-   */
-  const levels = rows.map((r) => (r.kind === "total" ? r.top : r.lift));
-  const low = Math.min(...levels);
-  const high = Math.max(...rows.map((r) => r.top));
-  const span = Math.max(high - low, 1);
-  const floor = Math.max(0, low - span * 0.45);
-  const truncated = floor > 0;
 
   return (
     <div className="w-full">
@@ -1069,7 +1089,7 @@ export function Waterfall({
             tickLine={false}
             interval={0}
           />
-          <YAxis hide domain={[floor, "dataMax"]} />
+          <YAxis hide domain={[floor, "dataMax"]} allowDataOverflow />
           <Tooltip
             cursor={{ fill: "var(--line)", opacity: 0.2 }}
             content={({ active, payload }) => {
@@ -1089,14 +1109,12 @@ export function Waterfall({
               );
             }}
           />
-          <Bar dataKey="lift" stackId="w" fill="transparent" isAnimationActive={false} />
           <Bar
-            dataKey="size"
-            stackId="w"
+            dataKey="range"
             radius={[2, 2, 0, 0]}
             /*
              * A step small beside the totals still has to be visible. Without a
-             * floor a rounding-error month is drawn as nothing at all, which
+             * floor a rounding-error year is drawn as nothing at all, which
              * reads as "this did not happen" rather than "this was small".
              */
             minPointSize={3}
