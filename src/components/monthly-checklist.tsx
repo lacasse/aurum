@@ -38,6 +38,7 @@ import {
   isLiability,
   isPension,
   sidesFor,
+  conflictingGranularity,
 } from "@/lib/types";
 import { DEBT_CATEGORY } from "@/lib/expenses";
 import {
@@ -1333,6 +1334,30 @@ function ReviewStep({
     setError("");
     try {
       const date = monthEnd(month);
+
+      /*
+       * The database refuses a month kept both ways (drizzle/0024). Asking the
+       * same question here first turns a rejected write half way through a save
+       * into a sentence naming the month and what is already in it.
+       */
+      if (incomeRows.length > 0) {
+        const clash = conflictingGranularity(transactions, {
+          date,
+          type: "income",
+          granularity: "monthly",
+        });
+        if (clash) {
+          setError(
+            `${labelMonth(month)} already has ${clash.count} individual income ` +
+              `transaction${clash.count === 1 ? "" : "s"}. Recording a monthly total ` +
+              `on top would count the same pay twice — remove those rows first, or ` +
+              `leave this month itemised and skip the income boxes.`,
+          );
+          setSaving(false);
+          return;
+        }
+      }
+
       const defaultAccount = accounts[0]?.id ?? "";
       for (const { box, amount } of incomeRows) {
         addTransaction({
@@ -1342,6 +1367,14 @@ function ReviewStep({
           category: box.category,
           ...sidesFor("income", defaultAccount),
           payee: box.label,
+          /*
+           * The checklist states a month's total for each box, not the deposits
+           * that made it up. Saying so lets the database refuse the month if the
+           * same income is already there as individual rows — which is how a
+           * month's pay came to be counted twice, once from the bank export and
+           * once from here.
+           */
+          granularity: "monthly",
         });
       }
 

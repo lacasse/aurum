@@ -148,6 +148,7 @@ export const transactionSchema = z
       .optional()
       .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined)),
     recurringId: optionalAccountId,
+    granularity: z.enum(["individual", "monthly"]).optional().default("individual"),
   })
   .superRefine((t, ctx) => {
     const issue = (message: string, path: string) =>

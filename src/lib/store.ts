@@ -70,6 +70,16 @@ interface FinanceStore extends FinanceData {
    * Null once a load has succeeded.
    */
   loadError: "auth" | "failed" | null;
+  /**
+   * Why the last write was refused, if it was.
+   *
+   * Writes are optimistic: the row appears at once and the request follows. So
+   * a refusal has to undo the row as well as report it, or the screen shows a
+   * transaction the database does not have — which is the same fault as showing
+   * demo data for real data, one row at a time.
+   */
+  writeError: string | null;
+  clearWriteError: () => void;
   /** Loads the full state from the API (Postgres via /api/data). */
   loadFromServer: () => Promise<void>;
   /** USD/CAD exchange rate, fetched from /api/fx. */
@@ -217,6 +227,25 @@ function synthHistory(ticker: string, price: number): number[] {
 const report = (err: unknown) => console.error("[sync]", err);
 
 /**
+ * The part of a failed write worth showing.
+ *
+ * `send` prefixes the method and URL so the console line identifies the call;
+ * that prefix is noise on screen, and what follows it — the server's own
+ * sentence — is the whole message when a rule refused the write.
+ */
+function messageFor(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const body = raw.match(/failed: \d+ ([\s\S]*)$/)?.[1] ?? raw;
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown };
+    if (typeof parsed.error === "string" && parsed.error) return parsed.error;
+  } catch {
+    /* not JSON: the raw text is the best available message */
+  }
+  return body || "The change could not be saved.";
+}
+
+/**
  * The in-flight snapshot-history request, so concurrent callers share one.
  *
  * Module scope rather than store state: it is a promise, not data, and four
@@ -307,6 +336,7 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
   ...generateSampleData(),
   hydrated: false,
   loadError: null,
+  writeError: null,
   usdCadRate: 1.37,
   merchantRules: {},
   demoPresent: false,
@@ -419,13 +449,23 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
     }
   },
 
+      clearWriteError: () => set({ writeError: null }),
+
       addTransaction: (input) => {
         const txn: Transaction = { ...input, id: uid() };
         set((s) => ({
           transactions: [txn, ...s.transactions],
           accounts: applyTxn(s.accounts, txn, 1),
+          writeError: null,
         }));
-        api.createTransaction(txn).catch(report);
+        api.createTransaction(txn).catch((err) => {
+          report(err);
+          set((s) => ({
+            transactions: s.transactions.filter((t) => t.id !== txn.id),
+            accounts: applyTxn(s.accounts, txn, -1),
+            writeError: messageFor(err),
+          }));
+        });
       },
 
       updateTransaction: (id, input) => {
