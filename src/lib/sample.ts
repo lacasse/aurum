@@ -171,6 +171,11 @@ export function generateSampleData(): FinanceData {
     [
       { id: "acc-tfsa", name: "TFSA", registration: "TFSA" as const },
       { id: "acc-rrsp", name: "RRSP", registration: "RRSP" as const },
+      /*
+       * An FHSA, so the contribution-room card has all three plans to draw
+       * rather than two gauges and a gap where the third should be.
+       */
+      { id: "acc-fhsa", name: "FHSA", registration: "FHSA" as const },
       {
         id: "acc-nonreg",
         name: "Non-registered",
@@ -616,6 +621,26 @@ export function generateSampleData(): FinanceData {
 
     /* Two of your own accounts, so the transfer filter has something to find. */
     move(m, 16, 900, "acc-checking", "acc-savings", "To savings");
+
+    /*
+     * Contributions into the shelters, which is what the contribution-room
+     * card measures. Without them every gauge reads nothing used and the card
+     * demonstrates only its own empty state.
+     *
+     * Deliberately uneven: the TFSA is filled steadily and ends the year close
+     * to its limit, the RRSP is contributed to in bursts, and the FHSA takes a
+     * single lump. Three different-looking gauges say more about what the card
+     * is for than three identical ones.
+     */
+    move(m, 3, 500, "acc-checking", "acc-tfsa", "Deposit to TFSA");
+    if (chance(rng, 0.5)) {
+      move(m, randInt(rng, 8, 20), rand(rng, 400, 1600), "acc-checking", "acc-rrsp", "Deposit to RRSP");
+    }
+    // Late in the series, so the lump lands in the year the card opens on
+    // rather than in one the reader has to go looking for.
+    if (mi === months.length - 5) {
+      move(m, 12, 4000, "acc-checking", "acc-fhsa", "Deposit to FHSA");
+    }
     if (chance(rng, 0.4)) {
       move(m, randInt(rng, 18, 26), rand(rng, 300, 1200), "acc-checking", "acc-nonreg", "To brokerage");
     }
