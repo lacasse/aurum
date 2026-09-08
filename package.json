@@ -18,6 +18,8 @@
     "check:security": "node scripts/check-security.mjs",
     "test:smoke": "node scripts/smoke.mjs",
     "check:figures": "./scripts/check-no-personal-figures.sh",
+    "check:context": "./scripts/check-no-personal-figures.sh --build-context",
+    "refresh:terms": "./scripts/refresh-private-terms.sh",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "dev:seed": "tsx scripts/seed-dev.ts"
   },
