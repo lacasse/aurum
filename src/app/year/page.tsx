@@ -260,48 +260,67 @@ export default function YearPage() {
         </div>
 
         {/*
-          * The year as one arithmetic sentence: what it opened at, what came
-          * in, what went out, what moved on its own, what it closed at.
+          * The chart and its reading, side by side.
           *
-          * This is the page's centre because it is the only place the cash flow
-          * and the balance sheet are the same statement. Everything else here
-          * is one or the other.
+          * The explanation used to sit under the chart and the observations in
+          * a row beneath that, so the three things that only mean anything
+          * together were three scrolls apart. A waterfall is not
+          * self-explanatory — the residual column especially — and a reader
+          * works out what it says by looking from the shape to the words and
+          * back.
           */}
         {shape && (
-          <Card>
-            <CardHeader
-              title={`How ${selected.year} moved`}
-              subtitle="Opening net worth, what passed through the year, and where it closed"
-            />
-            <div className="px-3 pb-4">
-              <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} />
-            </div>
-            <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
-              Growth is everything that moved net worth without passing through
-              income or spending — the market mostly, but also the pension
-              accruing, a revaluation, and the exchange rate. It is a
-              subtraction, not a measurement, which is why it is not called a
-              return.
-            </p>
-          </Card>
-        )}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader
+                title={`How ${selected.year} moved`}
+                subtitle="Opening net worth, what passed through the year, and where it closed"
+              />
+              <div className="px-3 pb-4">
+                <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} />
+              </div>
+            </Card>
 
-        {insights.length > 0 && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {insights.map((i) => (
-              <Card key={i.key} className="p-4">
-                <p
-                  className={cn(
-                    "text-sm font-semibold leading-snug",
-                    i.tone === "positive" && "text-positive",
-                    i.tone === "negative" && "text-negative",
-                  )}
-                >
-                  {i.headline}
+            <Card className="flex flex-col">
+              <CardHeader
+                title="What it says"
+                subtitle={`${fmtCAD(shape.netWorth - shape.openingNetWorth)} of movement, and where it came from`}
+              />
+              <div className="space-y-3 px-5 pb-4">
+                <p className="text-xs leading-relaxed text-ink-dim">
+                  The two end columns are the balance sheet on the first day of{" "}
+                  {selected.year} and the last. Between them,{" "}
+                  <span className="text-positive">income</span> and{" "}
+                  <span className="text-negative">spending</span> are the year&rsquo;s
+                  cash flow, and <strong className="text-ink">growth</strong> is
+                  everything that moved net worth without passing through either
+                  — the market mostly, but also the pension accruing, a
+                  revaluation, the exchange rate. It is a subtraction rather
+                  than a measurement, which is why it is not called a return.
                 </p>
-                <p className="mt-1 text-xs leading-relaxed text-ink-dim">{i.detail}</p>
-              </Card>
-            ))}
+
+                {insights.length > 0 && (
+                  <ul className="space-y-2.5 border-t border-line pt-3">
+                    {insights.map((i) => (
+                      <li key={i.key}>
+                        <p
+                          className={cn(
+                            "text-xs font-semibold leading-snug",
+                            i.tone === "positive" && "text-positive",
+                            i.tone === "negative" && "text-negative",
+                          )}
+                        >
+                          {i.headline}
+                        </p>
+                        <p className="mt-0.5 text-[0.6875rem] leading-relaxed text-ink-faint">
+                          {i.detail}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </Card>
           </div>
         )}
 

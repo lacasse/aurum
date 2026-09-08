@@ -1013,8 +1013,28 @@ export function Waterfall({
         ? accent("positive")
         : accent("negative");
 
+  /*
+   * The axis starts below the opening figure, not at zero.
+   *
+   * A year moves net worth by a fraction of what it already is, so against a
+   * zero baseline the two pillars tower over the steps between them and the
+   * steps — the entire subject of the chart — are squeezed into a band too
+   * thin to compare. Cutting the axis gives that band the height it needs.
+   *
+   * Every column stays on one scale, so the steps remain comparable with each
+   * other and with the pillars. Nothing is stretched to fit; only the empty
+   * distance to zero is removed, and the axis says so beneath the chart.
+   */
+  const levels = rows.map((r) => (r.kind === "total" ? r.top : r.lift));
+  const low = Math.min(...levels);
+  const high = Math.max(...rows.map((r) => r.top));
+  const span = Math.max(high - low, 1);
+  const floor = Math.max(0, low - span * 0.45);
+  const truncated = floor > 0;
+
   return (
-    <div style={{ width: "100%", height }}>
+    <div className="w-full">
+      <div style={{ width: "100%", height }}>
       <ResponsiveContainer>
         <ComposedChart
           data={rows}
@@ -1049,7 +1069,7 @@ export function Waterfall({
             tickLine={false}
             interval={0}
           />
-          <YAxis hide domain={[0, "dataMax"]} />
+          <YAxis hide domain={[floor, "dataMax"]} />
           <Tooltip
             cursor={{ fill: "var(--line)", opacity: 0.2 }}
             content={({ active, payload }) => {
@@ -1115,6 +1135,18 @@ export function Waterfall({
           </Bar>
         </ComposedChart>
       </ResponsiveContainer>
+      </div>
+      {truncated && (
+        /*
+         * Said plainly rather than drawn as a break in the axis. A zigzag is a
+         * convention people either know or misread, and the sentence costs one
+         * line.
+         */
+        <p className="px-1 text-[0.625rem] text-ink-faint">
+          The scale starts at {format(floor)}, not zero, so the year&rsquo;s
+          movements are readable against a much larger balance.
+        </p>
+      )}
     </div>
   );
 }
