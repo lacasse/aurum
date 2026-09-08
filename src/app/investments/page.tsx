@@ -254,6 +254,13 @@ export default function InvestmentsPage() {
   const [editing, setEditing] = useState<Holding | null>(null);
   const [benchmark, setBenchmark] = useState<BenchmarkData | null>(null);
   const [lastPriceUpdate, setLastPriceUpdate] = useState<Date | null>(null);
+  /*
+   * True while any price request is in flight, whoever started it: the mount
+   * fetch, the hourly poll, or a forced refresh. The spinner reports that the
+   * app is asking for prices, so it turns for all three — a page load really
+   * does call the API, and hiding that would make the indicator lie in the
+   * quieter direction.
+   */
   const [priceRefreshing, setPriceRefreshing] = useState(false);
   const [staleTickers, setStaleTickers] = useState<Set<string>>(new Set());
   /*
