@@ -449,8 +449,9 @@ export default function GuidePage() {
             ignored when matching now. An exact match still wins, and where a
             venue-less symbol matches two holdings the account decides; if it
             is still ambiguous the row is left alone, because{" "}
-            <code>MA</code> and <code>MA.NEO</code> in one account really are
-            two different securities — Mastercard and its CDR.
+            a symbol and that symbol with <code>.NEO</code> in one account
+            really are two different securities — a US share and its Canadian
+            depositary receipt.
           </p>
           <p>
             One thing it does ask: a repayment is the only kind of spending

@@ -105,9 +105,9 @@ export function baseTicker(ticker: string): string {
  * The suffix this app writes on a Canadian Depositary Receipt.
  *
  * A CDR is not the US share on another venue. It is a separate instrument with
- * its own price, its own currency and its own cost base — Mastercard's CDR
- * trades near thirty Canadian dollars while the share it tracks trades near
- * five hundred US. Holding one says nothing about holding the other, and a
+ * its own price, its own currency and its own cost base: a receipt can trade
+ * near thirty Canadian dollars while the share it tracks trades near five
+ * hundred US. Holding one says nothing about holding the other, and a
  * trade in one has no bearing on the basis of the other.
  */
 const CDR_SUFFIX = ".NEO";
@@ -176,10 +176,10 @@ export function resolveTicker(
    *
    * Stripping the venue is right for a venue — a broker writing XEQT where the
    * position is XEQT.TO — and wrong for a CDR, because `.NEO` is not a venue
-   * there. `baseTicker("MA.NEO")` is "MA", so every US Mastercard trade
-   * matched the Canadian receipt and was absorbed into it: twenty-three US
-   * shares ended up filed as receipts and priced as receipts, at a twentieth
-   * of what they were worth, showing a loss that never happened.
+   * there. `baseTicker("ZQX.NEO")` is "ZQX", so a trade in the US listing
+   * matched the Canadian receipt and was absorbed into it — shares filed as
+   * receipts and priced as receipts, at a twentieth of what they were worth,
+   * showing a loss that never happened.
    *
    * The listing currency is what separates them, and it is on every row of the
    * export. Two securities quoted in different currencies are two securities,
