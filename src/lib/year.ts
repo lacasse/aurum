@@ -1,5 +1,5 @@
 import { NON_SPENDABLE_INCOME, chainedReturns, isIncome } from "./analytics";
-import type { NetWorthPoint, PortfolioPoint } from "./analytics";
+import type { ClassPoint, NetWorthPoint, PortfolioPoint } from "./analytics";
 import { Transaction } from "./types";
 import { fromCents, roundMoney, toCents } from "./money";
 
@@ -195,4 +195,263 @@ function monthsBetween(from: string, to: string): number {
   const [fy, fm] = from.split("-").map(Number);
   const [ty, tm] = to.split("-").map(Number);
   return (ty - fy) * 12 + (tm - fm);
+}
+
+/* ── The year as a balance sheet, and what moved it ── */
+
+export interface YearShape {
+  year: string;
+  complete: boolean;
+  /** Where the money sits at the end of the year. */
+  cash: number;
+  bonds: number;
+  stocks: number;
+  crypto: number;
+  pension: number;
+  assets: number;
+  /** What is owed, as a positive number. */
+  liabilities: number;
+  netWorth: number;
+  openingNetWorth: number;
+  /** What passed through the year. */
+  income: number;
+  expenses: number;
+  /** Income less spending: the part of the change you can point at. */
+  saved: number;
+  /**
+   * Everything else that moved net worth.
+   *
+   * Closing less opening, less what was saved. Named honestly: it is market
+   * movement, but it is also pension accrual, a property revaluation and the
+   * exchange rate, and calling it "investment return" would credit the
+   * portfolio with all of them.
+   */
+  revaluation: number;
+}
+
+/**
+ * Each year's closing balance sheet beside its cash flow.
+ *
+ * The two are usually shown apart — a spending page and a net worth chart —
+ * which leaves the most interesting question unanswerable: of everything net
+ * worth gained this year, how much did you put there and how much arrived on
+ * its own? That is a subtraction, and it needs both halves in one place.
+ */
+export function yearShapes(
+  rows: readonly YearRow[],
+  classPoints: readonly ClassPoint[],
+): YearShape[] {
+  // The last month the record actually has for each year, not December: a year
+  // still running ends in the month it has reached.
+  const lastOf = new Map<string, ClassPoint>();
+  for (const p of classPoints) {
+    const year = p.key.slice(0, 4);
+    lastOf.set(year, p);
+  }
+
+  const byYear = new Map(rows.map((r) => [r.year, r]));
+  const ordered = [...rows].sort((a, b) => a.year.localeCompare(b.year));
+
+  return ordered.map((r) => {
+    const p = lastOf.get(r.year);
+    const previous = byYear.get(String(Number(r.year) - 1));
+    const openingNetWorth = previous?.netWorth ?? r.netWorth - (r.netWorthChange ?? 0);
+    const saved = r.income - r.expenses;
+    return {
+      year: r.year,
+      complete: r.complete,
+      cash: p?.Cash ?? 0,
+      bonds: p?.Bonds ?? 0,
+      stocks: p?.Stocks ?? 0,
+      crypto: p?.Crypto ?? 0,
+      pension: p?.Pension ?? 0,
+      assets: (p?.Cash ?? 0) + (p?.Bonds ?? 0) + (p?.Stocks ?? 0) + (p?.Crypto ?? 0) + (p?.Pension ?? 0),
+      liabilities: p?.liabilities ?? 0,
+      netWorth: r.netWorth,
+      openingNetWorth,
+      income: r.income,
+      expenses: r.expenses,
+      saved,
+      revaluation: r.netWorth - openingNetWorth - saved,
+    };
+  });
+}
+
+/** One step of the year's move from opening net worth to closing. */
+export interface WaterfallStep {
+  label: string;
+  /** Signed: what this step added or removed. Zero for the two totals. */
+  delta: number;
+  /** Where the bar sits, for a floating column. */
+  base: number;
+  top: number;
+  kind: "total" | "up" | "down";
+}
+
+/**
+ * The year as a single arithmetic sentence.
+ *
+ * Opening net worth, plus what came in, less what went out, plus everything
+ * that moved without passing through either — and the closing figure has to be
+ * what the balance sheet says it is. It balances by construction, which is the
+ * point: any surprise in the chart is a surprise about the year, not about the
+ * chart.
+ */
+export function yearWaterfall(shape: YearShape): WaterfallStep[] {
+  const steps: WaterfallStep[] = [];
+  let running = shape.openingNetWorth;
+
+  steps.push({
+    label: "Opened at",
+    delta: 0,
+    base: 0,
+    top: shape.openingNetWorth,
+    kind: "total",
+  });
+
+  const add = (label: string, delta: number) => {
+    const from = running;
+    running += delta;
+    steps.push({
+      label,
+      delta,
+      base: Math.min(from, running),
+      top: Math.max(from, running),
+      kind: delta >= 0 ? "up" : "down",
+    });
+  };
+
+  add("Income", shape.income);
+  add("Spending", -shape.expenses);
+  add(shape.revaluation >= 0 ? "Growth" : "Decline", shape.revaluation);
+
+  steps.push({ label: "Closed at", delta: 0, base: 0, top: shape.netWorth, kind: "total" });
+  return steps;
+}
+
+/* ── What the year actually says ── */
+
+export interface YearInsight {
+  key: string;
+  headline: string;
+  detail: string;
+  tone: "positive" | "negative" | "neutral";
+}
+
+/**
+ * Observations a reader would have to do arithmetic to reach.
+ *
+ * A page of totals reports; this is the part that notices. Every one of these
+ * is a subtraction or a ratio across two figures already on the page — which
+ * is exactly why they are worth drawing out, because nobody does that
+ * arithmetic while scrolling.
+ *
+ * Each is suppressed when its inputs cannot support it. A claim about a trend
+ * needs a year to compare against, a rate needs a denominator, and a debt
+ * projection needs the debt to actually be falling. Saying nothing beats
+ * saying something the figures do not carry.
+ */
+export function yearInsights(
+  shapes: readonly YearShape[],
+  year: string,
+): YearInsight[] {
+  const here = shapes.find((s) => s.year === year);
+  if (!here) return [];
+  const before = shapes.find((s) => s.year === String(Number(year) - 1));
+  const out: YearInsight[] = [];
+
+  /*
+   * The question the two halves of this page exist to answer together: of what
+   * net worth gained, how much did you put there?
+   *
+   * Only when it grew. In a year that fell the same ratio reads as though
+   * saving caused the fall, which is the opposite of what happened.
+   */
+  const gain = here.netWorth - here.openingNetWorth;
+  if (gain > 0 && here.saved > 0) {
+    const earned = Math.min(100, (here.saved / gain) * 100);
+    out.push({
+      key: "earned",
+      headline: `${Math.round(earned)}% of the year's gain was money you added`,
+      detail:
+        earned >= 60
+          ? "The rest is growth. Early on this is normal — a portfolio too small to move much is carried by contributions."
+          : "The rest arrived on its own, which is what a portfolio starts doing once it is large enough to out-earn what you can add.",
+      tone: "neutral",
+    });
+  }
+
+  // What a dollar of income actually did.
+  if (here.income > 0) {
+    const kept = Math.round((here.saved / here.income) * 100);
+    out.push({
+      key: "kept",
+      headline: `${Math.max(0, 100 - kept)}c of every dollar earned was spent`,
+      detail:
+        before && before.income > 0
+          ? `Last year it was ${Math.max(0, 100 - Math.round((before.saved / before.income) * 100))}c.`
+          : "The rest stayed.",
+      tone: kept >= 20 ? "positive" : kept >= 0 ? "neutral" : "negative",
+    });
+  }
+
+  /*
+   * Debt, and when it ends. Projected only while it is falling and only from a
+   * full year: a partial year's paydown annualises into a promise the record
+   * cannot make.
+   */
+  if (before && here.liabilities > 0 && before.liabilities > here.liabilities && here.complete) {
+    const paid = before.liabilities - here.liabilities;
+    const years = here.liabilities / paid;
+    out.push({
+      key: "debt",
+      headline: `Debt fell ${Math.round((paid / before.liabilities) * 100)}% this year`,
+      detail:
+        years <= 25
+          ? `At the same pace it is clear around ${Number(year) + Math.ceil(years)}.`
+          : "At this pace it is a long way from clear.",
+      tone: "positive",
+    });
+  } else if (before && here.liabilities > before.liabilities) {
+    out.push({
+      key: "debt",
+      headline: `Debt rose ${Math.round(((here.liabilities - before.liabilities) / Math.max(1, before.liabilities)) * 100)}% this year`,
+      detail: "Borrowing arrives like income and is not income.",
+      tone: "negative",
+    });
+  }
+
+  // How much of the balance sheet you could actually reach.
+  if (here.assets > 0) {
+    const liquidShare = Math.round((here.cash / here.assets) * 100);
+    out.push({
+      key: "liquid",
+      headline: `${liquidShare}% of assets are cash`,
+      detail:
+        here.expenses > 0
+          ? `About ${(here.cash / (here.expenses / 12)).toFixed(1)} months of this year's spending.`
+          : "Everything else is invested or locked away.",
+      tone: liquidShare < 3 ? "negative" : "neutral",
+    });
+  }
+
+  // Whether spending is drifting, which a single year's total cannot show.
+  if (before && before.expenses > 0 && here.complete) {
+    const change = ((here.expenses - before.expenses) / before.expenses) * 100;
+    if (Math.abs(change) >= 5) {
+      out.push({
+        key: "spending",
+        headline: `Spending ${change > 0 ? "rose" : "fell"} ${Math.abs(Math.round(change))}% against last year`,
+        detail: `${fmtDelta(here.expenses - before.expenses)} on a year that cost ${Math.round(before.expenses).toLocaleString()}.`,
+        tone: change > 0 ? "negative" : "positive",
+      });
+    }
+  }
+
+  return out;
+}
+
+function fmtDelta(n: number): string {
+  const sign = n >= 0 ? "+" : "-";
+  return `${sign}${Math.round(Math.abs(n)).toLocaleString()}`;
 }

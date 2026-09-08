@@ -962,3 +962,102 @@ export function RoomGauge({
     </div>
   );
 }
+
+/* ---------------- Waterfall ---------------- */
+
+/**
+ * A year's move from one net worth to the next, as floating columns.
+ *
+ * Two totals at the ends standing on the axis, and between them the steps that
+ * got from one to the other, each starting where the last finished. It is the
+ * one arrangement that shows cash flow and balance sheet as the same statement
+ * rather than two: the columns are the year's income and spending, and the
+ * pillars they sit between are the balance sheet on 1 January and 31 December.
+ *
+ * Recharts draws this with two stacked bars — an invisible one lifting the
+ * visible one off the axis — because a bar chart cannot otherwise start
+ * anywhere but zero.
+ */
+export function Waterfall({
+  steps,
+  format,
+  height = 260,
+}: {
+  steps: { label: string; delta: number; base: number; top: number; kind: "total" | "up" | "down" }[];
+  format: (n: number) => string;
+  height?: number;
+}) {
+  const rows = steps.map((s) => ({
+    label: s.label,
+    lift: s.base,
+    size: Math.max(s.top - s.base, 0),
+    kind: s.kind,
+    delta: s.delta,
+    top: s.top,
+  }));
+
+  const colourFor = (kind: string) =>
+    kind === "total" ? accent("brand") : kind === "up" ? accent("positive") : accent("negative");
+
+  return (
+    <div style={{ width: "100%", height }}>
+      <ResponsiveContainer>
+        <ComposedChart data={rows} margin={{ top: 16, right: 8, left: 8, bottom: 4 }}>
+          <CartesianGrid stroke="var(--line)" strokeDasharray="3 3" vertical={false} />
+          <XAxis
+            dataKey="label"
+            tick={{ fill: "var(--ink-faint)", fontSize: 11 }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            tick={{ fill: "var(--ink-faint)", fontSize: 11 }}
+            axisLine={false}
+            tickLine={false}
+            width={64}
+            tickFormatter={(v: number) => format(v)}
+          />
+          <Tooltip
+            cursor={{ fill: "var(--line)", opacity: 0.25 }}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const r = payload[0]?.payload as (typeof rows)[number] | undefined;
+              if (!r) return null;
+              return (
+                <div className="rounded-xl border border-line bg-surface px-3 py-2 shadow-xl">
+                  <p className="mb-1 text-[0.6875rem] font-medium text-ink-faint">{r.label}</p>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: colourFor(r.kind) }}
+                    />
+                    <span className="text-ink-dim">
+                      {r.kind === "total" ? "Net worth" : "Change"}
+                    </span>
+                    <span className="ml-auto font-medium tabular-nums text-ink">
+                      {format(r.kind === "total" ? r.top : r.delta)}
+                    </span>
+                  </div>
+                  {r.kind !== "total" && (
+                    <div className="mt-0.5 flex items-center gap-2 text-xs">
+                      <span className="h-2 w-2 shrink-0" />
+                      <span className="text-ink-faint">Running</span>
+                      <span className="ml-auto tabular-nums text-ink-dim">{format(r.top)}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            }}
+          />
+          {/* The lift. Transparent, and excluded from the tooltip by drawing it first. */}
+          <Bar dataKey="lift" stackId="w" fill="transparent" isAnimationActive={false} />
+          <Bar dataKey="size" stackId="w" radius={[3, 3, 0, 0]} maxBarSize={64}>
+            {rows.map((r, i) => (
+              <Cell key={i} fill={colourFor(r.kind)} />
+            ))}
+          </Bar>
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}

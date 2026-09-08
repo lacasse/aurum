@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { milestones, yearRows } from "./year";
-import type { NetWorthPoint, PortfolioPoint } from "./analytics";
+import { milestones, yearInsights, yearRows, yearShapes, yearWaterfall } from "./year";
+import type { ClassPoint, NetWorthPoint, PortfolioPoint } from "./analytics";
 import type { Transaction } from "./types";
 
 const nw = (key: string, net: number) =>
@@ -136,5 +136,183 @@ describe("milestones", () => {
 
   test("nothing reached is no milestones", () => {
     assert.deepEqual(milestones([{ key: "2024-01", net: 400 }]), []);
+  });
+});
+
+/* ALL-FIXTURES-INVENTED */
+
+const cls = (key: string, over: Partial<ClassPoint> = {}): ClassPoint =>
+  ({
+    key,
+    label: key,
+    Cash: 0,
+    Bonds: 0,
+    Stocks: 0,
+    Crypto: 0,
+    Pension: 0,
+    liabilities: 0,
+    net: 0,
+    ...over,
+  }) as ClassPoint;
+
+const row = (year: string, over: Record<string, unknown> = {}) =>
+  ({
+    year,
+    complete: true,
+    income: 100000,
+    expenses: 60000,
+    expenseGrowth: null,
+    netCashflow: 40000,
+    uncommittedLiquid: 40000,
+    savingsRate: 40,
+    netWorth: 200000,
+    netWorthChange: 50000,
+    portfolio: 0,
+    costBasis: 0,
+    investmentProfit: 0,
+    investmentFlows: 0,
+    portfolioReturn: null,
+    cagr: null,
+    ...over,
+  }) as ReturnType<typeof yearRows>[number];
+
+describe("a year as a balance sheet beside its cash flow", () => {
+  const rows = [
+    row("2025", { netWorth: 150000, netWorthChange: null }),
+    row("2026", { netWorth: 200000, netWorthChange: 50000 }),
+  ];
+  const classes = [
+    cls("2025-12", { Cash: 20000, Stocks: 140000, liabilities: 10000 }),
+    cls("2026-06", { Cash: 30000, Stocks: 100000, liabilities: 9000 }),
+    cls("2026-12", { Cash: 25000, Stocks: 180000, Pension: 20000, liabilities: 8000 }),
+  ];
+
+  test("a year closes on the last month the record reaches, not on December", () => {
+    const partial = yearShapes([row("2026", { netWorth: 130000 })], [
+      cls("2026-05", { Cash: 30000, Stocks: 100000 }),
+    ]);
+    assert.equal(partial[0].assets, 130000);
+  });
+
+  test("assets are the bands added up, and debt is kept apart from them", () => {
+    const [, here] = yearShapes(rows, classes);
+    assert.equal(here.assets, 225000);
+    assert.equal(here.liabilities, 8000);
+  });
+
+  test("what you saved and what arrived on its own add up to the change", () => {
+    const [, here] = yearShapes(rows, classes);
+    assert.equal(here.saved, 40000);
+    assert.equal(here.saved + here.revaluation, here.netWorth - here.openingNetWorth);
+  });
+
+  test("the opening figure is last year's close", () => {
+    const [, here] = yearShapes(rows, classes);
+    assert.equal(here.openingNetWorth, 150000);
+  });
+
+  test("the first year on record still opens somewhere", () => {
+    const [first] = yearShapes(rows, classes);
+    assert.equal(Number.isFinite(first.openingNetWorth), true);
+  });
+});
+
+/*
+ * The waterfall's whole claim is that it balances: the last column has to be
+ * the balance sheet's own figure, or the chart is telling a story the record
+ * does not support.
+ */
+describe("the year's move, as a waterfall", () => {
+  const [shape] = yearShapes(
+    [row("2026", { netWorth: 200000, netWorthChange: 50000, income: 100000, expenses: 60000 })],
+    [cls("2026-12", { Cash: 25000, Stocks: 175000 })],
+  );
+
+  test("it starts at the opening figure and ends at the closing one", () => {
+    const steps = yearWaterfall(shape);
+    assert.equal(steps[0].top, shape.openingNetWorth);
+    assert.equal(steps[steps.length - 1].top, shape.netWorth);
+  });
+
+  test("every step starts where the last one finished", () => {
+    const steps = yearWaterfall(shape);
+    let running = shape.openingNetWorth;
+    for (const step of steps.slice(1, -1)) {
+      const from = running;
+      running += step.delta;
+      assert.equal(step.base, Math.min(from, running));
+      assert.equal(step.top, Math.max(from, running));
+    }
+    assert.equal(running, shape.netWorth);
+  });
+
+  test("spending points down and income points up", () => {
+    const steps = yearWaterfall(shape);
+    assert.equal(steps.find((s) => s.label === "Income")?.kind, "up");
+    assert.equal(steps.find((s) => s.label === "Spending")?.kind, "down");
+  });
+
+  test("the two totals stand on the axis rather than floating", () => {
+    const steps = yearWaterfall(shape);
+    for (const s of steps.filter((s) => s.kind === "total")) assert.equal(s.base, 0);
+  });
+});
+
+describe("what the year says", () => {
+  const shapes = yearShapes(
+    [
+      row("2025", { netWorth: 150000, income: 90000, expenses: 66000 }),
+      row("2026", { netWorth: 200000, netWorthChange: 50000, income: 100000, expenses: 60000 }),
+    ],
+    [
+      cls("2025-12", { Cash: 20000, Stocks: 140000, liabilities: 20000 }),
+      cls("2026-12", { Cash: 25000, Stocks: 180000, liabilities: 10000 }),
+    ],
+  );
+
+  test("it says how much of the gain was money you added", () => {
+    const earned = yearInsights(shapes, "2026").find((i) => i.key === "earned");
+    // Saved 40,000 of a 50,000 gain.
+    assert.match(earned!.headline, /80%/);
+  });
+
+  test("it does not claim saving caused a year that fell", () => {
+    const falling = yearShapes(
+      [
+        row("2025", { netWorth: 150000 }),
+        row("2026", { netWorth: 120000, netWorthChange: -30000 }),
+      ],
+      [cls("2025-12"), cls("2026-12")],
+    );
+    assert.equal(yearInsights(falling, "2026").some((i) => i.key === "earned"), false);
+  });
+
+  test("it projects a payoff only while the debt is falling", () => {
+    const debt = yearInsights(shapes, "2026").find((i) => i.key === "debt");
+    assert.match(debt!.headline, /fell 50%/);
+    assert.equal(debt!.tone, "positive");
+  });
+
+  test("and calls out debt that grew instead", () => {
+    const worse = yearShapes(
+      [row("2025", { netWorth: 150000 }), row("2026", { netWorth: 200000 })],
+      [
+        cls("2025-12", { liabilities: 10000 }),
+        cls("2026-12", { liabilities: 15000 }),
+      ],
+    );
+    const debt = yearInsights(worse, "2026").find((i) => i.key === "debt");
+    assert.equal(debt?.tone, "negative");
+  });
+
+  test("a year with nothing to compare against says less, not something wrong", () => {
+    const alone = yearShapes([row("2026")], [cls("2026-12", { Cash: 1000 })]);
+    const keys = yearInsights(alone, "2026").map((i) => i.key);
+    assert.equal(keys.includes("spending"), false);
+    assert.equal(keys.includes("debt"), false);
+  });
+
+  test("a year nobody has is no insights at all", () => {
+    assert.deepEqual(yearInsights(shapes, "1999"), []);
   });
 });

@@ -21,7 +21,8 @@ import {
   Segmented,
   cn,
 } from "@/components/ui";
-import { GroupedBars, RoomGauge } from "@/components/charts";
+import { GroupedBars, RoomGauge, Waterfall } from "@/components/charts";
+import { accent as accentFor } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import {
@@ -29,10 +30,17 @@ import {
   firstFlowMonth,
   monthsSince,
   netExternalFlows,
+  netWorthByClass,
   netWorthOver,
   portfolioSeries,
 } from "@/lib/analytics";
-import { milestones, yearRows } from "@/lib/year";
+import {
+  milestones,
+  yearInsights,
+  yearRows,
+  yearShapes,
+  yearWaterfall,
+} from "@/lib/year";
 import {
   REGISTERED_PLANS,
   contributionRoom,
@@ -108,7 +116,19 @@ export default function YearPage() {
       : portfolioSeries(holdings, 18);
     const netWorth = netWorthOver(accounts, portfolio, usdCadRate);
     const rows = yearRows(transactions, netWorth, portfolio, netExternalFlows(holdings));
-    return { rows, marks: milestones(netWorth) };
+    /*
+     * The balance sheet, month by month, so each year can be closed on the last
+     * month the record actually reaches rather than on a December that may not
+     * have happened yet.
+     */
+    const classes = start
+      ? netWorthByClass(accounts, holdings, {}, monthsSince(start), snapshots, usdCadRate)
+      : [];
+    return {
+      rows,
+      shapes: yearShapes(rows, classes),
+      marks: milestones(netWorth),
+    };
   }, [accounts, holdings, transactions, snapshots, usdCadRate]);
 
   if (!ready) return <PageSkeleton />;
@@ -164,6 +184,16 @@ export default function YearPage() {
     .map((r) => ({ label: r.year, income: r.income, expenses: r.expenses }));
 
   const room = contributionRoom(selected.year, transactions, accounts, limits);
+  const shape = data.shapes.find((sh) => sh.year === selected.year);
+  const insights = yearInsights(data.shapes, selected.year);
+  const balanceBars = data.shapes.map((sh) => ({
+    label: sh.year,
+    Cash: sh.cash,
+    Bonds: sh.bonds,
+    Stocks: sh.stocks,
+    Crypto: sh.crypto,
+    Pension: sh.pension,
+  }));
 
   return (
     <Shell
@@ -230,6 +260,73 @@ export default function YearPage() {
         </div>
 
         {/*
+          * The year as one arithmetic sentence: what it opened at, what came
+          * in, what went out, what moved on its own, what it closed at.
+          *
+          * This is the page's centre because it is the only place the cash flow
+          * and the balance sheet are the same statement. Everything else here
+          * is one or the other.
+          */}
+        {shape && (
+          <Card>
+            <CardHeader
+              title={`How ${selected.year} moved`}
+              subtitle="Opening net worth, what passed through the year, and where it closed"
+            />
+            <div className="px-3 pb-4">
+              <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} />
+            </div>
+            <div className="grid grid-cols-2 gap-px border-t border-line bg-line sm:grid-cols-4">
+              {[
+                { label: "Opened at", value: shape.openingNetWorth, tone: "" },
+                { label: "Saved", value: shape.saved, tone: shape.saved >= 0 ? "text-positive" : "text-negative" },
+                {
+                  label: shape.revaluation >= 0 ? "Growth" : "Decline",
+                  value: shape.revaluation,
+                  tone: shape.revaluation >= 0 ? "text-positive" : "text-negative",
+                },
+                { label: "Closed at", value: shape.netWorth, tone: "" },
+              ].map((c) => (
+                <div key={c.label} className="bg-surface px-4 py-2.5">
+                  <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+                    {c.label}
+                  </p>
+                  <p className={cn("mt-0.5 text-sm font-semibold tabular-nums", c.tone)}>
+                    {fmtCAD(c.value)}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
+              Growth is everything that moved net worth without passing through
+              income or spending — the market mostly, but also the pension
+              accruing, a revaluation, and the exchange rate. It is a
+              subtraction, not a measurement, which is why it is not called a
+              return.
+            </p>
+          </Card>
+        )}
+
+        {insights.length > 0 && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {insights.map((i) => (
+              <Card key={i.key} className="p-4">
+                <p
+                  className={cn(
+                    "text-sm font-semibold leading-snug",
+                    i.tone === "positive" && "text-positive",
+                    i.tone === "negative" && "text-negative",
+                  )}
+                >
+                  {i.headline}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-ink-dim">{i.detail}</p>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {/*
           * Room is the one limit here the app cannot work out for itself. It
           * depends on income, on room carried forward and on withdrawals made
           * years ago, all of it stated on a notice of assessment — so the
@@ -278,6 +375,66 @@ export default function YearPage() {
             </p>
           )}
         </Card>
+
+        {/*
+          * The balance sheet across years: what the money is, not what it did.
+          *
+          * Stacked rather than lined up side by side, because the question is
+          * composition — a portfolio that stops being mostly cash is a
+          * different portfolio, and that shift is invisible in four separate
+          * lines.
+          */}
+        {balanceBars.length > 1 && (
+          <Card>
+            <CardHeader
+              title="What it is made of"
+              subtitle="Where the money sits at the end of each year, and what is owed against it"
+            />
+            <div className="px-3 pb-4">
+              {/*
+                * Bars, not an area. An area chart reads a trend between its
+                * points, and there is nothing between two year ends — the
+                * record has no June for a year it has already closed. Stacked
+                * columns say what each year *was*, which is the question.
+                */}
+              <GroupedBars
+                data={balanceBars as unknown as Record<string, unknown>[]}
+                xKey="label"
+                stacked
+                bars={[
+                  { key: "Cash", name: "Cash", color: accentFor("market") },
+                  { key: "Bonds", name: "Bonds", color: accentFor("bonds") },
+                  { key: "Stocks", name: "Stocks", color: accentFor("brand") },
+                  { key: "Crypto", name: "Crypto", color: accentFor("cost") },
+                  { key: "Pension", name: "Pension", color: accentFor("pension") },
+                ]}
+                yFmt={(n: number) => fmtCompact(n)}
+                height={240}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-px border-t border-line bg-line sm:grid-cols-4">
+              {shape && [
+                { label: "Assets", value: shape.assets },
+                { label: "Owed", value: -shape.liabilities },
+                { label: "Net worth", value: shape.netWorth },
+                {
+                  label: "Cash share",
+                  value: null,
+                  text: shape.assets > 0 ? `${Math.round((shape.cash / shape.assets) * 100)}%` : "—",
+                },
+              ].map((c) => (
+                <div key={c.label} className="bg-surface px-4 py-2.5">
+                  <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+                    {c.label}
+                  </p>
+                  <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                    {c.text ?? fmtCAD(c.value ?? 0)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
 
         <Card>
           <CardHeader
