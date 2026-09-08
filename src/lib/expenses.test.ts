@@ -77,6 +77,41 @@ describe("months on record", () => {
   });
 });
 
+/*
+ * The page opened on the calendar month because a recurring rent payment fires
+ * on the 1st, so the month in progress was the newest month "with spending in
+ * it" from its second day — one row against a full month beside it, read as a
+ * collapse in spending.
+ */
+describe("the month the expenses page opens on", () => {
+  const august = txn("2026-08-14", 240, "Groceries");
+  const july = txn("2026-07-14", 260, "Groceries");
+  const septemberRent = txn("2026-09-01", 1300, "Housing");
+
+  test("a month still running is not the one to open on", () => {
+    assert.equal(
+      latestExpenseMonth([july, august, septemberRent], "2026-09"),
+      "2026-08",
+    );
+  });
+
+  test("the last full month is still the answer once the next one is over", () => {
+    assert.equal(
+      latestExpenseMonth([july, august, septemberRent], "2026-10"),
+      "2026-09",
+    );
+  });
+
+  test("a first month of use opens on itself rather than on nothing", () => {
+    assert.equal(latestExpenseMonth([septemberRent], "2026-09"), "2026-09");
+  });
+
+  test("months ahead of the calendar are not opened on", () => {
+    const future = txn("2027-01-04", 50, "Groceries");
+    assert.equal(latestExpenseMonth([august, future], "2026-09"), "2026-08");
+  });
+});
+
 describe("monthlySpend", () => {
   const txns = [
     txn("2025-01-04", 1000, "Housing"),
