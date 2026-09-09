@@ -1643,6 +1643,37 @@ export const NET_WORTH_CLASSES = [
 
 export type NetWorthClass = (typeof NET_WORTH_CLASSES)[number];
 
+/**
+ * Each point's classes as shares of what was owned at that point.
+ *
+ * Shares, not dollars. In dollars the chart is the net worth line again with
+ * lines inside it: the total grows, so every band sweeps upward together and
+ * the mix — the only thing such a chart is for — is a few pixels of thickness
+ * along the bottom. Normalised, the shape moves only when the composition
+ * moves, which is what "made of" means.
+ *
+ * Debt is left out rather than netted off: a share of a total that something
+ * has already been subtracted from is not a share of anything you can point
+ * at. A negative balance is floored at nought for the same reason — it is a
+ * liability wearing an asset's name, and it cannot be part of a whole.
+ *
+ * A point where nothing was owned is all noughts rather than absent, so the
+ * series stays the same length as the record it came from.
+ */
+export function classShares<T extends { label: string } & Record<NetWorthClass, number>>(
+  points: readonly T[],
+): Record<string, string | number>[] {
+  return points.map((p) => {
+    const owned = NET_WORTH_CLASSES.reduce((sum, c) => sum + Math.max(0, p[c]), 0);
+    const row: Record<string, string | number> = { label: p.label };
+    if ("key" in p && typeof p.key === "string") row.key = p.key;
+    for (const c of NET_WORTH_CLASSES) {
+      row[c] = owned > 0 ? (Math.max(0, p[c]) / owned) * 100 : 0;
+    }
+    return row;
+  });
+}
+
 export interface ClassPoint {
   key: string;
   label: string;

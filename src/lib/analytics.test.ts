@@ -26,6 +26,7 @@ import {
   avgSpendByCategory,
   firstAccountMonth,
   netWorthOver,
+  classShares,
   netWorthByClass,
   fiProgress,
   savingsRate,
@@ -1920,5 +1921,53 @@ describe("incomeBySource", () => {
   test("a pension contribution is income you cannot spend", () => {
     const b = incomeBySource([pay("2026-08-31", 400, "RSP / Pension")], 1, "2026-08");
     assert.equal(b.sources[0].spendable, false);
+  });
+});
+
+describe("classShares", () => {
+  const at = (label: string, b: Partial<Record<"Cash" | "Bonds" | "Stocks" | "Crypto" | "Pension", number>>) =>
+    ({ label, Cash: 0, Bonds: 0, Stocks: 0, Crypto: 0, Pension: 0, ...b });
+
+  test("each class as a percentage of what was owned", () => {
+    const [row] = classShares([at("2026", { Cash: 25, Stocks: 75 })]);
+    assert.equal(row.Cash, 25);
+    assert.equal(row.Stocks, 75);
+    assert.equal(row.label, "2026");
+  });
+
+  test("every point totals a hundred", () => {
+    const rows = classShares([
+      at("2025", { Cash: 1, Bonds: 2, Stocks: 3, Crypto: 4, Pension: 5 }),
+      at("2026", { Cash: 900, Pension: 100 }),
+    ]);
+    for (const r of rows) {
+      const total = ["Cash", "Bonds", "Stocks", "Crypto", "Pension"]
+        .reduce((a, k) => a + Number(r[k]), 0);
+      assert.ok(Math.abs(total - 100) < 1e-9, `${r.label} came to ${total}`);
+    }
+  });
+
+  test("a class never owned is nought, not missing", () => {
+    const [row] = classShares([at("2026", { Cash: 100 })]);
+    assert.equal(row.Bonds, 0, "drawn as a flat band rather than a gap");
+    assert.ok("Crypto" in row);
+  });
+
+  test("a point where nothing was owned is all noughts, not a hole", () => {
+    const rows = classShares([at("2025", {}), at("2026", { Cash: 10 })]);
+    assert.equal(rows.length, 2, "the series keeps the length of the record");
+    assert.equal(rows[0].Cash, 0);
+  });
+
+  test("a negative balance cannot be part of a whole", () => {
+    // A liability wearing an asset's name: floored, not netted off.
+    const [row] = classShares([at("2026", { Cash: -50, Stocks: 100 })]);
+    assert.equal(row.Cash, 0);
+    assert.equal(row.Stocks, 100, "the shares are of what is owned, not of the net");
+  });
+
+  test("a key is carried through when the point has one", () => {
+    const [row] = classShares([{ ...at("Jan", { Cash: 1 }), key: "2026-01" }]);
+    assert.equal(row.key, "2026-01");
   });
 });

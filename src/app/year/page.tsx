@@ -20,6 +20,8 @@ import {
   cn,
 } from "@/components/ui";
 import {
+  BAND_ORDER,
+  CLASS_COLORS,
   GroupedBars,
   spectrumAt,
   RoomGauge,
@@ -32,6 +34,7 @@ import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import {
   allTimeSeries,
+  classShares,
   firstFlowMonth,
   monthsSince,
   netExternalFlows,
@@ -228,6 +231,13 @@ export default function YearPage() {
     Crypto: sh.crypto,
     Pension: sh.pension,
   }));
+  /*
+   * Only the bands the record actually holds somewhere in it. A colour in the
+   * chart with no key beside it is a colour you cannot name, and a class never
+   * owned is not a nought worth drawing.
+   */
+  const mixBands = BAND_ORDER.filter((c) => balanceBars.some((p) => p[c] > 0));
+  const balanceMix = classShares(balanceBars);
 
   return (
     <Shell
@@ -478,39 +488,92 @@ export default function YearPage() {
           {/*
             * The balance sheet across years: what the money is, not what it did.
             *
-            * Stacked rather than lined up side by side, because the question is
-            * composition — a portfolio that stops being mostly cash is a
-            * different portfolio, and that shift is invisible in four separate
-            * lines.
+            * The same chart as net worth composition on the dashboard, over
+            * years rather than months, because it is the same question asked
+            * of a longer window — and one chart read twice is cheaper than two
+            * charts learned separately. Same bands, same colours, same order,
+            * from the same three shared definitions.
             */}
           {balanceBars.length > 1 && (
             <Card>
               <CardHeader
                 title="Asset allocation at year end"
-                subtitle="What the assets are made of each year, and what is owed against them"
+                subtitle="Share of everything you own, at the close of each year"
               />
-              <div className="px-3 pb-4">
-                {/*
-                  * Bars, not an area. An area chart reads a trend between its
-                  * points, and there is nothing between two year ends — the
-                  * record has no June for a year it has already closed. Stacked
-                  * columns say what each year *was*, which is the question.
-                  */}
-                <GroupedBars
-                  data={balanceBars as unknown as Record<string, unknown>[]}
+              {/*
+                * Shares, not dollars. In dollars this was the net worth line
+                * again with lines inside it: the total grew several times over,
+                * so every band swept upward together and the mix — the only
+                * thing this chart is for — was a few pixels along the bottom.
+                *
+                * Drawn as an area between year ends, which is a real cost and
+                * a deliberate one. There is no June in a year already closed,
+                * so the slope between two points is not a record of anything;
+                * it says only that the mix went from one to the other. Bars
+                * were honest about that and made the drift between them
+                * something to work out rather than see, and the drift is the
+                * subject. The axis labels are year ends, so what is measured
+                * stays legible.
+                *
+                * A band worth very little is still only a few pixels tall, and
+                * the figures underneath are what answer for it.
+                */}
+              <div className="px-3 pb-2">
+                <SeriesChart
+                  data={balanceMix as unknown as Record<string, unknown>[]}
                   xKey="label"
                   stacked
-                  bars={[
-                    { key: "Cash", name: "Cash", color: accentFor("market") },
-                    { key: "Bonds", name: "Bonds", color: accentFor("bonds") },
-                    { key: "Stocks", name: "Stocks", color: accentFor("brand") },
-                    { key: "Crypto", name: "Crypto", color: accentFor("cost") },
-                    { key: "Pension", name: "Pension", color: accentFor("pension") },
-                  ]}
-                  yFmt={(n: number) => fmtCompact(n)}
-                  height={240}
+                  fadeAtZero
+                  series={mixBands.map((name) => ({
+                    key: name,
+                    name,
+                    color: CLASS_COLORS[name],
+                  }))}
+                  height={280}
+                  yDomain={[0, 100]}
+                  yFmt={(n: number) => `${Math.round(n)}%`}
                 />
               </div>
+              {shape && (
+                <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
+                  {/*
+                    * The bands the chart drew, not the ones held now — a colour
+                    * in the chart with no key beside it is a colour you cannot
+                    * name. One held in an earlier year and since sold reads as
+                    * zero, which is the answer rather than an omission.
+                    *
+                    * The figures are the selected year's, and they are what
+                    * answer for a band too thin to see: the chart gives up the
+                    * dollars to show the mix, and this is where they come back.
+                    */}
+                  {mixBands.map((c) => {
+                    const held = {
+                      Cash: shape.cash,
+                      Bonds: shape.bonds,
+                      Stocks: shape.stocks,
+                      Crypto: shape.crypto,
+                      Pension: shape.pension,
+                    }[c];
+                    return (
+                      <div key={c} className="flex items-baseline gap-2">
+                        <span
+                          className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
+                          style={{ background: CLASS_COLORS[c] }}
+                        />
+                        <span className="text-[0.6875rem] text-ink-faint">{c}</span>
+                        <span className="text-sm font-semibold tabular-nums">
+                          {fmtCompact(held)}
+                        </span>
+                        <span className="text-[0.6875rem] tabular-nums text-ink-faint">
+                          {shape.assets > 0
+                            ? `${Math.round((Math.max(0, held) / shape.assets) * 100)}%`
+                            : "—"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-px border-t border-line bg-line sm:grid-cols-4">
                 {shape && [
                   { label: "Assets", value: shape.assets },

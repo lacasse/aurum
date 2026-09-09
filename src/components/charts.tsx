@@ -27,8 +27,40 @@ import {
 } from "recharts";
 import { cn } from "./ui";
 import { accent, spectrumAt, type AccentName } from "@/lib/palette";
+import type { NetWorthClass } from "@/lib/analytics";
 
 export { spectrumAt } from "@/lib/palette";
+
+/**
+ * One colour per class of thing owned, and the order they stack in.
+ *
+ * Shared because the same composition is drawn on two pages now — month by
+ * month on the dashboard and year by year on the Year page — and a band that
+ * is amber in one and blue in the other is two charts the reader has to learn
+ * separately rather than one they can read twice.
+ *
+ * The order is a decision about a picture, not about the domain, which is why
+ * it lives here and not beside `NET_WORTH_CLASSES`. Whatever sits last is the
+ * top of the stack, and the top of a stack that always totals a hundred
+ * percent runs along the frame, where its boundary line cannot be seen. That
+ * costs crypto nothing — it is unmistakable from its fill — and it cost the
+ * pension its line entirely while it sat up there.
+ */
+export const CLASS_COLORS: Record<NetWorthClass, string> = {
+  Cash: "#34d399",
+  Bonds: "#60a5fa",
+  Pension: "#f472b6",
+  Stocks: "#f59e0b",
+  Crypto: "#8b5cf6",
+};
+
+export const BAND_ORDER: NetWorthClass[] = [
+  "Cash",
+  "Bonds",
+  "Pension",
+  "Stocks",
+  "Crypto",
+];
 
 /**
  * One colour per category, assigned in the order given.
