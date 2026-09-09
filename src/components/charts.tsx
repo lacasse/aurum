@@ -7,6 +7,7 @@ import {
   CartesianGrid,
   Cell,
   ComposedChart,
+  Layer,
   Legend,
   Line,
   Pie,
@@ -15,9 +16,11 @@ import {
   PolarGrid,
   PolarRadiusAxis,
   Radar,
+  Rectangle,
   RadarChart,
   ReferenceLine,
   ResponsiveContainer,
+  Sankey,
   Tooltip,
   XAxis,
   YAxis,
@@ -358,6 +361,7 @@ export function GroupedBars({
   height = 280,
   yFmt,
   stacked,
+  rightBar,
 }: {
   data: Record<string, unknown>[];
   xKey: string;
@@ -365,6 +369,16 @@ export function GroupedBars({
   height?: number;
   yFmt?: (n: number) => string;
   stacked?: boolean;
+  /**
+   * A series measured in something other than the left axis's unit, drawn
+   * against its own scale on the right.
+   *
+   * A savings rate beside income and spending is the case this exists for: a
+   * percentage plotted on a axis of dollars is a flat line on the floor, and
+   * scaling it to fit would make a rate look like an amount. Two axes say
+   * plainly that these are two different quantities.
+   */
+  rightBar?: SeriesDef & { fmt?: (n: number) => string };
 }) {
   const stackId = stacked ? "a" : undefined;
   /*
@@ -384,12 +398,26 @@ export function GroupedBars({
         <CartesianGrid {...GRID_PROPS} />
         <XAxis dataKey={xKey} tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={16} />
         <YAxis
+          yAxisId="left"
           tick={AXIS_TICK}
           tickLine={false}
           axisLine={false}
           width={56}
           tickFormatter={(v) => (yFmt ? yFmt(Number(v)) : String(v))}
         />
+        {rightBar ? (
+          <YAxis
+            yAxisId="right"
+            orientation="right"
+            tick={AXIS_TICK}
+            tickLine={false}
+            axisLine={false}
+            width={44}
+            tickFormatter={(v) =>
+              rightBar.fmt ? rightBar.fmt(Number(v)) : String(v)
+            }
+          />
+        ) : null}
         <Tooltip
           cursor={{ fill: "var(--elevated)", opacity: 0.6 }}
           content={<ChartTooltip fmt={yFmt} />}
@@ -400,6 +428,7 @@ export function GroupedBars({
         {bars.map((b, i) => (
           <Bar
             key={b.key}
+            yAxisId="left"
             dataKey={b.key}
             name={b.name}
             fill={b.color}
@@ -408,6 +437,16 @@ export function GroupedBars({
             stackId={stackId}
           />
         ))}
+        {rightBar ? (
+          <Bar
+            yAxisId="right"
+            dataKey={rightBar.key}
+            name={rightBar.name}
+            fill={rightBar.color}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={26}
+          />
+        ) : null}
       </ComposedChart>
     </ResponsiveContainer>
   );
@@ -1060,21 +1099,15 @@ export function Waterfall({
           data={rows}
           margin={{ top: 28, right: 4, left: 4, bottom: 0 }}
           /*
-           * Columns touching, with no gap at all.
+           * All but touching.
            *
-           * A waterfall is one shape, not five bars: each step begins at the
-           * height the last one reached, and that hand-off is the whole point.
-           * Any gap between the columns hides it — the eye has to carry the
-           * level across empty space and take on trust that it lands. Butted
-           * together, the top edge of one column meets the bottom of the next
-           * and the path is simply visible.
-           *
-           * Safe here because no two neighbours share a colour: the opening
-           * pillar, income, spending, growth and the closing pillar alternate
-           * by construction, so touching bars stay distinct without a rule
-           * between them.
+           * A waterfall is one shape: each step begins at the height the last
+           * one reached, and a real gap hides that hand-off — the eye has to
+           * carry the level across empty space and take it on trust. A hairline
+           * keeps the path readable while stopping the columns from fusing into
+           * one block, which is what butting them fully together did.
            */
-          barCategoryGap={0}
+          barCategoryGap={3}
         >
           {/*
             * No y-axis and no grid. Every column already carries its own figure
@@ -1233,6 +1266,113 @@ export function AllocationBar({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/* ---------------- Sankey ---------------- */
+
+/**
+ * A year's whole cash flow: where every dollar came from, and where it went.
+ *
+ * The one chart on the page that shows both halves at full detail at once.
+ * Everything else answers a question about the year; this is the year.
+ *
+ * Node colour carries the direction — arriving, the trunk, leaving, kept —
+ * because a Sankey read without it is a tangle of equally-weighted ribbons,
+ * and which side of the trunk a band sits on is the first thing anyone needs
+ * to know.
+ */
+export function YearSankey({
+  nodes,
+  links,
+  format,
+  height = 460,
+}: {
+  nodes: { name: string }[];
+  links: { source: number; target: number; value: number }[];
+  format: (n: number) => string;
+  height?: number;
+}) {
+  if (nodes.length === 0 || links.length === 0) return null;
+
+  const trunk = links.find((l) => links.some((o) => o.source === l.target))?.target ?? -1;
+  const incoming = new Set(links.filter((l) => l.target === trunk).map((l) => l.source));
+
+  const colourOf = (index: number) => {
+    if (index === trunk) return accent("brand");
+    if (incoming.has(index)) return accent("positive");
+    return nodes[index]?.name === "Kept" ? accent("market") : accent("negative");
+  };
+
+  return (
+    <div style={{ width: "100%", height }}>
+      <ResponsiveContainer>
+        <Sankey
+          data={{ nodes, links }}
+          nodePadding={18}
+          nodeWidth={12}
+          margin={{ top: 8, right: 132, bottom: 8, left: 108 }}
+          link={{ stroke: "var(--line)", strokeOpacity: 0.28, fill: "var(--ink-faint)", fillOpacity: 0.14 }}
+          node={(props: unknown) => {
+            const { x, y, width, height: h, index, payload } = props as {
+              x: number; y: number; width: number; height: number; index: number;
+              payload: { name: string; value: number };
+            };
+            const colour = colourOf(index);
+            /*
+             * Labels outside the column rather than on it. A node can be a few
+             * pixels tall — a category that took very little — and text laid
+             * over it is unreadable at exactly the sizes where the reader most
+             * needs to know what it is.
+             */
+            const left = incoming.has(index);
+            return (
+              <Layer key={index}>
+                <Rectangle x={x} y={y} width={width} height={h} fill={colour} radius={2} />
+                <text
+                  x={left ? x - 8 : x + width + 8}
+                  y={y + h / 2}
+                  textAnchor={left ? "end" : "start"}
+                  dominantBaseline="middle"
+                  fontSize={11}
+                  fill="var(--ink-dim)"
+                >
+                  {payload.name}
+                </text>
+                <text
+                  x={left ? x - 8 : x + width + 8}
+                  y={y + h / 2 + 12}
+                  textAnchor={left ? "end" : "start"}
+                  dominantBaseline="middle"
+                  fontSize={10}
+                  fill="var(--ink-faint)"
+                >
+                  {format(payload.value)}
+                </text>
+              </Layer>
+            );
+          }}
+        >
+          <Tooltip
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const p = payload[0]?.payload as { name?: string; value?: number } | undefined;
+              if (!p) return null;
+              return (
+                <div className="rounded-xl border border-line bg-surface px-3 py-2 shadow-xl">
+                  {p.name ? (
+                    <p className="mb-0.5 text-[0.6875rem] font-medium text-ink-faint">{p.name}</p>
+                  ) : null}
+                  <p className="text-xs font-medium tabular-nums text-ink">
+                    {format(Number(p.value ?? 0))}
+                  </p>
+                </div>
+              );
+            }}
+          />
+        </Sankey>
+      </ResponsiveContainer>
     </div>
   );
 }

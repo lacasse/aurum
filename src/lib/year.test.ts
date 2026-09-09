@@ -7,6 +7,8 @@ import {
   incomeAllocation,
   incomeMix,
   incomeMixShares,
+  incomeTypeShares,
+  yearFlow,
   unearnedShare,
   milestones,
   yearInsights,
@@ -643,5 +645,87 @@ describe("pension in, pension out", () => {
     const { sources } = incomeMix(txns);
     assert.ok(sources.includes("RSP / Pension"));
     assert.ok(sources.includes("Pension Income"));
+  });
+});
+
+describe("income split active against passive", () => {
+  const txns = [
+    txn("2026-01-31", "income", 60000, "Salary"),
+    txn("2026-02-28", "income", 6000, "RSP / Pension"),
+    txn("2026-03-31", "income", 30000, "Pension Income"),
+    txn("2026-04-30", "income", 4000, "Dividends"),
+  ];
+
+  test("the two shares add to a hundred", () => {
+    const [row] = incomeTypeShares(txns);
+    assert.equal(Math.round(Number(row.Active) + Number(row.Passive)), 100);
+  });
+
+  test("a pension contribution is active and a pension payment is passive", () => {
+    const [row] = incomeTypeShares(txns);
+    // 66,000 of work against 34,000 that arrived without it.
+    assert.equal(Math.round(Number(row.Active)), 66);
+  });
+
+  test("it agrees with the sentence beside it", () => {
+    const [row] = incomeTypeShares(txns);
+    assert.equal(Math.round(Number(row.Passive)), Math.round(unearnedShare(txns, "2026")!));
+  });
+});
+
+/*
+ * The trunk is what makes the flow chart honest: both halves have to meet in
+ * the middle, so it cannot draw more leaving than arrived.
+ */
+describe("the year as one flow", () => {
+  const txns = [
+    txn("2026-01-31", "income", 60000, "Salary"),
+    txn("2026-02-28", "income", 5000, "Dividends"),
+    txn("2026-03-31", "expense", 20000, "Housing"),
+    txn("2026-04-30", "expense", 9000, "Groceries"),
+  ];
+
+  const into = (f: ReturnType<typeof yearFlow>, name: string) =>
+    f.links.filter((l) => f.nodes[l.target].name === name).reduce((a, l) => a + l.value, 0);
+  const outOf = (f: ReturnType<typeof yearFlow>, name: string) =>
+    f.links.filter((l) => f.nodes[l.source].name === name).reduce((a, l) => a + l.value, 0);
+
+  test("everything arriving at the trunk leaves it again", () => {
+    const f = yearFlow(txns, "2026");
+    assert.equal(Math.round(into(f, "2026")), Math.round(outOf(f, "2026")));
+  });
+
+  test("what was not spent leaves as kept", () => {
+    const f = yearFlow(txns, "2026");
+    assert.equal(into(f, "Kept"), 36000);
+  });
+
+  test("a year that overspent draws where the rest came from", () => {
+    const over = [
+      txn("2026-01-31", "income", 10000, "Salary"),
+      txn("2026-02-28", "expense", 25000, "Housing"),
+    ];
+    const f = yearFlow(over, "2026");
+    assert.equal(into(f, "2026"), 25000);
+    assert.equal(outOf(f, "From savings"), 15000);
+    assert.equal(f.nodes.some((n) => n.name === "Kept"), false);
+  });
+
+  test("transfers are not a flow through the year", () => {
+    const withTransfer = [
+      ...txns,
+      { ...txn("2026-05-31", "income", 50000, "Transfer"), type: "transfer" } as unknown as (typeof txns)[number],
+    ];
+    assert.equal(into(yearFlow(withTransfer, "2026"), "2026"), into(yearFlow(txns, "2026"), "2026"));
+  });
+
+  test("sources past the limit are pooled rather than dropped", () => {
+    const f = yearFlow(txns, "2026", 1);
+    assert.equal(Math.round(into(f, "2026")), 65000);
+    assert.ok(f.nodes.some((n) => n.name === "Other"));
+  });
+
+  test("a year with nothing in it draws nothing", () => {
+    assert.deepEqual(yearFlow([], "2026"), { nodes: [], links: [] });
   });
 });

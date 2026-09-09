@@ -729,6 +729,13 @@ export function incomeMix(transactions: Transaction[], limit = 5): IncomeMix {
  * for time, and everything else compounds without asking. Null when the year
  * earned nothing, because a share of nothing is not zero.
  */
+export const WORK_CATEGORIES = new Set([
+  "Salary",
+  "Additional Income",
+  "Freelance",
+  "RSP / Pension",
+]);
+
 export function unearnedShare(
   transactions: Transaction[],
   year: string,
@@ -743,12 +750,7 @@ export function unearnedShare(
    *
    * Freelance income was absent by oversight, which flattered the figure.
    */
-  workCategories = new Set([
-    "Salary",
-    "Additional Income",
-    "Freelance",
-    "RSP / Pension",
-  ]),
+  workCategories = WORK_CATEGORIES,
 ): number | null {
   let total = 0;
   let unearned = 0;
@@ -782,4 +784,131 @@ export function incomeMixShares(mix: IncomeMix): Record<string, string | number>
     }
     return out;
   });
+}
+
+/**
+ * Income split two ways: earned by working, and not.
+ *
+ * The full breakdown by source answers what the money was; this answers the
+ * only question about it that changes a life. Active income stops when you do.
+ * Passive income does not, and the share of one against the other is the
+ * distance between having a job and not needing one.
+ *
+ * The same set of categories decides it as decides `unearnedShare`, so the
+ * chart and the sentence beside it can never disagree — a pension
+ * contribution is active, being deferred pay off the same hours, and a pension
+ * paying out is passive.
+ *
+ * Shares rather than amounts, so a rising salary cannot make growing passive
+ * income appear to shrink.
+ */
+export function incomeTypeShares(
+  transactions: Transaction[],
+): Record<string, string | number>[] {
+  const byYear = new Map<string, { active: number; passive: number }>();
+  for (const t of transactions) {
+    if (!isIncome(t)) continue;
+    const year = t.date.slice(0, 4);
+    const slot = byYear.get(year) ?? { active: 0, passive: 0 };
+    if (WORK_CATEGORIES.has(t.category)) slot.active += toCents(t.amount);
+    else slot.passive += toCents(t.amount);
+    byYear.set(year, slot);
+  }
+  return [...byYear.keys()].sort().map((year) => {
+    const { active, passive } = byYear.get(year)!;
+    const total = active + passive;
+    return {
+      label: year,
+      Active: total > 0 ? (active / total) * 100 : 0,
+      Passive: total > 0 ? (passive / total) * 100 : 0,
+    };
+  });
+}
+
+/* ── The whole year as one flow ── */
+
+export interface FlowNode {
+  name: string;
+}
+export interface FlowLink {
+  source: number;
+  target: number;
+  value: number;
+}
+export interface YearFlow {
+  nodes: FlowNode[];
+  links: FlowLink[];
+}
+
+/**
+ * Every dollar of a year, from where it came to where it went.
+ *
+ * Sources on the left, a single trunk in the middle, destinations on the
+ * right. The trunk is the point: it forces the two halves to reconcile, so
+ * the chart cannot show more leaving than arrived, and a year that overspent
+ * has to say so rather than quietly widening.
+ *
+ * Only income and spending. Transfers are excluded because moving money
+ * between your own accounts is not a flow through the year — drawing it would
+ * count the same dollar twice, once arriving in the account it left and once
+ * in the one it reached, and inflate both halves by however often money was
+ * shuffled.
+ *
+ * A year that spent more than it earned draws the shortfall as its own source,
+ * because the money did come from somewhere — savings, or borrowing — and a
+ * chart that balanced by shrinking the spending would be lying about the part
+ * that matters.
+ */
+export function yearFlow(
+  transactions: Transaction[],
+  year: string,
+  limit = 9,
+): YearFlow {
+  const income = new Map<string, number>();
+  const spend = new Map<string, number>();
+
+  for (const t of transactions) {
+    if (t.date.slice(0, 4) !== year) continue;
+    const cents = toCents(t.amount);
+    if (isIncome(t)) income.set(t.category, (income.get(t.category) ?? 0) + cents);
+    else if (t.type === "expense") spend.set(t.category, (spend.get(t.category) ?? 0) + cents);
+  }
+
+  const trim = (m: Map<string, number>) => {
+    const ranked = [...m.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    const kept = ranked.slice(0, limit);
+    const rest = ranked.slice(limit).reduce((a, [, v]) => a + v, 0);
+    return rest > 0 ? [...kept, ["Other" as string, rest] as [string, number]] : kept;
+  };
+
+  const sources = trim(income);
+  const uses = trim(spend);
+  const earned = sources.reduce((a, [, v]) => a + v, 0);
+  const spent = uses.reduce((a, [, v]) => a + v, 0);
+
+  if (earned === 0 && spent === 0) return { nodes: [], links: [] };
+
+  const nodes: FlowNode[] = [];
+  const links: FlowLink[] = [];
+  const add = (name: string) => nodes.push({ name }) - 1;
+
+  const shortfall = Math.max(0, spent - earned);
+  const trunk = earned + shortfall;
+
+  const sourceIds = sources.map(([name]) => add(name));
+  const shortfallId = shortfall > 0 ? add("From savings") : -1;
+  const trunkId = add(`${year}`);
+  const useIds = uses.map(([name]) => add(name));
+  const keptId = trunk > spent ? add("Kept") : -1;
+
+  sources.forEach(([, v], i) => links.push({ source: sourceIds[i], target: trunkId, value: fromCents(v) }));
+  if (shortfallId >= 0) {
+    links.push({ source: shortfallId, target: trunkId, value: fromCents(shortfall) });
+  }
+  uses.forEach(([, v], i) => links.push({ source: trunkId, target: useIds[i], value: fromCents(v) }));
+  if (keptId >= 0) {
+    links.push({ source: trunkId, target: keptId, value: fromCents(trunk - spent) });
+  }
+
+  return { nodes, links };
 }

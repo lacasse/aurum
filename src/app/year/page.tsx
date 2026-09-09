@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowDownRight,
   ArrowUpRight,
-  Flag,
   PiggyBank,
   SlidersHorizontal,
   Wallet,
@@ -12,7 +11,6 @@ import {
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
 import {
-  Badge,
   Button,
   Card,
   CardHeader,
@@ -28,7 +26,7 @@ import {
   SeriesChart,
   SignedHBars,
   Waterfall,
-  spectrumAt,
+  YearSankey,
 } from "@/components/charts";
 import { accent as accentFor } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
@@ -47,10 +45,9 @@ import {
   categoryShifts,
   contributionsVsValue,
   incomeAllocation,
-  incomeMix,
-  incomeMixShares,
+  incomeTypeShares,
+  yearFlow,
   unearnedShare,
-  milestones,
   yearInsights,
   yearRows,
   yearShapes,
@@ -63,7 +60,7 @@ import {
   type ContributionLimits,
   type RegisteredPlan,
 } from "@/lib/contributions";
-import { fmtCAD, fmtCompact, fmtPct, fmtSignedCAD, labelMonth } from "@/lib/format";
+import { fmtCAD, fmtCompact, fmtPct, fmtSignedCAD } from "@/lib/format";
 
 /** A colour per plan, so the same gauge is the same colour every time. */
 const PLAN_TONE = {
@@ -165,7 +162,6 @@ export default function YearPage() {
     return {
       rows,
       shapes: yearShapes(rows, classes),
-      marks: milestones(netWorth),
     };
   }, [accounts, holdings, transactions, snapshots, usdCadRate]);
 
@@ -191,35 +187,15 @@ export default function YearPage() {
   // record that opens at a peak, growth since then is a different claim.
   const cagrBase = [...data.rows].reverse().find((r) => r.netWorth > 0)?.year ?? null;
 
-  /*
-   * One row per month rather than per step: a month that passed several is a
-   * single event, and the badge says how many.
-   */
-  const grouped = [...data.marks]
-    .reduce<{ month: string; from: number; to: number; count: number; months: number | null }[]>(
-      (acc, m) => {
-        const last = acc[acc.length - 1];
-        if (last && last.month === m.month) {
-          last.to = m.amount;
-          last.count++;
-          return acc;
-        }
-        acc.push({
-          month: m.month,
-          from: m.amount,
-          to: m.amount,
-          count: 1,
-          months: m.monthsFromPrevious,
-        });
-        return acc;
-      },
-      [],
-    )
-    .reverse();
 
   const bars = [...data.rows]
     .reverse()
-    .map((r) => ({ label: r.year, income: r.income, expenses: r.expenses }));
+    .map((r) => ({
+      label: r.year,
+      income: r.income,
+      expenses: r.expenses,
+      savingsRate: r.savingsRate ?? 0,
+    }));
 
   const room = contributionRoom(selected.year, transactions, accounts, limits);
   const shape = data.shapes.find((sh) => sh.year === selected.year);
@@ -237,8 +213,8 @@ export default function YearPage() {
       ? contributions[contributions.length - 1].value -
         contributions[contributions.length - 1].contributed
       : null;
-  const mix = incomeMix(transactions);
-  const mixShares = incomeMixShares(mix);
+  const typeShares = incomeTypeShares(transactions);
+  const flow = yearFlow(transactions, selected.year);
   const unearned = unearnedShare(transactions, selected.year);
   const balanceBars = data.shapes.map((sh) => ({
     label: sh.year,
@@ -563,6 +539,34 @@ export default function YearPage() {
         </div>
 
         {/*
+          * The year itself, rather than a question about it. Sources on the
+          * left, one trunk, destinations on the right — and the trunk forces
+          * the halves to reconcile, so the chart cannot show more leaving than
+          * arrived.
+          */}
+        {flow.nodes.length > 0 && (
+          <Card>
+            <CardHeader
+              title={`Every dollar of ${selected.year}`}
+              subtitle="Where the money came from, and where it went"
+            />
+            <div className="px-3 pb-4">
+              <YearSankey
+                nodes={flow.nodes}
+                links={flow.links}
+                format={(n) => fmtCompact(n)}
+              />
+            </div>
+            <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
+              Income and spending only. Transfers between your own accounts are
+              left out — the same dollar would be counted twice, once leaving an
+              account and once arriving in another, and both halves would grow
+              with however often money was moved.
+            </p>
+          </Card>
+        )}
+
+        {/*
           * Compounding, as a picture rather than a percentage. The lines start
           * together and separate; the gap is every dollar the portfolio earned
           * rather than received.
@@ -570,7 +574,7 @@ export default function YearPage() {
         {contributions.length > 1 && (
           <Card>
             <CardHeader
-              title="Your money, and the market&rsquo;s"
+              title="Investment compounding"
               subtitle="Everything paid into the portfolio, beside what it is worth"
             />
             <div className="px-3 pb-4">
@@ -596,48 +600,44 @@ export default function YearPage() {
           </Card>
         )}
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {/*
-            * A wage can only be traded for time. Everything beside it compounds
-            * without asking, so the share worth watching is the one that is not
-            * the salary — which a total can never show.
-            */}
-          {mix.rows.length > 1 && (
-            <Card>
-              <CardHeader
-                title="Yearly income source"
-                subtitle={
-                  unearned === null
-                    ? "What the income was made of, year by year"
-                    : `${Math.round(unearned)}% of ${selected.year} came from something other than work`
-                }
+        {/*
+          * Two categories, not five. The full breakdown answers what the money
+          * was; this answers the only question about it that changes a life —
+          * active income stops when you do, passive income does not, and the
+          * share of one against the other is the distance between having a job
+          * and not needing one.
+          */}
+        {typeShares.length > 1 && (
+          <Card>
+            <CardHeader
+              title="Income type"
+              subtitle={
+                unearned === null
+                  ? "Active against passive, year by year"
+                  : `${Math.round(unearned)}% of ${selected.year} did not come from working`
+              }
+            />
+            <div className="px-3 pb-4">
+              <SeriesChart
+                data={typeShares as unknown as Record<string, unknown>[]}
+                xKey="label"
+                stacked
+                yDomain={[0, 100]}
+                series={[
+                  { key: "Active", name: "Active", color: accentFor("cost") },
+                  { key: "Passive", name: "Passive", color: accentFor("brand") },
+                ]}
+                yFmt={(n: number) => `${Math.round(n)}%`}
+                height={260}
               />
-              <div className="px-3 pb-4">
-                {/*
-                  * Shares rather than amounts. A salary that rises every year
-                  * makes every other source shrink on a chart of dollars even
-                  * as those sources grow — the wage simply out-scales them.
-                  * Normalised, the question becomes what the income was made
-                  * of, which is the part that changes slowly and matters.
-                  */}
-                <SeriesChart
-                  data={mixShares as unknown as Record<string, unknown>[]}
-                  xKey="label"
-                  stacked
-                  yDomain={[0, 100]}
-                  series={mix.sources.map((name, i) => ({
-                    key: name,
-                    name,
-                    color: spectrumAt(i, mix.sources.length),
-                  }))}
-                  yFmt={(n: number) => `${Math.round(n)}%`}
-                  height={240}
-                />
-              </div>
-            </Card>
-          )}
-
-        </div>
+            </div>
+            <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
+              A pension contribution counts as active — it is deferred pay off
+              the same hours as the salary it comes from. A pension paying out
+              counts as passive.
+            </p>
+          </Card>
+        )}
 
         <Card>
           <CardHeader
@@ -645,13 +645,24 @@ export default function YearPage() {
             subtitle="Every year on record, side by side"
           />
           <div className="px-3 pb-4">
+            {/*
+              * The savings rate has its own axis on the right. A percentage
+              * plotted against dollars is a flat line on the floor, and
+              * scaling it to fit would make a rate look like an amount.
+              */}
             <GroupedBars
               data={bars as unknown as Record<string, unknown>[]}
               xKey="label"
               bars={[
-                { key: "income", name: "Income", color: "#34d399" },
-                { key: "expenses", name: "Expenses", color: "#fb7185" },
+                { key: "income", name: "Income", color: accentFor("positive") },
+                { key: "expenses", name: "Expenses", color: accentFor("negative") },
               ]}
+              rightBar={{
+                key: "savingsRate",
+                name: "Saved",
+                color: accentFor("brand"),
+                fmt: (n: number) => `${Math.round(n)}%`,
+              }}
               height={260}
               yFmt={fmtCompact}
             />
@@ -806,45 +817,6 @@ export default function YearPage() {
             onClose={() => setRoomOpen(false)}
           />
         </Modal>
-
-        {data.marks.length > 0 && (
-          <Card>
-            <CardHeader
-              title="Milestones"
-              subtitle="The month each step was first passed, and how long it took"
-            />
-            {/*
-              * Several steps crossed in one month are one event, not several.
-              * The record opens partway up — the first month with a portfolio
-              * figure in it passes fourteen at once — and fourteen rows saying
-              * "same month" describe the gap in the data rather than a year of
-              * progress.
-              */}
-            <ul className="grid gap-1 px-3 pb-4 sm:grid-cols-2 lg:grid-cols-3">
-              {grouped.map((g) => (
-                <li
-                  key={g.month}
-                  className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-elevated"
-                >
-                  <Flag size={14} className="shrink-0 text-brand" />
-                  <span className="font-medium tabular-nums">
-                    {g.from === g.to
-                      ? fmtCompact(g.to)
-                      : `${fmtCompact(g.from)}–${fmtCompact(g.to)}`}
-                  </span>
-                  <span className="text-sm text-ink-dim">{labelMonth(g.month)}</span>
-                  <Badge className="ml-auto">
-                    {g.months === null
-                      ? `${g.count} at once`
-                      : g.count > 1
-                        ? `${g.count} in ${g.months} mo`
-                        : `${g.months} mo`}
-                  </Badge>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        )}
       </div>
     </Shell>
   );
