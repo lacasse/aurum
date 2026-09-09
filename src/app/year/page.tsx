@@ -219,9 +219,11 @@ export default function YearPage() {
   const typeLast = typeRow
     ? { ...incomeTypeAmounts(transactions, selected.year), shares: typeRow }
     : null;
-  const flow = yearFlow(transactions, selected.year, accounts, 8, (c) =>
-    groupOf(c, spendGroups),
-  );
+  const flow = yearFlow(transactions, selected.year, {
+    accounts,
+    holdings,
+    spendGroup: (c) => groupOf(c, spendGroups),
+  });
   const unearned = unearnedShare(transactions, selected.year);
   const balanceBars = data.shapes.map((sh) => ({
     label: sh.year,
@@ -541,7 +543,7 @@ export default function YearPage() {
           <Card>
             <CardHeader
               title={`Every dollar of ${selected.year}`}
-              subtitle="Where the money came from, where it landed, and what it left for"
+              subtitle="Where the money came from, where it landed, and what it became"
             />
             <div className="px-3 pb-4">
               <YearSankey
@@ -552,14 +554,20 @@ export default function YearPage() {
             </div>
             <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
               Accounts in the second column, what the money left them for in the
-              third, and each account balances on its own. Spending ends at
+              third, and every account balances on its own. Spending ends at
               necessity or discretion rather than at a column of categories —
               the same split as the Expenses page, and reassignable there.
-              Deposits into an investment, crypto or pension account are shown as
-              a destination; transfers between two cash accounts are not, because
-              the same dollar would be counted twice and both halves would grow
-              with however often money was moved. Anything that left an account
-              income never reached that year comes in as “From savings”.
+              A deposit into an investment account and a purchase inside it are
+              two different events, so the deposit moves the money between
+              accounts and the purchase is what the account then spends it on,
+              broken down by asset class. Selling appears on the left, because
+              a sale is money arriving. Dividends are not taken from the trade
+              history — they are already income under their own category.
+              Transfers between two cash accounts are left out, because the same
+              dollar would be counted twice. Anything that left an account income
+              never reached comes in as “From savings”; anything an investment
+              account took in with no purchase to account for is “Not itemised”,
+              which is cash sitting there or trades that were never imported.
             </p>
           </Card>
         )}

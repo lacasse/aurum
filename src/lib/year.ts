@@ -1,6 +1,6 @@
 import { NON_SPENDABLE_INCOME, chainedReturns, isIncome } from "./analytics";
 import type { ClassPoint, NetWorthPoint, PortfolioPoint } from "./analytics";
-import type { Account, AccountKind } from "./types";
+import type { Account, AccountKind, Holding } from "./types";
 import { Transaction } from "./types";
 import { fromCents, roundMoney, toCents } from "./money";
 import { labelMonth } from "./format";
@@ -863,7 +863,8 @@ export interface FlowNode {
     | "discretionary"
     | "debt"
     | "investing"
-    | "kept";
+    | "kept"
+    | "idle";
 }
 export interface FlowLink {
   source: number;
@@ -875,49 +876,22 @@ export interface YearFlow {
   links: FlowLink[];
 }
 
-/**
- * Every dollar of a year, from where it came to where it went.
- *
- * Four columns, and the middle one is the point. Income arrives on the left,
- * lands in a named account, and leaves that account again — as spending, as a
- * deposit into something invested, or not at all. A two-column version drew a
- * year as one undifferentiated pool, which is not how anybody holds money: the
- * question "which account is this coming out of" is the one a cash flow is
- * actually asked, and the middle column is the only place it can be answered.
- *
- * Each account forces its own halves to reconcile, so the chart cannot show
- * more leaving an account than reached it. Where an account paid out more than
- * it took in that year, the difference is drawn as its own source, because the
- * money did come from somewhere — a balance carried in, or borrowing — and a
- * chart that balanced by shrinking the spending would be lying about the part
- * that matters.
- *
- * Rows with no account on them still work: they route through a single node
- * named for the year, which is what the whole chart used to be. A month
- * imported as a sheet total has nowhere else to go, and it should not vanish.
- *
- * Transfers appear only where they leave the cash side for the invested side.
- * That is a real destination for a year's money, and drawing it costs nothing
- * because the deposit is only ever counted once — on the way out of the
- * account income landed in. Every other transfer is still excluded: shuffling
- * money between two chequing accounts is not a flow through the year, and
- * counting it would inflate both halves by however often it was moved.
- */
+/** Accounts whose outflow is purchases rather than spending. */
 const INVESTED_KINDS = new Set<AccountKind>(["investment", "crypto", "pension"]);
 
-/**
- * What a dollar leaving an account was for. Kept is not one of these: it is
- * what no account paid out at all, so it has nothing to break down.
- *
- * The spending side is split the way the rest of the app splits it — by
- * `groupOf`, which is the one answer to "could this have been avoided". A
- * second answer here would drift from the Expenses page within a release.
- */
 const SPENDING = "Spending";
-const INVESTING = "Investing";
+/** An account buying securities with what it holds. */
+const BOUGHT = "Bought";
+/** Money moved to another of your own accounts, which is not a purpose. */
+const DEPOSIT = "__deposit";
+/** Selling a position, which is money arriving rather than leaving. */
+const SOLD = "Sold investments";
+/** What an invested account took in and has no purchases to account for. */
+const UNITEMISED = "Not itemised";
+
 const GROUP_ROLE: Record<string, FlowNode["role"]> = {
   [SPENDING]: "necessity",
-  [INVESTING]: "investing",
+  [BOUGHT]: "investing",
 };
 /** The three ends of the spending branch, each its own colour. */
 const LEAF_ROLE: Record<string, FlowNode["role"]> = {
@@ -926,12 +900,72 @@ const LEAF_ROLE: Record<string, FlowNode["role"]> = {
   [SPEND_GROUP_LABELS.excluded]: "debt",
 };
 
+/**
+ * Every dollar of a year, from where it came to where it went.
+ *
+ * Four columns. Money arrives on the left, lands in a named account, leaves
+ * that account for something, and that something is broken down. A
+ * two-column version drew a year as one undifferentiated pool, which is not
+ * how anybody holds money: "which account is this coming out of" is the
+ * question a cash flow is actually asked.
+ *
+ * Every account reconciles on its own, so the chart cannot show more leaving
+ * one than reached it. Where an account paid out more than it took in, the
+ * difference is drawn as its own source, because the money did come from
+ * somewhere — a balance carried in, or borrowing — and a chart that balanced
+ * by shrinking the spending would be lying about the part that matters.
+ *
+ * Rows with no account on them still work: they route through a single node
+ * named for the year, which is what the whole chart used to be. A month
+ * imported as a sheet total has nowhere else to go and should not vanish.
+ *
+ * ## The invested side
+ *
+ * A deposit into an investment account and a purchase inside it are two
+ * different events, and drawing both as outflows of the same account would be
+ * the same dollar twice. So they are drawn as what they are: a transfer moves
+ * money from one account to another, and a *buy* is how an investment account
+ * spends what it holds. The breakdown is then by asset class rather than by
+ * account, which is what a portfolio is actually divided into — the account is
+ * a container, and two of them holding the same fund is not a distinction
+ * worth a column.
+ *
+ * A sale is money arriving, so it is a source on the left beside the salary,
+ * exactly as a shortfall is. That is the only way a flow diagram can carry an
+ * outflow from a position: a ribbon cannot run backwards, and netting sales
+ * off the buys would leave a class that was sold down with a negative width
+ * and nothing to draw. It also makes a year that paid for itself by selling
+ * legible, which the previous version could not show at all.
+ *
+ * Dividends are deliberately *not* taken from the trade history. A dividend
+ * landing in a chequing account is already an income row under "Dividends",
+ * and the trade importer records the same payment against the holding, so
+ * counting both would inflate the year by every distribution twice.
+ *
+ * Where an investment account took money in and has no purchases to account
+ * for it, the remainder is "Not itemised" rather than "Kept". It is either
+ * cash sitting in the account or a purchase whose trade history was never
+ * imported, and those are not the same thing as money deliberately unspent.
+ */
+export interface YearFlowOptions {
+  accounts?: Pick<Account, "id" | "name" | "kind">[];
+  /** Positions, for the purchases and sales inside the invested accounts. */
+  holdings?: Pick<Holding, "accountId" | "assetClass" | "flows">[];
+  /** How many leaves a branch draws before the tail is pooled. */
+  limit?: number;
+  /** Which side of the necessity line a category falls, overrides included. */
+  spendGroup?: (category: string) => SpendGroup;
+}
+
 export function yearFlow(
   transactions: Transaction[],
   year: string,
-  accounts: Pick<Account, "id" | "name" | "kind">[] = [],
-  limit = 8,
-  spendGroup: (category: string) => SpendGroup = (c) => groupOf(c),
+  {
+    accounts = [],
+    holdings = [],
+    limit = 8,
+    spendGroup = (c) => groupOf(c),
+  }: YearFlowOptions = {},
 ): YearFlow {
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const TRUNK = year;
@@ -943,13 +977,8 @@ export function yearFlow(
   const spendTotals = new Map<string, number>();
   const investTotals = new Map<string, number>();
   const hubTotals = new Map<string, number>();
-  /*
-   * Every dollar leaving an account leaves it *for* something, and the purpose
-   * is a shorter list than the destinations. Carrying it on the row lets the
-   * chart put the split before the detail: how the year divided between
-   * spending and investing is one glance, and which categories and which
-   * accounts is the glance after it.
-   */
+  /** Accounts whose outflow is purchases rather than spending. */
+  const invested = new Set<string>();
   const rows: {
     from: string;
     to: string;
@@ -987,9 +1016,42 @@ export function yearFlow(
       const hub = hubOf(t.sourceAccountId);
       // A deposit from the invested account into itself is not a deposit.
       if (hub === dest.name) continue;
-      note(investTotals, dest.name, cents);
+      invested.add(dest.name);
       note(hubTotals, hub, cents);
-      rows.push({ from: hub, to: dest.name, cents, stage: 2, group: INVESTING });
+      note(hubTotals, dest.name, cents);
+      /*
+       * Account to account, with no purpose node between them. The deposit is
+       * not spending and it is not yet a purchase — it is the money moving to
+       * where the buying happens, and the buying is the next column.
+       */
+      rows.push({ from: hub, to: dest.name, cents, stage: 2, group: DEPOSIT });
+    }
+  }
+
+  /*
+   * The purchases and sales inside the accounts. A buy is how an investment
+   * account spends; a sale is money arriving in one.
+   */
+  const sold = new Map<string, number>();
+  for (const h of holdings) {
+    const hub = hubOf(h.accountId);
+    for (const f of h.flows ?? []) {
+      if (f.date.slice(0, 4) !== year) continue;
+      const cents = toCents(f.amount);
+      if (cents <= 0) continue;
+      if (f.kind === "buy") {
+        invested.add(hub);
+        note(investTotals, h.assetClass, cents);
+        note(hubTotals, hub, cents);
+        rows.push({ from: hub, to: h.assetClass, cents, stage: 2, group: BOUGHT });
+      } else if (f.kind === "sell") {
+        invested.add(hub);
+        note(incomeTotals, SOLD, cents);
+        note(hubTotals, hub, cents);
+        note(sold, hub, cents);
+        rows.push({ from: SOLD, to: hub, cents, stage: 1 });
+      }
+      // Dividends are income already, under their own category. See above.
     }
   }
 
@@ -1010,23 +1072,17 @@ export function yearFlow(
   };
   const sourceName = pool(incomeTotals, limit, "Other income");
   /*
-   * A pool per group, not one across both. Sharing it meant an investment
-   * account could be collapsed into "Other spending" and then hang off the
-   * investing branch under a spending label.
-   */
-  /*
-   * Only the investment side is pooled. The spending side is already three
-   * leaves at most -- what had to be paid, what was chosen, and what bought
-   * nothing -- which is the whole point of ending it there rather than in a
-   * column of categories that has to be read one label at a time.
+   * Neither the spending nor the invested side needs pooling in practice --
+   * three necessity groups and four asset classes -- but the tail is capped
+   * anyway so a future class or group cannot quietly widen the chart.
    */
   const leafName: Record<string, (name: string) => string> = {
-    [INVESTING]: pool(investTotals, limit, "Other investments"),
+    [BOUGHT]: pool(investTotals, limit, "Other assets"),
   };
   // The year node is the spine for account-less rows and never pools away.
   const hubName = (() => {
     const named = new Map([...hubTotals].filter(([k]) => k !== TRUNK));
-    const collapse = pool(named, 5, "Other accounts");
+    const collapse = pool(named, 6, "Other accounts");
     return (name: string) => (name === TRUNK ? TRUNK : collapse(name));
   })();
 
@@ -1042,7 +1098,21 @@ export function yearFlow(
   for (const r of rows) {
     if (r.stage === 1) {
       const to = hubName(r.to);
-      link(sourceName(r.from), to, r.cents);
+      link(r.from === SOLD ? SOLD : sourceName(r.from), to, r.cents);
+      note(inflow, to, r.cents);
+      continue;
+    }
+    const from = hubName(r.from);
+    if (r.group === DEPOSIT) {
+      /*
+       * One link, not two. A deposit lands in an account that is itself a
+       * column of this chart, so it needs no purpose node in between — and
+       * the receiving account's own inflow is what the purchases below it
+       * have to reconcile against.
+       */
+      const to = hubName(r.to);
+      link(from, to, r.cents);
+      note(outflow, from, r.cents);
       note(inflow, to, r.cents);
       continue;
     }
@@ -1052,8 +1122,7 @@ export function yearFlow(
      * both carry the same amount the account still balances exactly as it did
      * when it paid the destination directly.
      */
-    const from = hubName(r.from);
-    const group = r.group ?? SPEND_GROUP_LABELS.discretionary;
+    const group = r.group ?? SPENDING;
     const leaf = (leafName[group] ?? ((n: string) => n))(r.to);
     link(from, group, r.cents);
     link(group, leaf, r.cents);
@@ -1062,19 +1131,41 @@ export function yearFlow(
     note(outflow, from, r.cents);
   }
 
-  const hubs = [...new Set([...inflow.keys(), ...outflow.keys()])].sort(
-    (a, b) =>
-      (inflow.get(b) ?? 0) + (outflow.get(b) ?? 0) -
-        ((inflow.get(a) ?? 0) + (outflow.get(a) ?? 0)) || a.localeCompare(b),
-  );
+  const hubs = [...new Set([...inflow.keys(), ...outflow.keys()])]
+    .filter((n) => n !== SOLD)
+    .sort(
+      (a, b) =>
+        (inflow.get(b) ?? 0) + (outflow.get(b) ?? 0) -
+          ((inflow.get(a) ?? 0) + (outflow.get(a) ?? 0)) || a.localeCompare(b),
+    );
 
+  /*
+   * An account is the invested kind or it is not; whether it happened to
+   * receive a transfer this year does not change what it is. Deciding by the
+   * transfer left a pension that was paid into directly reading as a chequing
+   * account, so its contributions came out as money deliberately unspent.
+   */
+  const investedHubs = new Set(
+    [
+      ...invested,
+      ...accounts.filter((a) => INVESTED_KINDS.has(a.kind)).map((a) => a.name),
+    ]
+      .map((n) => hubName(n))
+      .filter((n) => hubs.includes(n)),
+  );
   const shortfall = new Map<string, number>();
-  let kept = 0;
+  const spare = new Map<string, number>();
   for (const hub of hubs) {
     const gap = (outflow.get(hub) ?? 0) - (inflow.get(hub) ?? 0);
     if (gap > 0) shortfall.set(hub, gap);
-    else kept -= gap;
+    else if (gap < 0) spare.set(hub, -gap);
   }
+  const kept = [...spare]
+    .filter(([h]) => !investedHubs.has(h))
+    .reduce((a, [, v]) => a + v, 0);
+  const unitemised = [...spare]
+    .filter(([h]) => investedHubs.has(h))
+    .reduce((a, [, v]) => a + v, 0);
 
   const nodes: FlowNode[] = [];
   const index = new Map<string, number>();
@@ -1085,23 +1176,23 @@ export function yearFlow(
     index.set(name, next);
     return next;
   };
-  /** A leaf is whatever its branch is: a necessity, a choice, a deposit. */
+  /** A leaf is whatever its branch is: a necessity, a choice, an asset. */
   const roleOfLeaf = new Map<string, FlowNode["role"]>();
 
   /*
-   * Nodes in reading order — sources, then hubs, then uses — so the layout has
-   * no reason to cross ribbons that need not cross.
+   * Nodes in reading order — sources, then hubs, then what the money was for,
+   * then the detail — so the layout has no reason to cross ribbons that need
+   * not cross.
    */
   const links: FlowLink[] = [];
   const edgeList = [...edges].map(([k, v]) => {
     const [from, to] = k.split("\u0000");
     return { from, to, cents: v };
   });
-  for (const e of edgeList) if (hubs.includes(e.to)) id(e.from, "source");
+  for (const e of edgeList) if (hubs.includes(e.to) && !hubs.includes(e.from)) id(e.from, "source");
   if (shortfall.size > 0) id("From savings", "source");
-  for (const hub of hubs) id(hub, "account");
-  const groupOrder = [SPENDING, INVESTING];
-  for (const g of groupOrder) if (groups.has(g)) id(g, GROUP_ROLE[g]);
+  for (const hub of hubs) id(hub, investedHubs.has(hub) ? "investing" : "account");
+  for (const g of [SPENDING, BOUGHT]) if (groups.has(g)) id(g, GROUP_ROLE[g]);
   for (const e of edgeList) {
     if (groups.has(e.from) && leaves.has(e.to)) {
       roleOfLeaf.set(e.to, LEAF_ROLE[e.to] ?? GROUP_ROLE[e.from]);
@@ -1109,6 +1200,7 @@ export function yearFlow(
   }
   for (const e of edgeList) if (leaves.has(e.to)) id(e.to, roleOfLeaf.get(e.to));
   if (kept > 0) id("Kept", "kept");
+  if (unitemised > 0) id(UNITEMISED, "idle");
 
   for (const e of edgeList) {
     links.push({ source: id(e.from), target: id(e.to), value: fromCents(e.cents) });
@@ -1116,11 +1208,9 @@ export function yearFlow(
   for (const [hub, gap] of shortfall) {
     links.push({ source: id("From savings"), target: id(hub), value: fromCents(gap) });
   }
-  if (kept > 0) {
-    for (const hub of hubs) {
-      const spare = (inflow.get(hub) ?? 0) - (outflow.get(hub) ?? 0);
-      if (spare > 0) links.push({ source: id(hub), target: id("Kept"), value: fromCents(spare) });
-    }
+  for (const [hub, left] of spare) {
+    const target = investedHubs.has(hub) ? UNITEMISED : "Kept";
+    links.push({ source: id(hub), target: id(target), value: fromCents(left) });
   }
 
   return { nodes, links };

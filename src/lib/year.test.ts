@@ -721,7 +721,7 @@ describe("the year as one flow", () => {
   });
 
   test("sources past the limit are pooled rather than dropped", () => {
-    const f = yearFlow(txns, "2026", [], 1);
+    const f = yearFlow(txns, "2026", { limit: 1 });
     assert.equal(Math.round(into(f, "2026")), 65000);
     assert.ok(f.nodes.some((n) => n.name === "Other income"));
   });
@@ -767,22 +767,22 @@ describe("the flow through the accounts", () => {
     f.links.filter((l) => f.nodes[l.source].name === name).reduce((a, l) => a + l.value, 0);
 
   test("income lands in the account it was paid into", () => {
-    const f = yearFlow(rows, "2026", accounts);
+    const f = yearFlow(rows, "2026", { accounts });
     assert.equal(into(f, "Chequing"), 60000);
   });
 
   test("an account cannot pay out more than reached it", () => {
-    const f = yearFlow(rows, "2026", accounts);
+    const f = yearFlow(rows, "2026", { accounts });
     assert.equal(into(f, "Chequing"), outOf(f, "Chequing"));
   });
 
   test("a deposit into an invested account is drawn as a destination", () => {
-    const f = yearFlow(rows, "2026", accounts);
+    const f = yearFlow(rows, "2026", { accounts });
     assert.equal(into(f, "Portfolio"), 15000);
   });
 
   test("what the account did not pay out is still kept", () => {
-    const f = yearFlow(rows, "2026", accounts);
+    const f = yearFlow(rows, "2026", { accounts });
     assert.equal(into(f, "Kept"), 25000);
   });
 
@@ -790,19 +790,19 @@ describe("the flow through the accounts", () => {
     const cash = [...accounts, { id: "a-sav", name: "Savings", kind: "savings" as const }];
     const shuffled = [...rows, at("2026-05-31", "transfer", 5000, "Transfer", "a-chq", "a-sav")];
     assert.equal(
-      into(yearFlow(shuffled, "2026", cash), "Chequing"),
-      into(yearFlow(rows, "2026", cash), "Chequing"),
+      into(yearFlow(shuffled, "2026", { accounts: cash }), "Chequing"),
+      into(yearFlow(rows, "2026", { accounts: cash }), "Chequing"),
     );
   });
 
   test("spending from an account income never reached says where it came from", () => {
-    const f = yearFlow([at("2026-02-28", "expense", 9000, "Groceries", "a-chq")], "2026", accounts);
+    const f = yearFlow([at("2026-02-28", "expense", 9000, "Groceries", "a-chq")], "2026", { accounts });
     assert.equal(outOf(f, "From savings"), 9000);
     assert.equal(f.nodes.some((n) => n.name === "Kept"), false);
   });
 
   test("a row naming no account still routes through the year", () => {
-    const f = yearFlow([...rows, txn("2026-06-30", "expense", 4000, "Travel")], "2026", accounts);
+    const f = yearFlow([...rows, txn("2026-06-30", "expense", 4000, "Travel")], "2026", { accounts });
     assert.equal(outOf(f, "2026"), 4000);
   });
 });
@@ -837,7 +837,7 @@ describe("what the money left an account for", () => {
     at("2026-03-31", "expense", 5000, "Travel", "a-chq"),
     at("2026-04-30", "transfer", 15000, "Transfer", "a-chq", "a-inv"),
   ];
-  const f = yearFlow(rows, "2026", accounts);
+  const f = yearFlow(rows, "2026", { accounts });
   const into = (name: string) =>
     f.links.filter((l) => f.nodes[l.target].name === name).reduce((a, l) => a + l.value, 0);
   const outOf = (name: string) =>
@@ -863,7 +863,7 @@ describe("what the money left an account for", () => {
         at("2026-02-28", "expense", 7000, "Debt Repayment", "a-chq"),
       ],
       "2026",
-      accounts,
+      { accounts },
     );
     const e = (from: string, to: string) =>
       d.links
@@ -875,9 +875,10 @@ describe("what the money left an account for", () => {
   });
 
   test("an override moves a category to the other branch", () => {
-    const o = yearFlow(rows, "2026", accounts, 8, (c) =>
-      c === "Travel" ? "necessity" : groupOf(c),
-    );
+    const o = yearFlow(rows, "2026", {
+      accounts,
+      spendGroup: (c) => (c === "Travel" ? "necessity" : groupOf(c)),
+    });
     const e = (from: string, to: string) =>
       o.links
         .filter((l) => o.nodes[l.source].name === from && o.nodes[l.target].name === to)
@@ -890,18 +891,18 @@ describe("what the money left an account for", () => {
     const role = (n: string) => f.nodes.find((x) => x.name === n)?.role;
     assert.equal(role("Salary"), "source");
     assert.equal(role("Chequing"), "account");
-    assert.equal(role("Investing"), "investing");
     assert.equal(role("Kept"), "kept");
     // Each end of the spending branch is its own colour.
     assert.equal(role("Necessity"), "necessity");
     assert.equal(role("Discretionary"), "discretionary");
-    // An investment leaf belongs to the branch that fed it.
+    // An account that buys things reads as the invested side, not as cash.
     assert.equal(role("Portfolio"), "investing");
   });
 
-  test("investing is its own branch, not a spending category", () => {
-    assert.equal(edge("Chequing", "Investing"), 15000);
-    assert.equal(edge("Investing", "Portfolio"), 15000);
+  test("a deposit goes straight to the account, with no purpose between", () => {
+    // A transfer is not spending and not yet a purchase; it is the money
+    // moving to where the buying happens.
+    assert.equal(edge("Chequing", "Portfolio"), 15000);
     assert.equal(edge("Spending", "Portfolio"), 0);
   });
 
@@ -918,24 +919,184 @@ describe("what the money left an account for", () => {
     assert.equal(outOf("Kept"), 0);
   });
 
-  test("an investment account is pooled as an investment, never as spending", () => {
-    const many = [
-      at("2026-01-31", "income", 900000, "Salary", undefined, "a-chq"),
-      ...Array.from({ length: 12 }, (_, i) =>
-        at(`2026-02-${String(i + 1).padStart(2, "0")}`, "transfer", 1000 * (12 - i), "Transfer", "a-chq", `a-${i}`),
-      ),
-    ];
-    const lots = [
-      ...accounts,
-      ...Array.from({ length: 12 }, (_, i) => ({
-        id: `a-${i}`,
-        name: `Fund ${i}`,
-        kind: "investment" as const,
-      })),
-    ];
-    const g = yearFlow(many, "2026", lots);
-    const pooled = g.nodes.find((n) => n.name === "Other investments");
-    assert.ok(pooled, "the tail past the limit is pooled as investments");
-    assert.equal(g.nodes.some((n) => n.name === "Other spending"), false);
+  test("an account that took money in but bought nothing is not called kept", () => {
+    // Either cash sitting there or purchases whose trades were never
+    // imported. Neither is money deliberately unspent.
+    assert.equal(into("Not itemised"), 15000);
+    assert.equal(into("Kept"), 20000);
+  });
+});
+
+/*
+ * The invested side. A deposit into an account and a purchase inside it are
+ * two different events, and a sale is money arriving rather than a ribbon
+ * running backwards.
+ */
+describe("what the money bought", () => {
+  const accounts = [
+    { id: "a-chq", name: "Chequing", kind: "checking" as const },
+    { id: "a-rrsp", name: "RRSP", kind: "investment" as const },
+  ];
+  const at = (
+    date: string,
+    type: "income" | "expense" | "transfer",
+    amount: number,
+    category: string,
+    from?: string,
+    to?: string,
+  ) =>
+    ({
+      ...txn(date, type === "transfer" ? "expense" : type, amount, category),
+      type,
+      sourceAccountId: from,
+      destinationAccountId: to,
+    }) as unknown as Transaction;
+
+  const holding = (
+    assetClass: "US Equity" | "Bonds",
+    flows: { date: string; kind: "buy" | "sell" | "dividend"; amount: number }[],
+    accountId = "a-rrsp",
+  ) =>
+    ({
+      accountId,
+      assetClass,
+      flows: flows.map((f) => ({ ...f, shares: f.kind === "sell" ? -1 : 1 })),
+    }) as unknown as Parameters<typeof yearFlow>[2] extends { holdings?: infer H }
+      ? H extends (infer E)[]
+        ? E
+        : never
+      : never;
+
+  const base = [
+    at("2026-01-31", "income", 90000, "Salary", undefined, "a-chq"),
+    at("2026-02-15", "transfer", 30000, "Transfer", "a-chq", "a-rrsp"),
+  ];
+  const holdings = [
+    holding("US Equity", [{ date: "2026-03-01", kind: "buy", amount: 20000 }]),
+    holding("Bonds", [{ date: "2026-03-02", kind: "buy", amount: 10000 }]),
+  ];
+  const f = yearFlow(base, "2026", { accounts, holdings });
+  const edge = (from: string, to: string) =>
+    f.links
+      .filter((l) => f.nodes[l.source].name === from && f.nodes[l.target].name === to)
+      .reduce((a, l) => a + l.value, 0);
+  const into = (g: ReturnType<typeof yearFlow>, name: string) =>
+    g.links.filter((l) => g.nodes[l.target].name === name).reduce((a, l) => a + l.value, 0);
+  const outOf = (g: ReturnType<typeof yearFlow>, name: string) =>
+    g.links.filter((l) => g.nodes[l.source].name === name).reduce((a, l) => a + l.value, 0);
+
+  test("purchases break down by asset class, not by account", () => {
+    assert.equal(edge("RRSP", "Bought"), 30000);
+    assert.equal(edge("Bought", "US Equity"), 20000);
+    assert.equal(edge("Bought", "Bonds"), 10000);
+  });
+
+  test("the account it was bought in still balances", () => {
+    assert.equal(into(f, "RRSP"), 30000);
+    assert.equal(outOf(f, "RRSP"), 30000);
+  });
+
+  test("a deposit and the purchase it funded are not the same dollar twice", () => {
+    // 90k in, 30k moved on, 60k kept — and the 30k leaves the chequing
+    // account once, then leaves the RRSP once as what it bought.
+    assert.equal(edge("Chequing", "RRSP"), 30000);
+    assert.equal(into(f, "Kept"), 60000);
+    assert.equal(into(f, "Chequing"), outOf(f, "Chequing"));
+    // The year's outflows do not include the deposit twice.
+    assert.equal(edge("Chequing", "Bought"), 0);
+  });
+
+  test("a sale is a source, because a ribbon cannot run backwards", () => {
+    const sold = yearFlow(base, "2026", {
+      accounts,
+      holdings: [
+        holding("US Equity", [
+          { date: "2026-03-01", kind: "buy", amount: 50000 },
+          { date: "2026-06-01", kind: "sell", amount: 20000 },
+        ]),
+      ],
+    });
+    assert.equal(outOf(sold, "Sold investments"), 20000);
+    assert.equal(into(sold, "RRSP"), 50000);
+    assert.equal(outOf(sold, "RRSP"), 50000);
+    // Netted instead, the class would be 30k and the sale invisible.
+    assert.equal(into(sold, "US Equity"), 50000);
+  });
+
+  test("a dividend is not taken from the trade history", () => {
+    // It is already an income row under its own category; counting the
+    // holding's copy as well would inflate the year by every distribution.
+    const div = yearFlow(base, "2026", {
+      accounts,
+      holdings: [
+        holding("US Equity", [
+          { date: "2026-03-01", kind: "buy", amount: 30000 },
+          { date: "2026-05-01", kind: "dividend", amount: 4000 },
+        ]),
+      ],
+    });
+    assert.equal(into(div, "RRSP"), 30000);
+    assert.equal(div.nodes.some((n) => n.name === "Dividends"), false);
+  });
+
+  test("buying more than was deposited says where the rest came from", () => {
+    const over = yearFlow(base, "2026", {
+      accounts,
+      holdings: [holding("Bonds", [{ date: "2026-04-01", kind: "buy", amount: 45000 }])],
+    });
+    assert.equal(outOf(over, "From savings"), 15000);
+    assert.equal(into(over, "RRSP"), 45000);
+  });
+
+  test("an asset class carries the colour of the branch that bought it", () => {
+    const role = (n: string) => f.nodes.find((x) => x.name === n)?.role;
+    assert.equal(role("US Equity"), "investing");
+    assert.equal(role("Bonds"), "investing");
+    assert.equal(role("RRSP"), "investing");
+    assert.equal(role("Chequing"), "account");
+    assert.equal(role("Salary"), "source");
+  });
+
+  test("a flow outside the year is not this year's", () => {
+    const last = yearFlow(base, "2026", {
+      accounts,
+      holdings: [holding("Bonds", [{ date: "2025-04-01", kind: "buy", amount: 45000 }])],
+    });
+    assert.equal(last.nodes.some((n) => n.name === "Bonds"), false);
+  });
+});
+
+/*
+ * An account is the invested kind or it is not. Deciding by whether a
+ * transfer happened to arrive this year read a pension paid into directly as
+ * a chequing account, so its contributions came out as money left unspent.
+ */
+describe("an account is invested by what it is", () => {
+  const accounts = [
+    { id: "a-pen", name: "Pension Plan", kind: "pension" as const },
+    { id: "a-chq", name: "Chequing", kind: "checking" as const },
+  ];
+  const rows = [
+    {
+      ...txn("2026-01-31", "income", 12000, "RSP / Pension"),
+      destinationAccountId: "a-pen",
+    } as unknown as Transaction,
+    {
+      ...txn("2026-01-31", "income", 40000, "Salary"),
+      destinationAccountId: "a-chq",
+    } as unknown as Transaction,
+  ];
+  const f = yearFlow(rows, "2026", { accounts });
+  const into = (name: string) =>
+    f.links.filter((l) => f.nodes[l.target].name === name).reduce((a, l) => a + l.value, 0);
+
+  test("a pension paid into directly is not cash left unspent", () => {
+    assert.equal(into("Not itemised"), 12000);
+    assert.equal(into("Kept"), 40000);
+  });
+
+  test("and it reads as the invested side", () => {
+    assert.equal(f.nodes.find((n) => n.name === "Pension Plan")?.role, "investing");
+    assert.equal(f.nodes.find((n) => n.name === "Chequing")?.role, "account");
   });
 });

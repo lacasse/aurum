@@ -1298,6 +1298,7 @@ const FLOW_TONE: Record<string, AccentName> = {
   debt: "pension",
   investing: "market",
   kept: "bonds",
+  idle: "passive",
 };
 
 export function YearSankey({
