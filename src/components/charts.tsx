@@ -1259,21 +1259,21 @@ export function AllocationBar({
 /* ---------------- Sankey ---------------- */
 
 /**
- * A year's whole cash flow: where every dollar came from, and where it went.
+ * A year's whole cash flow: where every dollar came from, which account it
+ * landed in, and where it went from there.
  *
- * The one chart on the page that shows both halves at full detail at once.
+ * The one chart on the page that shows every part at full detail at once.
  * Everything else answers a question about the year; this is the year.
  *
- * Node colour carries the direction — arriving, the trunk, leaving, kept —
- * because a Sankey read without it is a tangle of equally-weighted ribbons,
- * and which side of the trunk a band sits on is the first thing anyone needs
- * to know.
+ * Node colour carries the role — arriving, held, leaving, kept — because a
+ * Sankey read without it is a tangle of equally-weighted ribbons, and where in
+ * the run a band sits is the first thing anyone needs to know.
  */
 export function YearSankey({
   nodes,
   links,
   format,
-  height = 460,
+  height = 560,
 }: {
   nodes: { name: string }[];
   links: { source: number; target: number; value: number }[];
@@ -1282,12 +1282,30 @@ export function YearSankey({
 }) {
   if (nodes.length === 0 || links.length === 0) return null;
 
-  const trunk = links.find((l) => links.some((o) => o.source === l.target))?.target ?? -1;
-  const incoming = new Set(links.filter((l) => l.target === trunk).map((l) => l.source));
+  /*
+   * Depth decides both the colour and which side the label sits on, because
+   * the chart now has a middle rather than a trunk. Colouring by "is anything
+   * pointing at this" worked while there was exactly one column between the
+   * two ends; with accounts in the middle, an account that received income and
+   * an account that paid a bill are the same kind of thing and have to read
+   * that way.
+   */
+  const depth = nodes.map(() => 0);
+  for (let pass = 0; pass < nodes.length; pass++) {
+    let moved = false;
+    for (const l of links) {
+      if (depth[l.target] < depth[l.source] + 1) {
+        depth[l.target] = depth[l.source] + 1;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  const last = Math.max(...depth);
 
   const colourOf = (index: number) => {
-    if (index === trunk) return accent("brand");
-    if (incoming.has(index)) return accent("positive");
+    if (depth[index] === 0) return accent("positive");
+    if (depth[index] < last) return accent("brand");
     return nodes[index]?.name === "Kept" ? accent("market") : accent("negative");
   };
 
@@ -1296,9 +1314,9 @@ export function YearSankey({
       <ResponsiveContainer>
         <Sankey
           data={{ nodes, links }}
-          nodePadding={18}
+          nodePadding={30}
           nodeWidth={12}
-          margin={{ top: 8, right: 132, bottom: 8, left: 108 }}
+          margin={{ top: 26, right: 132, bottom: 8, left: 108 }}
           link={{ stroke: "var(--line)", strokeOpacity: 0.28, fill: "var(--ink-faint)", fillOpacity: 0.14 }}
           node={(props: unknown) => {
             const { x, y, width, height: h, index, payload } = props as {
@@ -1312,14 +1330,23 @@ export function YearSankey({
              * over it is unreadable at exactly the sizes where the reader most
              * needs to know what it is.
              */
-            const left = incoming.has(index);
+            const d = depth[index] ?? 0;
+            const middle = d > 0 && d < last;
+            /*
+             * The middle column is labelled above its bar rather than beside
+             * it. Either side of an account is a ribbon, so a label placed
+             * there lands on top of the very flow it names.
+             */
+            const tx = middle ? x + width / 2 : d === 0 ? x - 8 : x + width + 8;
+            const anchor = middle ? "middle" : d === 0 ? "end" : "start";
+            const ty = middle ? y - 16 : y + h / 2;
             return (
               <Layer key={index}>
                 <Rectangle x={x} y={y} width={width} height={h} fill={colour} radius={2} />
                 <text
-                  x={left ? x - 8 : x + width + 8}
-                  y={y + h / 2}
-                  textAnchor={left ? "end" : "start"}
+                  x={tx}
+                  y={ty}
+                  textAnchor={anchor}
                   dominantBaseline="middle"
                   fontSize={11}
                   fill="var(--ink-dim)"
@@ -1327,9 +1354,9 @@ export function YearSankey({
                   {payload.name}
                 </text>
                 <text
-                  x={left ? x - 8 : x + width + 8}
-                  y={y + h / 2 + 12}
-                  textAnchor={left ? "end" : "start"}
+                  x={tx}
+                  y={ty + 12}
+                  textAnchor={anchor}
                   dominantBaseline="middle"
                   fontSize={10}
                   fill="var(--ink-faint)"

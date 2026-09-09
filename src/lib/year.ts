@@ -1,5 +1,6 @@
 import { NON_SPENDABLE_INCOME, chainedReturns, isIncome } from "./analytics";
 import type { ClassPoint, NetWorthPoint, PortfolioPoint } from "./analytics";
+import type { Account, AccountKind } from "./types";
 import { Transaction } from "./types";
 import { fromCents, roundMoney, toCents } from "./money";
 import { labelMonth } from "./format";
@@ -858,73 +859,168 @@ export interface YearFlow {
 /**
  * Every dollar of a year, from where it came to where it went.
  *
- * Sources on the left, a single trunk in the middle, destinations on the
- * right. The trunk is the point: it forces the two halves to reconcile, so
- * the chart cannot show more leaving than arrived, and a year that overspent
- * has to say so rather than quietly widening.
+ * Four columns, and the middle one is the point. Income arrives on the left,
+ * lands in a named account, and leaves that account again — as spending, as a
+ * deposit into something invested, or not at all. A two-column version drew a
+ * year as one undifferentiated pool, which is not how anybody holds money: the
+ * question "which account is this coming out of" is the one a cash flow is
+ * actually asked, and the middle column is the only place it can be answered.
  *
- * Only income and spending. Transfers are excluded because moving money
- * between your own accounts is not a flow through the year — drawing it would
- * count the same dollar twice, once arriving in the account it left and once
- * in the one it reached, and inflate both halves by however often money was
- * shuffled.
- *
- * A year that spent more than it earned draws the shortfall as its own source,
- * because the money did come from somewhere — savings, or borrowing — and a
+ * Each account forces its own halves to reconcile, so the chart cannot show
+ * more leaving an account than reached it. Where an account paid out more than
+ * it took in that year, the difference is drawn as its own source, because the
+ * money did come from somewhere — a balance carried in, or borrowing — and a
  * chart that balanced by shrinking the spending would be lying about the part
  * that matters.
+ *
+ * Rows with no account on them still work: they route through a single node
+ * named for the year, which is what the whole chart used to be. A month
+ * imported as a sheet total has nowhere else to go, and it should not vanish.
+ *
+ * Transfers appear only where they leave the cash side for the invested side.
+ * That is a real destination for a year's money, and drawing it costs nothing
+ * because the deposit is only ever counted once — on the way out of the
+ * account income landed in. Every other transfer is still excluded: shuffling
+ * money between two chequing accounts is not a flow through the year, and
+ * counting it would inflate both halves by however often it was moved.
  */
+const INVESTED_KINDS = new Set<AccountKind>(["investment", "crypto", "pension"]);
+
 export function yearFlow(
   transactions: Transaction[],
   year: string,
-  limit = 9,
+  accounts: Pick<Account, "id" | "name" | "kind">[] = [],
+  limit = 8,
 ): YearFlow {
-  const income = new Map<string, number>();
-  const spend = new Map<string, number>();
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const TRUNK = year;
+
+  /** The account a row touched, or the year itself when it names none. */
+  const hubOf = (id: string | undefined) => byId.get(id ?? "")?.name ?? TRUNK;
+
+  const incomeTotals = new Map<string, number>();
+  const spendTotals = new Map<string, number>();
+  const hubTotals = new Map<string, number>();
+  const rows: { from: string; to: string; cents: number; stage: 1 | 2 }[] = [];
+
+  const note = (m: Map<string, number>, k: string, v: number) =>
+    m.set(k, (m.get(k) ?? 0) + v);
 
   for (const t of transactions) {
     if (t.date.slice(0, 4) !== year) continue;
     const cents = toCents(t.amount);
-    if (isIncome(t)) income.set(t.category, (income.get(t.category) ?? 0) + cents);
-    else if (t.type === "expense") spend.set(t.category, (spend.get(t.category) ?? 0) + cents);
+    if (cents <= 0) continue;
+    if (isIncome(t)) {
+      const hub = hubOf(t.destinationAccountId);
+      note(incomeTotals, t.category, cents);
+      note(hubTotals, hub, cents);
+      rows.push({ from: t.category, to: hub, cents, stage: 1 });
+    } else if (t.type === "expense") {
+      const hub = hubOf(t.sourceAccountId);
+      note(spendTotals, t.category, cents);
+      note(hubTotals, hub, cents);
+      rows.push({ from: hub, to: t.category, cents, stage: 2 });
+    } else if (t.type === "transfer") {
+      const dest = byId.get(t.destinationAccountId ?? "");
+      if (!dest || !INVESTED_KINDS.has(dest.kind)) continue;
+      const hub = hubOf(t.sourceAccountId);
+      // A deposit from the invested account into itself is not a deposit.
+      if (hub === dest.name) continue;
+      note(spendTotals, dest.name, cents);
+      note(hubTotals, hub, cents);
+      rows.push({ from: hub, to: dest.name, cents, stage: 2 });
+    }
   }
 
-  const trim = (m: Map<string, number>) => {
-    const ranked = [...m.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-    const kept = ranked.slice(0, limit);
-    const rest = ranked.slice(limit).reduce((a, [, v]) => a + v, 0);
-    return rest > 0 ? [...kept, ["Other" as string, rest] as [string, number]] : kept;
+  if (rows.length === 0) return { nodes: [], links: [] };
+
+  /*
+   * Past the limit, pooled rather than dropped. A chart that quietly omits the
+   * long tail no longer adds up, and the whole value of a Sankey is that it
+   * does. The hubs get a smaller allowance than the categories because they
+   * are the spine: a dozen of them is a tangle, not a middle.
+   */
+  const pool = (totals: Map<string, number>, keep: number, other: string) => {
+    const ranked = [...totals.entries()]
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const kept = new Set(ranked.slice(0, keep).map(([k]) => k));
+    return (name: string) => (kept.has(name) ? name : other);
   };
+  const sourceName = pool(incomeTotals, limit, "Other income");
+  const useName = pool(spendTotals, limit, "Other spending");
+  // The year node is the spine for account-less rows and never pools away.
+  const hubName = (() => {
+    const named = new Map([...hubTotals].filter(([k]) => k !== TRUNK));
+    const collapse = pool(named, 5, "Other accounts");
+    return (name: string) => (name === TRUNK ? TRUNK : collapse(name));
+  })();
 
-  const sources = trim(income);
-  const uses = trim(spend);
-  const earned = sources.reduce((a, [, v]) => a + v, 0);
-  const spent = uses.reduce((a, [, v]) => a + v, 0);
+  const edges = new Map<string, number>();
+  const inflow = new Map<string, number>();
+  const outflow = new Map<string, number>();
+  for (const r of rows) {
+    const from = r.stage === 1 ? sourceName(r.from) : hubName(r.from);
+    const to = r.stage === 1 ? hubName(r.to) : useName(r.to);
+    if (from === to) continue;
+    edges.set(`${from}\u0000${to}`, (edges.get(`${from}\u0000${to}`) ?? 0) + r.cents);
+    if (r.stage === 1) note(inflow, to, r.cents);
+    else note(outflow, from, r.cents);
+  }
 
-  if (earned === 0 && spent === 0) return { nodes: [], links: [] };
+  const hubs = [...new Set([...inflow.keys(), ...outflow.keys()])].sort(
+    (a, b) =>
+      (inflow.get(b) ?? 0) + (outflow.get(b) ?? 0) -
+        ((inflow.get(a) ?? 0) + (outflow.get(a) ?? 0)) || a.localeCompare(b),
+  );
+
+  const shortfall = new Map<string, number>();
+  let kept = 0;
+  for (const hub of hubs) {
+    const gap = (outflow.get(hub) ?? 0) - (inflow.get(hub) ?? 0);
+    if (gap > 0) shortfall.set(hub, gap);
+    else kept -= gap;
+  }
 
   const nodes: FlowNode[] = [];
+  const index = new Map<string, number>();
+  const id = (name: string) => {
+    const existing = index.get(name);
+    if (existing !== undefined) return existing;
+    const next = nodes.push({ name }) - 1;
+    index.set(name, next);
+    return next;
+  };
+
+  /*
+   * Nodes in reading order — sources, then hubs, then uses — so the layout has
+   * no reason to cross ribbons that need not cross.
+   */
   const links: FlowLink[] = [];
-  const add = (name: string) => nodes.push({ name }) - 1;
+  const edgeList = [...edges].map(([k, v]) => {
+    const [from, to] = k.split("\u0000");
+    return { from, to, cents: v };
+  });
+  for (const e of edgeList) if (hubs.includes(e.to)) id(e.from);
+  if (shortfall.size > 0) id("From savings");
+  for (const hub of hubs) id(hub);
+  for (const e of edgeList) if (!hubs.includes(e.to)) id(e.to);
+  if (kept > 0) id("Kept");
 
-  const shortfall = Math.max(0, spent - earned);
-  const trunk = earned + shortfall;
-
-  const sourceIds = sources.map(([name]) => add(name));
-  const shortfallId = shortfall > 0 ? add("From savings") : -1;
-  const trunkId = add(`${year}`);
-  const useIds = uses.map(([name]) => add(name));
-  const keptId = trunk > spent ? add("Kept") : -1;
-
-  sources.forEach(([, v], i) => links.push({ source: sourceIds[i], target: trunkId, value: fromCents(v) }));
-  if (shortfallId >= 0) {
-    links.push({ source: shortfallId, target: trunkId, value: fromCents(shortfall) });
+  for (const e of edgeList) {
+    links.push({ source: id(e.from), target: id(e.to), value: fromCents(e.cents) });
   }
-  uses.forEach(([, v], i) => links.push({ source: trunkId, target: useIds[i], value: fromCents(v) }));
-  if (keptId >= 0) {
-    links.push({ source: trunkId, target: keptId, value: fromCents(trunk - spent) });
+  for (const [hub, gap] of shortfall) {
+    links.push({ source: id("From savings"), target: id(hub), value: fromCents(gap) });
+  }
+  if (kept > 0) {
+    for (const hub of hubs) {
+      const spare = (inflow.get(hub) ?? 0) - (outflow.get(hub) ?? 0);
+      if (spare > 0) links.push({ source: id(hub), target: id("Kept"), value: fromCents(spare) });
+    }
   }
 
   return { nodes, links };
 }
+
 

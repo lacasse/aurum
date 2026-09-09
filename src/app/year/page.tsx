@@ -225,7 +225,7 @@ export default function YearPage() {
   const typeLast = typeRow
     ? { ...incomeTypeAmounts(transactions, selected.year), shares: typeRow }
     : null;
-  const flow = yearFlow(transactions, selected.year);
+  const flow = yearFlow(transactions, selected.year, accounts);
   const unearned = unearnedShare(transactions, selected.year);
   const balanceBars = data.shapes.map((sh) => ({
     label: sh.year,
@@ -552,16 +552,16 @@ export default function YearPage() {
         </div>
 
         {/*
-          * The year itself, rather than a question about it. Sources on the
-          * left, one trunk, destinations on the right — and the trunk forces
-          * the halves to reconcile, so the chart cannot show more leaving than
-          * arrived.
+          * The year itself, rather than a question about it. Income on the
+          * left, the accounts it landed in down the middle, and everything it
+          * left for on the right — with each account forced to reconcile, so
+          * the chart cannot show more leaving one than reached it.
           */}
         {flow.nodes.length > 0 && (
           <Card>
             <CardHeader
               title={`Every dollar of ${selected.year}`}
-              subtitle="Where the money came from, and where it went"
+              subtitle="Where the money came from, where it landed, and where it went"
             />
             <div className="px-3 pb-4">
               <YearSankey
@@ -571,10 +571,13 @@ export default function YearPage() {
               />
             </div>
             <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
-              Income and spending only. Transfers between your own accounts are
-              left out — the same dollar would be counted twice, once leaving an
-              account and once arriving in another, and both halves would grow
-              with however often money was moved.
+              The middle column is the account the money landed in, and each one
+              balances on its own. Deposits into an investment, crypto or pension
+              account are shown as a destination; transfers between two cash
+              accounts are not, because the same dollar would be counted twice
+              and both halves would grow with however often money was moved.
+              Anything that left an account income never reached that year comes
+              in as “From savings”.
             </p>
           </Card>
         )}
