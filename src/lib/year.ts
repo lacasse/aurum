@@ -745,33 +745,25 @@ export function unearnedShare(
   return total > 0 ? (unearned / total) * 100 : null;
 }
 
-/* ── How long the cash would last ── */
-
-export interface RunwayPoint {
-  label: string;
-  /** Months of necessary spending covered by cash, or null without either. */
-  months: number | null;
-}
-
 /**
- * Months of necessities the cash on hand would cover, at each year end.
+ * The same mix as shares of each year rather than as amounts.
  *
- * Against necessities rather than all spending: the question a reserve answers
- * is how long you could go without income, and in that year the discretionary
- * half is the first thing to stop. Measuring against total spending understates
- * the reserve by pricing in choices nobody would keep making.
+ * Two different questions, and the amounts answer the wrong one. A salary that
+ * rises every year makes every other source shrink on a chart of dollars, even
+ * as those sources grow — the wage simply out-scales them. Normalising each
+ * year to its own total asks what the income was *made of*, which is the thing
+ * that changes slowly and matters.
+ *
+ * A year with no income keeps its row at zero rather than being dropped, so
+ * the run of years stays unbroken and a gap reads as a gap.
  */
-export function runwayByYear(
-  shapes: readonly YearShape[],
-  transactions: Transaction[],
-  groupOf: (category: string) => "necessity" | "discretionary" | "excluded",
-): RunwayPoint[] {
-  return shapes.map((shape) => {
-    const { necessities } = incomeAllocation(transactions, shape.year, groupOf);
-    const monthly = necessities / 12;
-    return {
-      label: shape.year,
-      months: monthly > 0 && shape.cash > 0 ? Math.round((shape.cash / monthly) * 10) / 10 : null,
-    };
+export function incomeMixShares(mix: IncomeMix): Record<string, string | number>[] {
+  return mix.rows.map((row) => {
+    const total = mix.sources.reduce((sum, s) => sum + (Number(row[s]) || 0), 0);
+    const out: Record<string, string | number> = { label: row.label };
+    for (const source of mix.sources) {
+      out[source] = total > 0 ? ((Number(row[source]) || 0) / total) * 100 : 0;
+    }
+    return out;
   });
 }

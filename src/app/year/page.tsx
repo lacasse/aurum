@@ -48,7 +48,7 @@ import {
   contributionsVsValue,
   incomeAllocation,
   incomeMix,
-  runwayByYear,
+  incomeMixShares,
   unearnedShare,
   milestones,
   yearInsights,
@@ -238,8 +238,8 @@ export default function YearPage() {
         contributions[contributions.length - 1].contributed
       : null;
   const mix = incomeMix(transactions);
+  const mixShares = incomeMixShares(mix);
   const unearned = unearnedShare(transactions, selected.year);
-  const runway = runwayByYear(data.shapes, transactions, (c) => groupOf(c, spendGroups));
   const balanceBars = data.shapes.map((sh) => ({
     label: sh.year,
     Cash: sh.cash,
@@ -570,7 +570,7 @@ export default function YearPage() {
         {contributions.length > 1 && (
           <Card>
             <CardHeader
-              title="What you put in, against what it became"
+              title="Your money, and the market&rsquo;s"
               subtitle="Everything paid into the portfolio, beside what it is worth"
             />
             <div className="px-3 pb-4">
@@ -605,57 +605,38 @@ export default function YearPage() {
           {mix.rows.length > 1 && (
             <Card>
               <CardHeader
-                title="Where the income came from"
+                title="Yearly income source"
                 subtitle={
                   unearned === null
-                    ? "By source, year over year"
+                    ? "What the income was made of, year by year"
                     : `${Math.round(unearned)}% of ${selected.year} came from something other than work`
                 }
               />
               <div className="px-3 pb-4">
-                <GroupedBars
-                  data={mix.rows as unknown as Record<string, unknown>[]}
+                {/*
+                  * Shares rather than amounts. A salary that rises every year
+                  * makes every other source shrink on a chart of dollars even
+                  * as those sources grow — the wage simply out-scales them.
+                  * Normalised, the question becomes what the income was made
+                  * of, which is the part that changes slowly and matters.
+                  */}
+                <SeriesChart
+                  data={mixShares as unknown as Record<string, unknown>[]}
                   xKey="label"
                   stacked
-                  bars={mix.sources.map((name, i) => ({
+                  yDomain={[0, 100]}
+                  series={mix.sources.map((name, i) => ({
                     key: name,
                     name,
                     color: spectrumAt(i, mix.sources.length),
                   }))}
-                  yFmt={(n: number) => fmtCompact(n)}
+                  yFmt={(n: number) => `${Math.round(n)}%`}
                   height={240}
                 />
               </div>
             </Card>
           )}
 
-          {/*
-            * Against necessities, not all spending: the question a reserve
-            * answers is how long you could go without income, and the
-            * discretionary half is the first thing to stop in that year.
-            */}
-          {runway.some((r) => r.months !== null) && (
-            <Card>
-              <CardHeader
-                title="How long the cash would last"
-                subtitle="Months of necessities covered by cash at each year end"
-              />
-              <div className="px-3 pb-4">
-                <GroupedBars
-                  data={runway as unknown as Record<string, unknown>[]}
-                  xKey="label"
-                  bars={[{ key: "months", name: "Months", color: accentFor("market") }]}
-                  yFmt={(n: number) => `${n}m`}
-                  height={240}
-                />
-              </div>
-              <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
-                Measured against what the year cost in necessities alone.
-                Counting discretionary spending too would understate the reserve
-                by pricing in choices nobody would keep making.
-              </p>
-            </Card>
-          )}
         </div>
 
         <Card>

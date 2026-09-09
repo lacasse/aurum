@@ -6,7 +6,7 @@ import {
   contributionsVsValue,
   incomeAllocation,
   incomeMix,
-  runwayByYear,
+  incomeMixShares,
   unearnedShare,
   milestones,
   yearInsights,
@@ -576,27 +576,36 @@ describe("where the income came from", () => {
   });
 });
 
-describe("how long the cash would last", () => {
-  const shapes = yearShapes(
-    [row("2026", { netWorth: 100000 })],
-    [cls("2026-12", { Cash: 12000, Stocks: 88000 })],
-  );
+describe("income as shares of each year", () => {
   const txns = [
-    txn("2026-01-31", "expense", 24000, "Housing"),
-    txn("2026-02-28", "expense", 60000, "Travel"),
+    txn("2025-01-31", "income", 90000, "Salary"),
+    txn("2025-06-30", "income", 10000, "Dividends"),
+    txn("2026-01-31", "income", 75000, "Salary"),
+    txn("2026-06-30", "income", 25000, "Dividends"),
   ];
 
-  test("it counts necessities only, so choices do not shrink the reserve", () => {
-    // 24,000 of necessities is 2,000 a month; 12,000 of cash is six months.
-    assert.equal(runwayByYear(shapes, txns, groups)[0].months, 6);
+  test("each year adds to a hundred", () => {
+    const rows = incomeMixShares(incomeMix(txns));
+    for (const row of rows) {
+      const total = Object.entries(row)
+        .filter(([k]) => k !== "label")
+        .reduce((a, [, v]) => a + Number(v), 0);
+      assert.equal(Math.round(total), 100);
+    }
   });
 
-  test("no necessities recorded is unknown, not infinite", () => {
-    assert.equal(runwayByYear(shapes, [], groups)[0].months, null);
+  test("a source growing as a share is visible even when the total grew too", () => {
+    const rows = incomeMixShares(incomeMix(txns));
+    assert.equal(Math.round(Number(rows[0].Dividends)), 10);
+    assert.equal(Math.round(Number(rows[1].Dividends)), 25);
   });
 
-  test("no cash is unknown too, rather than a confident nought", () => {
-    const broke = yearShapes([row("2026")], [cls("2026-12", { Cash: 0 })]);
-    assert.equal(runwayByYear(broke, txns, groups)[0].months, null);
+  test("a year with no income stays in the run at zero rather than vanishing", () => {
+    const gap = incomeMixShares({
+      rows: [{ label: "2025", Salary: 100 }, { label: "2026", Salary: 0 }],
+      sources: ["Salary"],
+    });
+    assert.equal(gap.length, 2);
+    assert.equal(gap[1].Salary, 0);
   });
 });
