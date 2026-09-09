@@ -738,7 +738,7 @@ describe("the year as one flow", () => {
  */
 describe("the flow through the accounts", () => {
   const accounts = [
-    { id: "a-chq", name: "Chequing", kind: "checking" as const },
+    { id: "a-chq", name: "Cash", kind: "checking" as const },
     { id: "a-inv", name: "Portfolio", kind: "investment" as const },
   ];
   const at = (
@@ -766,14 +766,16 @@ describe("the flow through the accounts", () => {
   const outOf = (f: ReturnType<typeof yearFlow>, name: string) =>
     f.links.filter((l) => f.nodes[l.source].name === name).reduce((a, l) => a + l.value, 0);
 
-  test("income lands in the account it was paid into", () => {
+  test("income lands in the kind of place it was paid into", () => {
     const f = yearFlow(rows, "2026", { accounts });
-    assert.equal(into(f, "Chequing"), 60000);
+    assert.equal(into(f, "Cash"), 60000);
+    // The account's own name is not the question a cash flow is asked.
+    assert.equal(f.nodes.some((n) => n.name === "Chequing"), false);
   });
 
   test("an account cannot pay out more than reached it", () => {
     const f = yearFlow(rows, "2026", { accounts });
-    assert.equal(into(f, "Chequing"), outOf(f, "Chequing"));
+    assert.equal(into(f, "Cash"), outOf(f, "Cash"));
   });
 
   test("a deposit into an invested account is drawn as a destination", () => {
@@ -790,8 +792,8 @@ describe("the flow through the accounts", () => {
     const cash = [...accounts, { id: "a-sav", name: "Savings", kind: "savings" as const }];
     const shuffled = [...rows, at("2026-05-31", "transfer", 5000, "Transfer", "a-chq", "a-sav")];
     assert.equal(
-      into(yearFlow(shuffled, "2026", { accounts: cash }), "Chequing"),
-      into(yearFlow(rows, "2026", { accounts: cash }), "Chequing"),
+      into(yearFlow(shuffled, "2026", { accounts: cash }), "Cash"),
+      into(yearFlow(rows, "2026", { accounts: cash }), "Cash"),
     );
   });
 
@@ -813,7 +815,7 @@ describe("the flow through the accounts", () => {
  */
 describe("what the money left an account for", () => {
   const accounts = [
-    { id: "a-chq", name: "Chequing", kind: "checking" as const },
+    { id: "a-chq", name: "Cash", kind: "checking" as const },
     { id: "a-inv", name: "Portfolio", kind: "investment" as const },
   ];
   const at = (
@@ -848,7 +850,7 @@ describe("what the money left an account for", () => {
       .reduce((a, l) => a + l.value, 0);
 
   test("spending ends at whether it could have been avoided", () => {
-    assert.equal(edge("Chequing", "Spending"), 25000);
+    assert.equal(edge("Cash", "Spending"), 25000);
     assert.equal(edge("Spending", "Necessity"), 20000);
     assert.equal(edge("Spending", "Discretionary"), 5000);
     // The categories themselves are not drawn: two ends, not ten.
@@ -869,7 +871,7 @@ describe("what the money left an account for", () => {
       d.links
         .filter((l) => d.nodes[l.source].name === from && d.nodes[l.target].name === to)
         .reduce((a, l) => a + l.value, 0);
-    assert.equal(e("Chequing", "Spending"), 7000);
+    assert.equal(e("Cash", "Spending"), 7000);
     assert.equal(e("Spending", "Not consumption"), 7000);
     assert.equal(d.nodes.some((n) => n.name === "Debt Repayment"), false);
   });
@@ -890,7 +892,7 @@ describe("what the money left an account for", () => {
   test("every node says what it is, so colour is not read off the name", () => {
     const role = (n: string) => f.nodes.find((x) => x.name === n)?.role;
     assert.equal(role("Salary"), "source");
-    assert.equal(role("Chequing"), "account");
+    assert.equal(role("Cash"), "account");
     assert.equal(role("Kept"), "kept");
     // Each end of the spending branch is its own colour.
     assert.equal(role("Necessity"), "necessity");
@@ -902,7 +904,7 @@ describe("what the money left an account for", () => {
   test("a deposit goes straight to the invested bar, with no purpose between", () => {
     // A transfer is not spending and not yet a purchase; it is the money
     // moving to where the buying happens.
-    assert.equal(edge("Chequing", "Investments"), 15000);
+    assert.equal(edge("Cash", "Investments"), 15000);
     assert.equal(edge("Spending", "Investments"), 0);
   });
 
@@ -911,7 +913,7 @@ describe("what the money left an account for", () => {
   });
 
   test("the account still balances across the extra column", () => {
-    assert.equal(into("Chequing"), outOf("Chequing"));
+    assert.equal(into("Cash"), outOf("Cash"));
   });
 
   test("kept stays one node with nothing under it", () => {
@@ -934,7 +936,7 @@ describe("what the money left an account for", () => {
  */
 describe("what the money bought", () => {
   const accounts = [
-    { id: "a-chq", name: "Chequing", kind: "checking" as const },
+    { id: "a-chq", name: "Cash", kind: "checking" as const },
     { id: "a-rrsp", name: "RRSP", kind: "investment" as const },
   ];
   const at = (
@@ -1020,11 +1022,11 @@ describe("what the money bought", () => {
   test("a deposit and the purchase it funded are not the same dollar twice", () => {
     // 90k in, 30k moved on, 60k kept — and the 30k leaves the chequing
     // account once, then leaves the RRSP once as what it bought.
-    assert.equal(edge("Chequing", "Investments"), 30000);
+    assert.equal(edge("Cash", "Investments"), 30000);
     assert.equal(into(f, "Kept"), 60000);
-    assert.equal(into(f, "Chequing"), outOf(f, "Chequing"));
+    assert.equal(into(f, "Cash"), outOf(f, "Cash"));
     // The year's outflows do not include the deposit twice.
-    assert.equal(edge("Chequing", "US Equity"), 0);
+    assert.equal(edge("Cash", "US Equity"), 0);
   });
 
   test("a sale is a source, because a ribbon cannot run backwards", () => {
@@ -1074,7 +1076,7 @@ describe("what the money bought", () => {
     assert.equal(role("US Equity"), "investing");
     assert.equal(role("Bonds"), "investing");
     assert.equal(role("Investments"), "investing");
-    assert.equal(role("Chequing"), "account");
+    assert.equal(role("Cash"), "account");
     assert.equal(role("Salary"), "source");
   });
 
@@ -1095,7 +1097,7 @@ describe("what the money bought", () => {
 describe("an account is invested by what it is", () => {
   const accounts = [
     { id: "a-pen", name: "Pension Plan", kind: "pension" as const },
-    { id: "a-chq", name: "Chequing", kind: "checking" as const },
+    { id: "a-chq", name: "Cash", kind: "checking" as const },
   ];
   const rows = [
     {
@@ -1111,13 +1113,32 @@ describe("an account is invested by what it is", () => {
   const into = (name: string) =>
     f.links.filter((l) => f.nodes[l.target].name === name).reduce((a, l) => a + l.value, 0);
 
-  test("a pension paid into directly is not cash left unspent", () => {
-    assert.equal(into("Not itemised"), 12000);
+  test("a contribution buys an entitlement, not idle cash", () => {
+    assert.equal(into("Pension"), 12000);
     assert.equal(into("Kept"), 40000);
+    assert.equal(f.nodes.some((n) => n.name === "Not itemised"), false);
   });
 
-  test("and it reads as the invested side", () => {
+  test("the plan is its own asset, beside the classes that were bought", () => {
+    assert.equal(f.nodes.find((n) => n.name === "Pension")?.role, "pension");
     assert.equal(f.nodes.find((n) => n.name === "Investments")?.role, "investing");
-    assert.equal(f.nodes.find((n) => n.name === "Chequing")?.role, "account");
+    assert.equal(f.nodes.find((n) => n.name === "Cash")?.role, "account");
+  });
+
+  test("a plan that does report its holdings is not counted twice", () => {
+    const both = yearFlow(rows, "2026", {
+      accounts,
+      holdings: [
+        {
+          accountId: "a-pen",
+          assetClass: "Bonds",
+          flows: [{ date: "2026-03-01", kind: "buy", amount: 9000, shares: 1 }],
+        },
+      ] as unknown as NonNullable<Parameters<typeof yearFlow>[2]>["holdings"],
+    });
+    const got = (n: string) =>
+      both.links.filter((l) => both.nodes[l.target].name === n).reduce((a, l) => a + l.value, 0);
+    assert.equal(got("Bonds"), 9000);
+    assert.equal(got("Pension"), 3000);
   });
 });

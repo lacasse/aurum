@@ -1295,10 +1295,13 @@ const FLOW_TONE: Record<string, AccentName> = {
   account: "brand",
   necessity: "negative",
   discretionary: "cost",
-  debt: "pension",
   investing: "market",
+  pension: "pension",
   kept: "bonds",
-  idle: "passive",
+  /* Debt repayment buys nothing, so it takes neither spending colour. */
+  debt: "passive",
+  /* Still sitting in the account it arrived in, so: the account's own colour. */
+  idle: "brand",
 };
 
 export function YearSankey({

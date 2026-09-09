@@ -864,6 +864,7 @@ export interface FlowNode {
     | "debt"
     | "investing"
     | "kept"
+    | "pension"
     | "idle";
 }
 export interface FlowLink {
@@ -895,6 +896,30 @@ const INVESTED_KINDS = new Set<AccountKind>(["investment", "crypto", "pension"])
  * to itself, which is no flow at all — and it never was.
  */
 const INVESTMENTS = "Investments";
+
+/**
+ * The accounts money is simply held in, likewise as one bar.
+ *
+ * Five chequing and savings accounts down the middle answered "which one" for
+ * a reader who was not asking. What the column is worth saying is the kind of
+ * place the money sat: spendable, borrowed, or invested. Credit is kept apart
+ * from cash because a card balance is not money you have.
+ */
+const CASH = "Cash";
+const CREDIT = "Credit";
+const CASH_KINDS = new Set<AccountKind>(["checking", "savings", "cash"]);
+const CREDIT_KINDS = new Set<AccountKind>(["credit", "loan"]);
+
+/**
+ * A pension contribution is not a purchase, and it is not idle cash either.
+ *
+ * The money arrives in a plan that has no trades to import — an entitlement
+ * accrues instead — so measured against buys it looked like a shortfall, and
+ * the year appeared to have funded its investing out of savings it never
+ * touched. Pension is already its own class on the balance sheet beside cash,
+ * bonds, stocks and crypto; this is the same class, seen as it is bought.
+ */
+const PENSION_ASSET = "Pension";
 
 const SPENDING = "Spending";
 /**
@@ -1002,7 +1027,10 @@ export function yearFlow(
   const hubOf = (id: string | undefined) => {
     const a = byId.get(id ?? "");
     if (!a) return TRUNK;
-    return INVESTED_KINDS.has(a.kind) ? INVESTMENTS : a.name;
+    if (INVESTED_KINDS.has(a.kind)) return INVESTMENTS;
+    if (CREDIT_KINDS.has(a.kind)) return CREDIT;
+    if (CASH_KINDS.has(a.kind)) return CASH;
+    return a.name;
   };
 
   const incomeTotals = new Map<string, number>();
@@ -1011,6 +1039,9 @@ export function yearFlow(
   const hubTotals = new Map<string, number>();
   /** Whether the invested bar is on this year's chart at all. */
   let anyInvested = false;
+  /** Contributions to a pension plan, and any purchases already recorded in one. */
+  let pensionIn = 0;
+  let pensionBuys = 0;
   const rows: {
     from: string;
     to: string;
@@ -1029,6 +1060,7 @@ export function yearFlow(
     if (isIncome(t)) {
       const hub = hubOf(t.destinationAccountId);
       if (hub === INVESTMENTS) anyInvested = true;
+      if (byId.get(t.destinationAccountId ?? "")?.kind === "pension") pensionIn += cents;
       note(incomeTotals, t.category, cents);
       note(hubTotals, hub, cents);
       rows.push({ from: t.category, to: hub, cents, stage: 1 });
@@ -1050,6 +1082,7 @@ export function yearFlow(
       // Moving between two invested accounts is not a flow through the year.
       if (hub === INVESTMENTS) continue;
       anyInvested = true;
+      if (dest.kind === "pension") pensionIn += cents;
       note(hubTotals, hub, cents);
       note(hubTotals, INVESTMENTS, cents);
       /*
@@ -1066,6 +1099,7 @@ export function yearFlow(
    * account spends; a sale is money arriving in one.
    */
   for (const h of holdings) {
+    const inPension = byId.get(h.accountId)?.kind === "pension";
     for (const f of h.flows ?? []) {
       if (f.date.slice(0, 4) !== year) continue;
       const cents = toCents(f.amount);
@@ -1073,6 +1107,7 @@ export function yearFlow(
       anyInvested = true;
       note(hubTotals, INVESTMENTS, cents);
       if (f.kind === "buy") {
+        if (inPension) pensionBuys += cents;
         note(investTotals, h.assetClass, cents);
         rows.push({ from: INVESTMENTS, to: h.assetClass, cents, stage: 2, group: ASSET });
       } else if (f.kind === "sell") {
@@ -1081,6 +1116,23 @@ export function yearFlow(
       }
       // Dividends are income already, under their own category. See above.
     }
+  }
+
+  /*
+   * What went into the plan and did not turn into a recorded purchase is the
+   * entitlement itself. Subtracting the purchases keeps a plan that *does*
+   * report its holdings from being counted twice.
+   */
+  const pensionAsset = Math.max(0, pensionIn - pensionBuys);
+  if (pensionAsset > 0) {
+    note(investTotals, PENSION_ASSET, pensionAsset);
+    rows.push({
+      from: INVESTMENTS,
+      to: PENSION_ASSET,
+      cents: pensionAsset,
+      stage: 2,
+      group: ASSET,
+    });
   }
 
   if (rows.length === 0) return { nodes: [], links: [] };
@@ -1232,7 +1284,14 @@ export function yearFlow(
   }
   for (const e of edgeList) {
     if (leaves.has(e.to)) {
-      id(e.to, assetLeaves.has(e.to) ? "investing" : roleOfLeaf.get(e.to));
+      id(
+        e.to,
+        assetLeaves.has(e.to)
+          ? e.to === PENSION_ASSET
+            ? "pension"
+            : "investing"
+          : roleOfLeaf.get(e.to),
+      );
     }
   }
   if (kept > 0) id("Kept", "kept");

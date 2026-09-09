@@ -553,15 +553,17 @@ export default function YearPage() {
               />
             </div>
             <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
-              Accounts in the second column, what the money left them for in the
-              third, and every account balances on its own. Spending ends at
-              necessity or discretion rather than at a column of categories —
-              the same split as the Expenses page, and reassignable there.
-              Every invested account is one bar — which account a holding sits in
-              is a tax question, answered on the contribution card. A deposit
-              into it and a purchase inside it are two different events, so the
+              The second column is the kind of place the money sat — spendable,
+              borrowed, or invested — rather than which account it was, and each
+              bar balances on its own. Spending ends at necessity or discretion
+              rather than at a column of categories: the same split as the
+              Expenses page, and reassignable there. A deposit into the invested
+              bar and a purchase inside it are two different events, so the
               deposit moves the money and the purchase is what it became, broken
-              down by asset class. Selling appears on the left, because a sale is
+              down by asset class. A pension contribution is its own class there,
+              beside the things that were bought — the plan has no trades to
+              import, an entitlement accrues instead, and measured against
+              purchases it would read as a shortfall. Selling appears on the left, because a sale is
               money arriving. Dividends are not taken from the trade history —
               they are already income under their own category. Transfers between
               two cash accounts are left out, because the same dollar would be
