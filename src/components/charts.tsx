@@ -1375,17 +1375,6 @@ export function YearSankey({
           nodePadding={26}
           nodeWidth={12}
           /*
-           * Nodes down each column in the order the data gives them, not
-           * sorted by where their ribbons happen to land.
-           *
-           * What was kept comes straight from the middle rather than through
-           * spending, so the layout pulled it up level with its source — into
-           * the middle of the spending categories, where it read as one of
-           * them. Left in data order it sits under them, after the assets,
-           * which is where a thing that is neither belongs.
-           */
-          sort={false}
-          /*
            * Room under the plot as well as over it. The label of the lowest
            * node sits below its middle, and its amount below that again, so a
            * bottom margin of a few pixels cut the figure off the last income
