@@ -41,7 +41,6 @@ import {
   portfolioSeries,
 } from "@/lib/analytics";
 import {
-  cashflowInsights,
   categoryShifts,
   contributionsVsValue,
   incomeAllocation,
@@ -49,7 +48,6 @@ import {
   incomeTypeShares,
   yearFlow,
   unearnedShare,
-  yearInsights,
   yearRows,
   yearShapes,
   yearWaterfall,
@@ -202,10 +200,6 @@ export default function YearPage() {
 
   const room = contributionRoom(selected.year, transactions, accounts, limits);
   const shape = data.shapes.find((sh) => sh.year === selected.year);
-  const insights = [
-    ...yearInsights(data.shapes, selected.year),
-    ...cashflowInsights(transactions, selected.year, (c) => groupOf(c, spendGroups)),
-  ];
   const allocation = incomeAllocation(transactions, selected.year, (c) =>
     groupOf(c, spendGroups),
   );
@@ -301,17 +295,16 @@ export default function YearPage() {
         </div>
 
         {/*
-          * The chart and its reading, side by side.
+          * The year's movement beside the year's cash flow.
           *
-          * The explanation used to sit under the chart and the observations in
-          * a row beneath that, so the three things that only mean anything
-          * together were three scrolls apart. A waterfall is not
-          * self-explanatory — the residual column especially — and a reader
-          * works out what it says by looking from the shape to the words and
-          * back.
+          * The waterfall says what net worth did and the bars say what passed
+          * through to do it, so the two answer each other: a year whose middle
+          * columns are thin and whose closing column still rose was carried by
+          * the market rather than by what was earned. Reading that used to
+          * mean scrolling between them.
           */}
-        {shape && (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {shape && (
             <Card>
               <CardHeader
                 title={`How ${selected.year} moved`}
@@ -321,49 +314,34 @@ export default function YearPage() {
                 <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} />
               </div>
             </Card>
+          )}
 
-            <Card className="flex flex-col">
-              <CardHeader
-                title="What it says"
-                subtitle={`${fmtCAD(shape.netWorth - shape.openingNetWorth)} of movement, and where it came from`}
+          <Card>
+            <CardHeader
+              title="Income against spending"
+              subtitle="Every year on record, side by side"
+            />
+            <div className="px-3 pb-4">
+              {/*
+                * Saved is the difference, in dollars, so it shares the axis. A
+                * rate would not: a percentage against a scale of dollars is a
+                * flat line on the floor, and it would need an axis of its own to
+                * say anything.
+                */}
+              <GroupedBars
+                data={bars as unknown as Record<string, unknown>[]}
+                xKey="label"
+                bars={[
+                  { key: "income", name: "Income", color: accentFor("positive") },
+                  { key: "expenses", name: "Expenses", color: accentFor("negative") },
+                  { key: "saved", name: "Saved", color: accentFor("brand") },
+                ]}
+                height={260}
+                yFmt={fmtCompact}
               />
-              <div className="space-y-3 px-5 pb-4">
-                <p className="text-xs leading-relaxed text-ink-dim">
-                  The two end columns are the balance sheet on the first day of{" "}
-                  {selected.year} and the last. Between them,{" "}
-                  <span className="text-positive">income</span> and{" "}
-                  <span className="text-negative">spending</span> are the year&rsquo;s
-                  cash flow, and <strong className="text-ink">growth</strong> is
-                  everything that moved net worth without passing through either
-                  — the market mostly, but also the pension accruing, a
-                  revaluation, the exchange rate. It is a subtraction rather
-                  than a measurement, which is why it is not called a return.
-                </p>
-
-                {insights.length > 0 && (
-                  <ul className="space-y-2.5 border-t border-line pt-3">
-                    {insights.map((i) => (
-                      <li key={i.key}>
-                        <p
-                          className={cn(
-                            "text-xs font-semibold leading-snug",
-                            i.tone === "positive" && "text-positive",
-                            i.tone === "negative" && "text-negative",
-                          )}
-                        >
-                          {i.headline}
-                        </p>
-                        <p className="mt-0.5 text-[0.6875rem] leading-relaxed text-ink-faint">
-                          {i.detail}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </Card>
-          </div>
-        )}
+            </div>
+          </Card>
+        </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/*
@@ -690,31 +668,6 @@ export default function YearPage() {
           </Card>
         )}
 
-        <Card>
-          <CardHeader
-            title="Income against spending"
-            subtitle="Every year on record, side by side"
-          />
-          <div className="px-3 pb-4">
-            {/*
-              * Saved is the difference, in dollars, so it shares the axis. A
-              * rate would not: a percentage against a scale of dollars is a
-              * flat line on the floor, and it would need an axis of its own to
-              * say anything.
-              */}
-            <GroupedBars
-              data={bars as unknown as Record<string, unknown>[]}
-              xKey="label"
-              bars={[
-                { key: "income", name: "Income", color: accentFor("positive") },
-                { key: "expenses", name: "Expenses", color: accentFor("negative") },
-                { key: "saved", name: "Saved", color: accentFor("brand") },
-              ]}
-              height={260}
-              yFmt={fmtCompact}
-            />
-          </div>
-        </Card>
 
         <Card>
           <CardHeader

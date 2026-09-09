@@ -948,7 +948,7 @@ export function yearFlow(
     return (name: string) => (kept.has(name) ? name : other);
   };
   const sourceName = pool(incomeTotals, limit, "Other income");
-  const useName = pool(spendTotals, limit, "Other spending");
+  const outName = pool(spendTotals, limit, "Other spending");
   // The year node is the spine for account-less rows and never pools away.
   const hubName = (() => {
     const named = new Map([...hubTotals].filter(([k]) => k !== TRUNK));
@@ -961,7 +961,7 @@ export function yearFlow(
   const outflow = new Map<string, number>();
   for (const r of rows) {
     const from = r.stage === 1 ? sourceName(r.from) : hubName(r.from);
-    const to = r.stage === 1 ? hubName(r.to) : useName(r.to);
+    const to = r.stage === 1 ? hubName(r.to) : outName(r.to);
     if (from === to) continue;
     edges.set(`${from}\u0000${to}`, (edges.get(`${from}\u0000${to}`) ?? 0) + r.cents);
     if (r.stage === 1) note(inflow, to, r.cents);
