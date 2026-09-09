@@ -1375,6 +1375,20 @@ export function YearSankey({
           nodePadding={26}
           nodeWidth={12}
           /*
+           * Every node at the depth its own links give it, rather than
+           * flushing the ends to the right edge.
+           *
+           * Flushed right, what was kept sat two columns from where it came
+           * from — and the ribbon carrying it ran straight through the
+           * Spending bar on the way, so it read as money coming out of
+           * spending. Nothing was wrong with the figure; a link that skips a
+           * column has to cross whatever is standing in it.
+           *
+           * At its own depth it lands beside Spending and Investments, which
+           * is what it is: the third thing the money did.
+           */
+          align="left"
+          /*
            * Room under the plot as well as over it. The label of the lowest
            * node sits below its middle, and its amount below that again, so a
            * bottom margin of a few pixels cut the figure off the last income
