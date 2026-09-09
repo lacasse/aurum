@@ -721,9 +721,44 @@ describe("the year as one flow", () => {
   });
 
   test("sources past the limit are pooled rather than dropped", () => {
-    const f = yearFlow(txns, "2026", { limit: 1 });
-    assert.equal(Math.round(into(f, "2026")), 65000);
+    const many = [
+      ...txns,
+      txn("2026-05-31", "income", 4000, "Freelance"),
+      txn("2026-06-30", "income", 3000, "Gifts"),
+    ];
+    const f = yearFlow(many, "2026", { limit: 1 });
+    assert.equal(Math.round(into(f, "2026")), 72000);
     assert.ok(f.nodes.some((n) => n.name === "Other income"));
+  });
+
+  test("pooling a single category would only rename it, so it does not", () => {
+    // "Other income" standing for one category says less than the category
+    // did and takes the same room.
+    const f = yearFlow(txns, "2026", { limit: 1 });
+    assert.equal(f.nodes.some((n) => n.name === "Other income"), false);
+    assert.ok(f.nodes.some((n) => n.name === "Dividends"));
+  });
+
+  test("a category too thin to draw is pooled however few there are", () => {
+    const lopsided = [
+      txn("2026-01-31", "income", 100000, "Salary"),
+      txn("2026-02-28", "income", 500, "Interest"),
+      txn("2026-03-31", "income", 400, "Gifts"),
+      txn("2026-04-30", "income", 300, "Dividends"),
+      txn("2026-05-31", "expense", 20000, "Housing"),
+    ];
+    // Well inside any count cap, and still three bands of about a pixel.
+    const f = yearFlow(lopsided, "2026", { limit: 8 });
+    const names = f.nodes.map((n) => n.name);
+    assert.ok(names.includes("Salary"));
+    assert.ok(names.includes("Other income"));
+    assert.equal(names.includes("Gifts"), false);
+    assert.equal(
+      f.links
+        .filter((l) => f.nodes[l.source].name === "Other income")
+        .reduce((a, l) => a + l.value, 0),
+      1200,
+    );
   });
 
   test("a year with nothing in it draws nothing", () => {

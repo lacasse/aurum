@@ -942,6 +942,23 @@ const CASH_KINDS = new Set<AccountKind>([
  */
 const PENSION_ASSET = "Pension";
 
+/**
+ * Below this share of the year's income, a category is pooled rather than
+ * drawn.
+ *
+ * Counting the categories and keeping the top few is the wrong measure: eight
+ * sources can be eight readable bands one year and one band with seven
+ * hairlines under it the next, because what matters is not how many there are
+ * but how much of the total each one is. At a fiftieth, a band is a line a
+ * pixel or two thick carrying a label and the padding around it — a row of
+ * chart height spent on something that cannot be seen and does not move the
+ * picture.
+ *
+ * The count cap stays as a ceiling for the case this misses: many categories
+ * of similar, respectable size.
+ */
+const MIN_SOURCE_SHARE = 0.02;
+
 const SPENDING = "Spending";
 /**
  * A purchase, which needs no node of its own.
@@ -1163,14 +1180,34 @@ export function yearFlow(
    * does. The hubs get a smaller allowance than the categories because they
    * are the spine: a dozen of them is a tangle, not a middle.
    */
-  const pool = (totals: Map<string, number>, keep: number, other: string) => {
+  const pool = (
+    totals: Map<string, number>,
+    keep: number,
+    other: string,
+    minShare = 0,
+  ) => {
     const ranked = [...totals.entries()]
       .filter(([, v]) => v > 0)
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-    const kept = new Set(ranked.slice(0, keep).map(([k]) => k));
+    const total = ranked.reduce((a, [, v]) => a + v, 0);
+    const floor = total * minShare;
+    let kept = new Set(
+      ranked.slice(0, keep).filter(([, v]) => v >= floor).map(([k]) => k),
+    );
+    /*
+     * Pooling one thing renames it. "Other income" standing for a single
+     * category says less than the category did and takes the same room, so
+     * below two the rule does nothing.
+     */
+    if (ranked.length - kept.size === 1) kept = new Set(ranked.map(([k]) => k));
     return (name: string) => (kept.has(name) ? name : other);
   };
-  const sourceName = pool(incomeTotals, limit, "Other income");
+  /*
+   * A sale is money arriving, but it is not an income category and must not
+   * take one of their places in the ranking.
+   */
+  const categoryTotals = new Map([...incomeTotals].filter(([k]) => k !== SOLD));
+  const sourceName = pool(categoryTotals, limit, "Other income", MIN_SOURCE_SHARE);
   /*
    * Neither the spending nor the invested side needs pooling in practice --
    * three necessity groups and four asset classes -- but the tail is capped
