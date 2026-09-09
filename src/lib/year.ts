@@ -942,6 +942,9 @@ const CASH_KINDS = new Set<AccountKind>([
  */
 const PENSION_ASSET = "Pension";
 
+/** Where the categories too thin to draw go. */
+const OTHER_INCOME = "Other income";
+
 /**
  * Below this share of the year's income, a category is pooled rather than
  * drawn.
@@ -957,7 +960,7 @@ const PENSION_ASSET = "Pension";
  * The count cap stays as a ceiling for the case this misses: many categories
  * of similar, respectable size.
  */
-const MIN_SOURCE_SHARE = 0.02;
+const MIN_SOURCE_SHARE = 0.01;
 
 const SPENDING = "Spending";
 /**
@@ -1207,7 +1210,7 @@ export function yearFlow(
    * take one of their places in the ranking.
    */
   const categoryTotals = new Map([...incomeTotals].filter(([k]) => k !== SOLD));
-  const sourceName = pool(categoryTotals, limit, "Other income", MIN_SOURCE_SHARE);
+  const sourceName = pool(categoryTotals, limit, OTHER_INCOME, MIN_SOURCE_SHARE);
   /*
    * Neither the spending nor the invested side needs pooling in practice --
    * three necessity groups and four asset classes -- but the tail is capped
@@ -1358,9 +1361,16 @@ export function yearFlow(
       if (firstBars.has(hub)) reachesFirstBar.add("From savings");
     }
   }
+  /*
+   * Group first, then the pooled remainder, then size. What is left over does
+   * not belong among the named things ranked by weight — it is the floor of
+   * the group whatever it happens to add up to, and a reader who finds it
+   * partway up the column has to check that it is not a category.
+   */
   const orderedSources = [...sourceTotals.entries()].sort(
     (a, b) =>
       Number(reachesFirstBar.has(b[0])) - Number(reachesFirstBar.has(a[0])) ||
+      Number(a[0] === OTHER_INCOME) - Number(b[0] === OTHER_INCOME) ||
       b[1] - a[1] ||
       a[0].localeCompare(b[0]),
   );

@@ -1243,3 +1243,38 @@ describe("spending on a card is spending", () => {
     assert.equal(spend(unpaid), spend(f));
   });
 });
+
+/*
+ * What is left over is the floor of its group, whatever it adds up to. A
+ * reader who finds it partway up the column has to stop and check it is not a
+ * category.
+ */
+describe("the pooled remainder sits under the categories", () => {
+  const rows = [
+    txn("2026-01-31", "income", 100000, "Salary"),
+    txn("2026-02-28", "income", 900, "Interest"),
+    txn("2026-03-31", "income", 800, "Gifts"),
+    txn("2026-04-30", "income", 700, "Dividends"),
+    // Smaller than the pooled remainder will be, and still a category.
+    txn("2026-05-31", "income", 2000, "Freelance"),
+    txn("2026-06-30", "expense", 20000, "Housing"),
+  ];
+  const f = yearFlow(rows, "2026");
+  const order = f.nodes.map((n) => n.name);
+
+  test("it is pooled even though nothing is near the count cap", () => {
+    assert.ok(order.includes("Other income"));
+    assert.equal(order.includes("Interest"), false);
+  });
+
+  test("it comes after every named category, though it outweighs one", () => {
+    const other = order.indexOf("Other income");
+    assert.ok(other > order.indexOf("Salary"));
+    assert.ok(other > order.indexOf("Freelance"));
+    const pooled = f.links
+      .filter((l) => f.nodes[l.source].name === "Other income")
+      .reduce((a, l) => a + l.value, 0);
+    assert.equal(pooled, 2400);
+    assert.ok(pooled > 2000, "and it does outweigh Freelance");
+  });
+});
