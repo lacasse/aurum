@@ -1375,6 +1375,14 @@ export function YearSankey({
           nodePadding={26}
           nodeWidth={12}
           /*
+           * Keep each column in the order the data gives it. The relaxation
+           * still decides how far apart the nodes sit; this only stops it
+           * reordering them, which is what pulled what was kept up among the
+           * spending categories — it has one source and no destination, so
+           * nothing below held it down.
+           */
+          sort={false}
+          /*
            * Room under the plot as well as over it. The label of the lowest
            * node sits below its middle, and its amount below that again, so a
            * bottom margin of a few pixels cut the figure off the last income

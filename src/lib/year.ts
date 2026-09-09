@@ -1295,26 +1295,39 @@ export function yearFlow(
   });
   for (const e of edgeList) if (hubs.includes(e.to) && !hubs.includes(e.from)) id(e.from, "source");
   if (shortfall.size > 0) id("From savings", "source");
-  for (const hub of hubs) id(hub, investedHubs.has(hub) ? "investing" : "account");
+  /*
+   * Spending before the invested bar, to match the column after it, where the
+   * categories come before the asset classes. Two columns in the same order
+   * is what keeps the ribbons between them from crossing.
+   */
+  for (const hub of hubs) {
+    if (!investedHubs.has(hub)) id(hub, "account");
+  }
   for (const g of [SPENDING]) if (groups.has(g)) id(g, GROUP_ROLE[g]);
+  for (const hub of hubs) if (investedHubs.has(hub)) id(hub, "investing");
   for (const e of edgeList) {
     if (groups.has(e.from) && leaves.has(e.to)) {
       roleOfLeaf.set(e.to, LEAF_ROLE[e.to] ?? GROUP_ROLE[e.from]);
     }
   }
+  /*
+   * What was kept goes between the two sets of ends, not after them.
+   *
+   * It is the one band that reaches the last column without passing through
+   * the one before it, so it crosses that column on the way — and wherever it
+   * crosses, it runs behind whatever is standing there. Sat below the assets
+   * it crossed the spending bar and read as something spending gave off.
+   * Between the two, it crosses the gap between them instead.
+   */
   for (const e of edgeList) {
-    if (leaves.has(e.to)) {
-      id(
-        e.to,
-        assetLeaves.has(e.to)
-          ? e.to === PENSION_ASSET
-            ? "pension"
-            : "investing"
-          : roleOfLeaf.get(e.to),
-      );
-    }
+    if (leaves.has(e.to) && !assetLeaves.has(e.to)) id(e.to, roleOfLeaf.get(e.to));
   }
   if (kept > 0) id("Kept", "kept");
+  for (const e of edgeList) {
+    if (assetLeaves.has(e.to)) {
+      id(e.to, e.to === PENSION_ASSET ? "pension" : "investing");
+    }
+  }
   if (unitemised > 0) id(UNITEMISED, "idle");
 
   for (const e of edgeList) {
