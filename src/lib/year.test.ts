@@ -778,7 +778,7 @@ describe("the flow through the accounts", () => {
 
   test("a deposit into an invested account is drawn as a destination", () => {
     const f = yearFlow(rows, "2026", { accounts });
-    assert.equal(into(f, "Portfolio"), 15000);
+    assert.equal(into(f, "Investments"), 15000);
   });
 
   test("what the account did not pay out is still kept", () => {
@@ -895,15 +895,15 @@ describe("what the money left an account for", () => {
     // Each end of the spending branch is its own colour.
     assert.equal(role("Necessity"), "necessity");
     assert.equal(role("Discretionary"), "discretionary");
-    // An account that buys things reads as the invested side, not as cash.
-    assert.equal(role("Portfolio"), "investing");
+    // The invested bar reads as the invested side, not as cash.
+    assert.equal(role("Investments"), "investing");
   });
 
-  test("a deposit goes straight to the account, with no purpose between", () => {
+  test("a deposit goes straight to the invested bar, with no purpose between", () => {
     // A transfer is not spending and not yet a purchase; it is the money
     // moving to where the buying happens.
-    assert.equal(edge("Chequing", "Portfolio"), 15000);
-    assert.equal(edge("Spending", "Portfolio"), 0);
+    assert.equal(edge("Chequing", "Investments"), 15000);
+    assert.equal(edge("Spending", "Investments"), 0);
   });
 
   test("a group passes on exactly what it was given", () => {
@@ -985,25 +985,46 @@ describe("what the money bought", () => {
   const outOf = (g: ReturnType<typeof yearFlow>, name: string) =>
     g.links.filter((l) => g.nodes[l.source].name === name).reduce((a, l) => a + l.value, 0);
 
-  test("purchases break down by asset class, not by account", () => {
-    assert.equal(edge("RRSP", "Bought"), 30000);
-    assert.equal(edge("Bought", "US Equity"), 20000);
-    assert.equal(edge("Bought", "Bonds"), 10000);
+  test("purchases break down by asset class, hung off the invested bar", () => {
+    // No node between them: the bar is already what the money was for, and a
+    // shared one would merge the buys before splitting them again.
+    assert.equal(edge("Investments", "US Equity"), 20000);
+    assert.equal(edge("Investments", "Bonds"), 10000);
+    assert.equal(f.nodes.some((n) => n.name === "Bought"), false);
   });
 
-  test("the account it was bought in still balances", () => {
-    assert.equal(into(f, "RRSP"), 30000);
-    assert.equal(outOf(f, "RRSP"), 30000);
+  test("the invested bar balances, however many accounts fed it", () => {
+    assert.equal(into(f, "Investments"), 30000);
+    assert.equal(outOf(f, "Investments"), 30000);
+  });
+
+  test("every invested account answers to the one bar", () => {
+    const two = yearFlow(
+      [
+        ...base,
+        at("2026-02-20", "transfer", 10000, "Transfer", "a-chq", "a-tfsa"),
+      ],
+      "2026",
+      {
+        accounts: [...accounts, { id: "a-tfsa", name: "TFSA", kind: "investment" as const }],
+        holdings: [
+          holding("US Equity", [{ date: "2026-03-01", kind: "buy", amount: 40000 }]),
+        ],
+      },
+    );
+    assert.equal(into(two, "Investments"), 40000);
+    assert.equal(two.nodes.some((n) => n.name === "TFSA"), false);
+    assert.equal(two.nodes.some((n) => n.name === "RRSP"), false);
   });
 
   test("a deposit and the purchase it funded are not the same dollar twice", () => {
     // 90k in, 30k moved on, 60k kept — and the 30k leaves the chequing
     // account once, then leaves the RRSP once as what it bought.
-    assert.equal(edge("Chequing", "RRSP"), 30000);
+    assert.equal(edge("Chequing", "Investments"), 30000);
     assert.equal(into(f, "Kept"), 60000);
     assert.equal(into(f, "Chequing"), outOf(f, "Chequing"));
     // The year's outflows do not include the deposit twice.
-    assert.equal(edge("Chequing", "Bought"), 0);
+    assert.equal(edge("Chequing", "US Equity"), 0);
   });
 
   test("a sale is a source, because a ribbon cannot run backwards", () => {
@@ -1017,8 +1038,8 @@ describe("what the money bought", () => {
       ],
     });
     assert.equal(outOf(sold, "Sold investments"), 20000);
-    assert.equal(into(sold, "RRSP"), 50000);
-    assert.equal(outOf(sold, "RRSP"), 50000);
+    assert.equal(into(sold, "Investments"), 50000);
+    assert.equal(outOf(sold, "Investments"), 50000);
     // Netted instead, the class would be 30k and the sale invisible.
     assert.equal(into(sold, "US Equity"), 50000);
   });
@@ -1035,7 +1056,7 @@ describe("what the money bought", () => {
         ]),
       ],
     });
-    assert.equal(into(div, "RRSP"), 30000);
+    assert.equal(into(div, "Investments"), 30000);
     assert.equal(div.nodes.some((n) => n.name === "Dividends"), false);
   });
 
@@ -1045,14 +1066,14 @@ describe("what the money bought", () => {
       holdings: [holding("Bonds", [{ date: "2026-04-01", kind: "buy", amount: 45000 }])],
     });
     assert.equal(outOf(over, "From savings"), 15000);
-    assert.equal(into(over, "RRSP"), 45000);
+    assert.equal(into(over, "Investments"), 45000);
   });
 
   test("an asset class carries the colour of the branch that bought it", () => {
     const role = (n: string) => f.nodes.find((x) => x.name === n)?.role;
     assert.equal(role("US Equity"), "investing");
     assert.equal(role("Bonds"), "investing");
-    assert.equal(role("RRSP"), "investing");
+    assert.equal(role("Investments"), "investing");
     assert.equal(role("Chequing"), "account");
     assert.equal(role("Salary"), "source");
   });
@@ -1096,7 +1117,7 @@ describe("an account is invested by what it is", () => {
   });
 
   test("and it reads as the invested side", () => {
-    assert.equal(f.nodes.find((n) => n.name === "Pension Plan")?.role, "investing");
+    assert.equal(f.nodes.find((n) => n.name === "Investments")?.role, "investing");
     assert.equal(f.nodes.find((n) => n.name === "Chequing")?.role, "account");
   });
 });

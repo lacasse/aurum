@@ -879,9 +879,35 @@ export interface YearFlow {
 /** Accounts whose outflow is purchases rather than spending. */
 const INVESTED_KINDS = new Set<AccountKind>(["investment", "crypto", "pension"]);
 
+/**
+ * All the invested accounts as one bar.
+ *
+ * Drawn separately they were four or five nodes that behaved identically —
+ * money in, securities out — and the reader had to add them up by eye to learn
+ * what the year invested. Which account a holding sits in is a tax question,
+ * answered on the contribution card and on the accounts page; it is not what
+ * this chart is for. Merged, the bar is the year's investing, and what it
+ * bought hangs off it by asset class.
+ *
+ * Nothing about the arithmetic changes: summing the accounts sums their
+ * inflows and their outflows together, so the one node reconciles exactly as
+ * the several did. A transfer between two of them becomes a link from the node
+ * to itself, which is no flow at all — and it never was.
+ */
+const INVESTMENTS = "Investments";
+
 const SPENDING = "Spending";
-/** An account buying securities with what it holds. */
-const BOUGHT = "Bought";
+/**
+ * A purchase, which needs no node of its own.
+ *
+ * Buys used to pass through a single "Bought" node on the way to the classes.
+ * It cost a column and it lost the thing worth seeing: every account's
+ * purchases merged there before fanning out again, so which account bought the
+ * bonds and which bought the equity was no longer on the chart. An investment
+ * account is already the answer to "what was this for"; what it bought hangs
+ * straight off it.
+ */
+const ASSET = "__asset";
 /** Money moved to another of your own accounts, which is not a purpose. */
 const DEPOSIT = "__deposit";
 /** Selling a position, which is money arriving rather than leaving. */
@@ -891,7 +917,6 @@ const UNITEMISED = "Not itemised";
 
 const GROUP_ROLE: Record<string, FlowNode["role"]> = {
   [SPENDING]: "necessity",
-  [BOUGHT]: "investing",
 };
 /** The three ends of the spending branch, each its own colour. */
 const LEAF_ROLE: Record<string, FlowNode["role"]> = {
@@ -970,15 +995,22 @@ export function yearFlow(
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const TRUNK = year;
 
-  /** The account a row touched, or the year itself when it names none. */
-  const hubOf = (id: string | undefined) => byId.get(id ?? "")?.name ?? TRUNK;
+  /**
+   * The account a row touched, or the year itself when it names none. Every
+   * invested account answers to one name; see INVESTMENTS.
+   */
+  const hubOf = (id: string | undefined) => {
+    const a = byId.get(id ?? "");
+    if (!a) return TRUNK;
+    return INVESTED_KINDS.has(a.kind) ? INVESTMENTS : a.name;
+  };
 
   const incomeTotals = new Map<string, number>();
   const spendTotals = new Map<string, number>();
   const investTotals = new Map<string, number>();
   const hubTotals = new Map<string, number>();
-  /** Accounts whose outflow is purchases rather than spending. */
-  const invested = new Set<string>();
+  /** Whether the invested bar is on this year's chart at all. */
+  let anyInvested = false;
   const rows: {
     from: string;
     to: string;
@@ -996,6 +1028,7 @@ export function yearFlow(
     if (cents <= 0) continue;
     if (isIncome(t)) {
       const hub = hubOf(t.destinationAccountId);
+      if (hub === INVESTMENTS) anyInvested = true;
       note(incomeTotals, t.category, cents);
       note(hubTotals, hub, cents);
       rows.push({ from: t.category, to: hub, cents, stage: 1 });
@@ -1014,17 +1047,17 @@ export function yearFlow(
       const dest = byId.get(t.destinationAccountId ?? "");
       if (!dest || !INVESTED_KINDS.has(dest.kind)) continue;
       const hub = hubOf(t.sourceAccountId);
-      // A deposit from the invested account into itself is not a deposit.
-      if (hub === dest.name) continue;
-      invested.add(dest.name);
+      // Moving between two invested accounts is not a flow through the year.
+      if (hub === INVESTMENTS) continue;
+      anyInvested = true;
       note(hubTotals, hub, cents);
-      note(hubTotals, dest.name, cents);
+      note(hubTotals, INVESTMENTS, cents);
       /*
        * Account to account, with no purpose node between them. The deposit is
        * not spending and it is not yet a purchase — it is the money moving to
        * where the buying happens, and the buying is the next column.
        */
-      rows.push({ from: hub, to: dest.name, cents, stage: 2, group: DEPOSIT });
+      rows.push({ from: hub, to: INVESTMENTS, cents, stage: 2, group: DEPOSIT });
     }
   }
 
@@ -1032,24 +1065,19 @@ export function yearFlow(
    * The purchases and sales inside the accounts. A buy is how an investment
    * account spends; a sale is money arriving in one.
    */
-  const sold = new Map<string, number>();
   for (const h of holdings) {
-    const hub = hubOf(h.accountId);
     for (const f of h.flows ?? []) {
       if (f.date.slice(0, 4) !== year) continue;
       const cents = toCents(f.amount);
       if (cents <= 0) continue;
+      anyInvested = true;
+      note(hubTotals, INVESTMENTS, cents);
       if (f.kind === "buy") {
-        invested.add(hub);
         note(investTotals, h.assetClass, cents);
-        note(hubTotals, hub, cents);
-        rows.push({ from: hub, to: h.assetClass, cents, stage: 2, group: BOUGHT });
+        rows.push({ from: INVESTMENTS, to: h.assetClass, cents, stage: 2, group: ASSET });
       } else if (f.kind === "sell") {
-        invested.add(hub);
         note(incomeTotals, SOLD, cents);
-        note(hubTotals, hub, cents);
-        note(sold, hub, cents);
-        rows.push({ from: SOLD, to: hub, cents, stage: 1 });
+        rows.push({ from: SOLD, to: INVESTMENTS, cents, stage: 1 });
       }
       // Dividends are income already, under their own category. See above.
     }
@@ -1077,7 +1105,7 @@ export function yearFlow(
    * anyway so a future class or group cannot quietly widen the chart.
    */
   const leafName: Record<string, (name: string) => string> = {
-    [BOUGHT]: pool(investTotals, limit, "Other assets"),
+    [ASSET]: pool(investTotals, limit, "Other assets"),
   };
   // The year node is the spine for account-less rows and never pools away.
   const hubName = (() => {
@@ -1091,6 +1119,7 @@ export function yearFlow(
   const outflow = new Map<string, number>();
   const groups = new Set<string>();
   const leaves = new Set<string>();
+  const assetLeaves = new Set<string>();
   const link = (from: string, to: string, cents: number) => {
     if (from === to) return;
     edges.set(`${from}\u0000${to}`, (edges.get(`${from}\u0000${to}`) ?? 0) + cents);
@@ -1116,14 +1145,22 @@ export function yearFlow(
       note(inflow, to, r.cents);
       continue;
     }
+    const group = r.group ?? SPENDING;
+    const leaf = (leafName[group] ?? ((n: string) => n))(r.to);
+    if (group === ASSET) {
+      // Straight off the account that bought it. See ASSET.
+      link(from, leaf, r.cents);
+      leaves.add(leaf);
+      assetLeaves.add(leaf);
+      note(outflow, from, r.cents);
+      continue;
+    }
     /*
      * Two links for one row: the account to what it was for, and that to the
      * thing itself. The pair is what puts a column between them, and because
      * both carry the same amount the account still balances exactly as it did
      * when it paid the destination directly.
      */
-    const group = r.group ?? SPENDING;
-    const leaf = (leafName[group] ?? ((n: string) => n))(r.to);
     link(from, group, r.cents);
     link(group, leaf, r.cents);
     groups.add(group);
@@ -1140,19 +1177,14 @@ export function yearFlow(
     );
 
   /*
-   * An account is the invested kind or it is not; whether it happened to
-   * receive a transfer this year does not change what it is. Deciding by the
+   * One node is the invested side, whatever arrived in it. Deciding by the
    * transfer left a pension that was paid into directly reading as a chequing
    * account, so its contributions came out as money deliberately unspent.
    */
   const investedHubs = new Set(
-    [
-      ...invested,
-      ...accounts.filter((a) => INVESTED_KINDS.has(a.kind)).map((a) => a.name),
-    ]
-      .map((n) => hubName(n))
-      .filter((n) => hubs.includes(n)),
+    anyInvested && hubs.includes(INVESTMENTS) ? [INVESTMENTS] : [],
   );
+
   const shortfall = new Map<string, number>();
   const spare = new Map<string, number>();
   for (const hub of hubs) {
@@ -1192,13 +1224,17 @@ export function yearFlow(
   for (const e of edgeList) if (hubs.includes(e.to) && !hubs.includes(e.from)) id(e.from, "source");
   if (shortfall.size > 0) id("From savings", "source");
   for (const hub of hubs) id(hub, investedHubs.has(hub) ? "investing" : "account");
-  for (const g of [SPENDING, BOUGHT]) if (groups.has(g)) id(g, GROUP_ROLE[g]);
+  for (const g of [SPENDING]) if (groups.has(g)) id(g, GROUP_ROLE[g]);
   for (const e of edgeList) {
     if (groups.has(e.from) && leaves.has(e.to)) {
       roleOfLeaf.set(e.to, LEAF_ROLE[e.to] ?? GROUP_ROLE[e.from]);
     }
   }
-  for (const e of edgeList) if (leaves.has(e.to)) id(e.to, roleOfLeaf.get(e.to));
+  for (const e of edgeList) {
+    if (leaves.has(e.to)) {
+      id(e.to, assetLeaves.has(e.to) ? "investing" : roleOfLeaf.get(e.to));
+    }
+  }
   if (kept > 0) id("Kept", "kept");
   if (unitemised > 0) id(UNITEMISED, "idle");
 

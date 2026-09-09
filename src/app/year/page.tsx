@@ -557,17 +557,18 @@ export default function YearPage() {
               third, and every account balances on its own. Spending ends at
               necessity or discretion rather than at a column of categories —
               the same split as the Expenses page, and reassignable there.
-              A deposit into an investment account and a purchase inside it are
-              two different events, so the deposit moves the money between
-              accounts and the purchase is what the account then spends it on,
-              broken down by asset class. Selling appears on the left, because
-              a sale is money arriving. Dividends are not taken from the trade
-              history — they are already income under their own category.
-              Transfers between two cash accounts are left out, because the same
-              dollar would be counted twice. Anything that left an account income
-              never reached comes in as “From savings”; anything an investment
-              account took in with no purchase to account for is “Not itemised”,
-              which is cash sitting there or trades that were never imported.
+              Every invested account is one bar — which account a holding sits in
+              is a tax question, answered on the contribution card. A deposit
+              into it and a purchase inside it are two different events, so the
+              deposit moves the money and the purchase is what it became, broken
+              down by asset class. Selling appears on the left, because a sale is
+              money arriving. Dividends are not taken from the trade history —
+              they are already income under their own category. Transfers between
+              two cash accounts are left out, because the same dollar would be
+              counted twice. Anything that left an account income never reached
+              comes in as “From savings”; anything the invested bar took in with
+              no purchase to account for is “Not itemised”, which is cash sitting
+              there or trades that were never imported.
             </p>
           </Card>
         )}
