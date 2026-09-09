@@ -25,8 +25,10 @@ import {
   AllocationBar,
   GroupedBars,
   RoomGauge,
+  SeriesChart,
   SignedHBars,
   Waterfall,
+  spectrumAt,
 } from "@/components/charts";
 import { accent as accentFor } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
@@ -43,7 +45,11 @@ import {
 import {
   cashflowInsights,
   categoryShifts,
+  contributionsVsValue,
   incomeAllocation,
+  incomeMix,
+  runwayByYear,
+  unearnedShare,
   milestones,
   yearInsights,
   yearRows,
@@ -225,6 +231,15 @@ export default function YearPage() {
     groupOf(c, spendGroups),
   );
   const shifts = categoryShifts(transactions, selected.year);
+  const contributions = contributionsVsValue(data.rows);
+  const latestGap =
+    contributions.length > 0
+      ? contributions[contributions.length - 1].value -
+        contributions[contributions.length - 1].contributed
+      : null;
+  const mix = incomeMix(transactions);
+  const unearned = unearnedShare(transactions, selected.year);
+  const runway = runwayByYear(data.shapes, transactions, (c) => groupOf(c, spendGroups));
   const balanceBars = data.shapes.map((sh) => ({
     label: sh.year,
     Cash: sh.cash,
@@ -545,6 +560,102 @@ export default function YearPage() {
               </p>
             )}
           </Card>
+        </div>
+
+        {/*
+          * Compounding, as a picture rather than a percentage. The lines start
+          * together and separate; the gap is every dollar the portfolio earned
+          * rather than received.
+          */}
+        {contributions.length > 1 && (
+          <Card>
+            <CardHeader
+              title="What you put in, against what it became"
+              subtitle="Everything paid into the portfolio, beside what it is worth"
+            />
+            <div className="px-3 pb-4">
+              <SeriesChart
+                data={contributions as unknown as Record<string, unknown>[]}
+                xKey="label"
+                series={[
+                  { key: "contributed", name: "Paid in", color: accentFor("cost"), kind: "line" },
+                  { key: "value", name: "Worth", color: accentFor("brand") },
+                ]}
+                yFmt={(n: number) => fmtCompact(n)}
+                height={240}
+              />
+            </div>
+            {latestGap !== null && (
+              <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
+                The gap is {fmtCAD(Math.abs(latestGap))} the portfolio{" "}
+                {latestGap >= 0 ? "has earned" : "is behind"} on what was paid
+                into it. Withdrawals pull the lower line down, so a year that
+                sold something narrows the gap without anything having been lost.
+              </p>
+            )}
+          </Card>
+        )}
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/*
+            * A wage can only be traded for time. Everything beside it compounds
+            * without asking, so the share worth watching is the one that is not
+            * the salary — which a total can never show.
+            */}
+          {mix.rows.length > 1 && (
+            <Card>
+              <CardHeader
+                title="Where the income came from"
+                subtitle={
+                  unearned === null
+                    ? "By source, year over year"
+                    : `${Math.round(unearned)}% of ${selected.year} came from something other than work`
+                }
+              />
+              <div className="px-3 pb-4">
+                <GroupedBars
+                  data={mix.rows as unknown as Record<string, unknown>[]}
+                  xKey="label"
+                  stacked
+                  bars={mix.sources.map((name, i) => ({
+                    key: name,
+                    name,
+                    color: spectrumAt(i, mix.sources.length),
+                  }))}
+                  yFmt={(n: number) => fmtCompact(n)}
+                  height={240}
+                />
+              </div>
+            </Card>
+          )}
+
+          {/*
+            * Against necessities, not all spending: the question a reserve
+            * answers is how long you could go without income, and the
+            * discretionary half is the first thing to stop in that year.
+            */}
+          {runway.some((r) => r.months !== null) && (
+            <Card>
+              <CardHeader
+                title="How long the cash would last"
+                subtitle="Months of necessities covered by cash at each year end"
+              />
+              <div className="px-3 pb-4">
+                <GroupedBars
+                  data={runway as unknown as Record<string, unknown>[]}
+                  xKey="label"
+                  bars={[{ key: "months", name: "Months", color: accentFor("market") }]}
+                  yFmt={(n: number) => `${n}m`}
+                  height={240}
+                />
+              </div>
+              <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
+                Measured against what the year cost in necessities alone.
+                Counting discretionary spending too would understate the reserve
+                by pricing in choices nobody would keep making.
+              </p>
+            </Card>
+          )}
         </div>
 
         <Card>

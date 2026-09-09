@@ -629,3 +629,149 @@ export function categoryShifts(
     .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
     .slice(0, limit);
 }
+
+/* ── What you put in, against what it became ── */
+
+export interface ContributionPoint {
+  label: string;
+  /** Everything paid into holdings up to the end of this year, less withdrawals. */
+  contributed: number;
+  /** What the portfolio was worth at that point. */
+  value: number;
+}
+
+/**
+ * The compounding story, which a single year cannot tell.
+ *
+ * The waterfall answers what one year did. This answers the question behind
+ * it: the two lines start together and separate, and the gap between them is
+ * every dollar the portfolio earned rather than received. Watching that gap
+ * open is the only view in the app where compounding is a picture rather than
+ * a percentage.
+ *
+ * A year the portfolio was not yet worth anything is dropped rather than drawn
+ * as two lines at zero, which is a flat start that says nothing and squashes
+ * the years that do.
+ */
+export function contributionsVsValue(rows: readonly YearRow[]): ContributionPoint[] {
+  const ordered = [...rows].sort((a, b) => a.year.localeCompare(b.year));
+  let running = 0;
+  const out: ContributionPoint[] = [];
+  for (const r of ordered) {
+    running = roundMoney(running + r.investmentFlows);
+    if (r.portfolio <= 0 && running <= 0) continue;
+    out.push({ label: r.year, contributed: running, value: r.portfolio });
+  }
+  return out;
+}
+
+/* ── Where the income came from ── */
+
+export interface IncomeMix {
+  /** One row per year, with a key per source. */
+  rows: Record<string, string | number>[];
+  /** The sources present, largest first, for the chart's series. */
+  sources: string[];
+}
+
+/**
+ * Income by source, year over year.
+ *
+ * A salary is one source and one employer, and a record that shows only its
+ * total cannot say whether that is changing. Split by source and stacked, the
+ * question becomes visible: whether anything is growing beside the wage, and
+ * how fast.
+ *
+ * Borrowing is excluded along with everything else `isIncome` refuses, because
+ * money arriving from a lender is not income and drawing it as a source would
+ * make a year of borrowing look like a year of earning.
+ */
+export function incomeMix(transactions: Transaction[], limit = 5): IncomeMix {
+  const byYear = new Map<string, Map<string, number>>();
+  const totals = new Map<string, number>();
+
+  for (const t of transactions) {
+    if (!isIncome(t)) continue;
+    const year = t.date.slice(0, 4);
+    const cents = toCents(t.amount);
+    const slot = byYear.get(year) ?? new Map<string, number>();
+    slot.set(t.category, (slot.get(t.category) ?? 0) + cents);
+    byYear.set(year, slot);
+    totals.set(t.category, (totals.get(t.category) ?? 0) + cents);
+  }
+
+  const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c);
+  const kept = ranked.slice(0, limit);
+  const hasOther = ranked.length > kept.length;
+  const sources = hasOther ? [...kept, "Other"] : kept;
+
+  const rows = [...byYear.keys()]
+    .sort()
+    .map((year) => {
+      const slot = byYear.get(year)!;
+      const row: Record<string, string | number> = { label: year };
+      for (const source of kept) row[source] = fromCents(slot.get(source) ?? 0);
+      if (hasOther) {
+        let rest = 0;
+        for (const [category, cents] of slot) if (!kept.includes(category)) rest += cents;
+        row.Other = fromCents(rest);
+      }
+      return row;
+    });
+
+  return { rows, sources };
+}
+
+/**
+ * The share of a year's income that did not come from working.
+ *
+ * The figure worth watching rather than the total: a wage can only be traded
+ * for time, and everything else compounds without asking. Null when the year
+ * earned nothing, because a share of nothing is not zero.
+ */
+export function unearnedShare(
+  transactions: Transaction[],
+  year: string,
+  workCategories = new Set(["Salary", "Additional Income"]),
+): number | null {
+  let total = 0;
+  let unearned = 0;
+  for (const t of transactions) {
+    if (!isIncome(t) || t.date.slice(0, 4) !== year) continue;
+    const cents = toCents(t.amount);
+    total += cents;
+    if (!workCategories.has(t.category)) unearned += cents;
+  }
+  return total > 0 ? (unearned / total) * 100 : null;
+}
+
+/* ── How long the cash would last ── */
+
+export interface RunwayPoint {
+  label: string;
+  /** Months of necessary spending covered by cash, or null without either. */
+  months: number | null;
+}
+
+/**
+ * Months of necessities the cash on hand would cover, at each year end.
+ *
+ * Against necessities rather than all spending: the question a reserve answers
+ * is how long you could go without income, and in that year the discretionary
+ * half is the first thing to stop. Measuring against total spending understates
+ * the reserve by pricing in choices nobody would keep making.
+ */
+export function runwayByYear(
+  shapes: readonly YearShape[],
+  transactions: Transaction[],
+  groupOf: (category: string) => "necessity" | "discretionary" | "excluded",
+): RunwayPoint[] {
+  return shapes.map((shape) => {
+    const { necessities } = incomeAllocation(transactions, shape.year, groupOf);
+    const monthly = necessities / 12;
+    return {
+      label: shape.year,
+      months: monthly > 0 && shape.cash > 0 ? Math.round((shape.cash / monthly) * 10) / 10 : null,
+    };
+  });
+}

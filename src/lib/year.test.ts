@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import {
   cashflowInsights,
   categoryShifts,
+  contributionsVsValue,
   incomeAllocation,
+  incomeMix,
+  runwayByYear,
+  unearnedShare,
   milestones,
   yearInsights,
   yearRows,
@@ -500,5 +504,99 @@ describe("what the cash flow says", () => {
 
   test("a year with no income says nothing at all", () => {
     assert.deepEqual(cashflowInsights([txn("2026-01-01", "expense", 10, "Travel")], "2026", groups), []);
+  });
+});
+
+describe("what you put in, against what it became", () => {
+  test("contributions accumulate while the value is read as it stands", () => {
+    const pts = contributionsVsValue([
+      row("2024", { investmentFlows: 10000, portfolio: 10500 }),
+      row("2025", { investmentFlows: 12000, portfolio: 26000 }),
+      row("2026", { investmentFlows: 8000, portfolio: 42000 }),
+    ]);
+    assert.deepEqual(pts.map((p) => p.contributed), [10000, 22000, 30000]);
+    assert.deepEqual(pts.map((p) => p.value), [10500, 26000, 42000]);
+  });
+
+  test("a withdrawal pulls the contributed line back down", () => {
+    const pts = contributionsVsValue([
+      row("2025", { investmentFlows: 20000, portfolio: 21000 }),
+      row("2026", { investmentFlows: -5000, portfolio: 17000 }),
+    ]);
+    assert.equal(pts[1].contributed, 15000);
+  });
+
+  test("years before anything was invested are left out", () => {
+    const pts = contributionsVsValue([
+      row("2023", { investmentFlows: 0, portfolio: 0 }),
+      row("2024", { investmentFlows: 0, portfolio: 0 }),
+      row("2025", { investmentFlows: 5000, portfolio: 5100 }),
+    ]);
+    assert.deepEqual(pts.map((p) => p.label), ["2025"]);
+  });
+});
+
+describe("where the income came from", () => {
+  const txns = [
+    txn("2025-01-31", "income", 50000, "Salary"),
+    txn("2025-06-30", "income", 400, "Dividends"),
+    txn("2026-01-31", "income", 52000, "Salary"),
+    txn("2026-06-30", "income", 3000, "Dividends"),
+    txn("2026-07-31", "income", 900, "Interest"),
+    txn("2026-08-31", "income", 20000, "Loan Proceeds"),
+  ];
+
+  test("a year is a row and a source is a column", () => {
+    const { rows, sources } = incomeMix(txns);
+    assert.deepEqual(rows.map((r) => r.label), ["2025", "2026"]);
+    assert.ok(sources.includes("Salary"));
+    assert.equal(rows[1].Dividends, 3000);
+  });
+
+  test("borrowed money is not a source of income", () => {
+    const { rows, sources } = incomeMix(txns);
+    assert.equal(sources.includes("Loan Proceeds"), false);
+    assert.equal(rows[1]["Loan Proceeds"], undefined);
+  });
+
+  test("sources past the limit are pooled rather than dropped", () => {
+    const { rows, sources } = incomeMix(txns, 1);
+    assert.deepEqual(sources, ["Salary", "Other"]);
+    // Dividends and interest, neither lost nor listed.
+    assert.equal(rows[1].Other, 3900);
+  });
+
+  test("the share that did not come from working", () => {
+    // 3,900 of 55,900, borrowing excluded.
+    assert.equal(Math.round(unearnedShare(txns, "2026")!), 7);
+  });
+
+  test("a year that earned nothing has no share, rather than zero", () => {
+    assert.equal(unearnedShare(txns, "2019"), null);
+  });
+});
+
+describe("how long the cash would last", () => {
+  const shapes = yearShapes(
+    [row("2026", { netWorth: 100000 })],
+    [cls("2026-12", { Cash: 12000, Stocks: 88000 })],
+  );
+  const txns = [
+    txn("2026-01-31", "expense", 24000, "Housing"),
+    txn("2026-02-28", "expense", 60000, "Travel"),
+  ];
+
+  test("it counts necessities only, so choices do not shrink the reserve", () => {
+    // 24,000 of necessities is 2,000 a month; 12,000 of cash is six months.
+    assert.equal(runwayByYear(shapes, txns, groups)[0].months, 6);
+  });
+
+  test("no necessities recorded is unknown, not infinite", () => {
+    assert.equal(runwayByYear(shapes, [], groups)[0].months, null);
+  });
+
+  test("no cash is unknown too, rather than a confident nought", () => {
+    const broke = yearShapes([row("2026")], [cls("2026-12", { Cash: 0 })]);
+    assert.equal(runwayByYear(broke, txns, groups)[0].months, null);
   });
 });
