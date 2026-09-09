@@ -553,13 +553,14 @@ export default function YearPage() {
               />
             </div>
             <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
-              The second column is everything that reached a spendable account,
-              whichever account that was, and each bar balances on its own. Cards
-              count as spendable: paying one off is a transfer between your own
-              accounts, which this chart leaves out, so drawing the card apart
-              left its spending with no visible funding. Income paid straight
-              into a registered plan never lands here, which is why this is
-              smaller than the year&rsquo;s income. Spending ends at necessity or discretion
+              The second column is everything that arrived in an account you can
+              spend from, and each bar balances on its own. Cards count as
+              spendable: paying one off is a transfer between your own accounts,
+              which this chart leaves out, so drawing the card apart left its
+              spending with no visible funding. Pay that goes straight into a
+              registered plan never arrives in one of your accounts, so it is not
+              counted here — which is why this is smaller than the
+              year&rsquo;s income. Spending ends at necessity or discretion
               rather than at a column of categories: the same split as the
               Expenses page, and reassignable there. A deposit into the invested
               bar and a purchase inside it are two different events, so the

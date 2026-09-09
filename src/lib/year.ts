@@ -898,7 +898,11 @@ const INVESTED_KINDS = new Set<AccountKind>(["investment", "crypto", "pension"])
 const INVESTMENTS = "Investments";
 
 /**
- * Everything that reached a spendable account, as one bar. Cards included.
+ * Everything that arrived in an account you can spend from, as one bar.
+ *
+ * Arrived, not earned, and not new: in a year that outspends itself a drawn
+ * balance lands here too, and it is neither. The plainest true word is the one
+ * that survives that case, and it pairs with "Kept" at the other end.
  *
  * Five chequing and savings accounts down the middle answered "which one" for
  * a reader who was not asking, so the column says the kind of place the money
@@ -919,7 +923,7 @@ const INVESTMENTS = "Investments";
  * paying next month, which is a question about a balance rather than about a
  * year's spending, and the balance sheet answers it.
  */
-const CASH = "Net liquid inflows";
+const CASH = "Money in";
 const CASH_KINDS = new Set<AccountKind>([
   "checking",
   "savings",
