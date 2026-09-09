@@ -310,8 +310,8 @@ export default function YearPage() {
         {flow.nodes.length > 0 && (
           <Card>
             <CardHeader
-              title={`Every dollar of ${selected.year}`}
-              subtitle="Where the money came from, where it landed, and what it became"
+              title="Sources and uses of funds"
+              subtitle={`Every dollar that entered or left an account in ${selected.year}`}
             />
             <div className="px-3 pb-4">
               <YearSankey
@@ -334,8 +334,8 @@ export default function YearPage() {
         {byYear.years.length > 1 && (
           <Card>
             <CardHeader
-              title="Spending by category"
-              subtitle={`Each category's year, ${byYear.years[0]} to ${byYear.years[byYear.years.length - 1]}`}
+              title="Expenses by category"
+              subtitle={`Year over year, ${byYear.years[0]} to ${byYear.years[byYear.years.length - 1]}`}
             />
             <div className="px-3 pb-4">
               <GroupedBars
@@ -362,7 +362,7 @@ export default function YearPage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader
-              title="Income against spending"
+              title="Income, expenses and net savings"
               subtitle="Every year on record, side by side"
             />
             <div className="px-3 pb-4">
@@ -396,7 +396,7 @@ export default function YearPage() {
           {typeShares.length > 1 && (
             <Card>
               <CardHeader
-                title="Income type"
+                title="Active and passive income mix"
                 subtitle={
                   unearned === null
                     ? "Active against passive, year by year"
@@ -466,8 +466,8 @@ export default function YearPage() {
           {shape && (
             <Card>
               <CardHeader
-                title={`How ${selected.year} moved`}
-                subtitle="Opening net worth, what passed through the year, and where it closed"
+                title="Net worth roll-forward"
+                subtitle={`From opening to closing net worth in ${selected.year}`}
               />
               <div className="px-3 pb-4">
                 <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} />
@@ -486,8 +486,8 @@ export default function YearPage() {
           {balanceBars.length > 1 && (
             <Card>
               <CardHeader
-                title="Balance sheet composition"
-                subtitle="Where the money sits at the end of each year, and what is owed against it"
+                title="Asset allocation at year end"
+                subtitle="What the assets are made of each year, and what is owed against them"
               />
               <div className="px-3 pb-4">
                 {/*
@@ -545,7 +545,7 @@ export default function YearPage() {
           {contributions.length > 1 && (
             <Card>
               <CardHeader
-                title="Investment compounding"
+                title="Net contributions against market value"
                 subtitle="Everything paid into the portfolio, beside what it is worth"
               />
               <div className="px-3 pb-4">
@@ -579,8 +579,8 @@ export default function YearPage() {
             */}
           <Card>
             <CardHeader
-              title="Contribution room"
-              subtitle={`What you have paid into each registered plan in ${selected.year}`}
+              title="Registered plan contribution room"
+              subtitle={`What you have paid into each plan in ${selected.year}`}
               action={
                 <Button variant="ghost" size="sm" onClick={() => setRoomOpen(true)}>
                   <SlidersHorizontal size={14} /> Set room
@@ -625,7 +625,7 @@ export default function YearPage() {
         <SectionHeading title="The record" hint="Every year on record, side by side" />
         <Card>
           <CardHeader
-            title="Year by year"
+            title="Annual summary"
             subtitle="What came in, what it grew to, and what the portfolio did with it"
           />
           <div className="overflow-x-auto px-2 pb-3">
