@@ -472,7 +472,21 @@ export default function YearPage() {
         </div>
 
         <SectionHeading title="Net worth" hint="What the year built, and what it is made of" />
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/*
+          * A third of the row for the roll-forward, two thirds for the mix.
+          *
+          * Five columns given half a page were slabs — a waterfall is five
+          * numbers and the shape they make, and at that width the shape was
+          * lost behind the bars drawing it. The composition beside it is a
+          * line over years and reads better the wider it gets, so the space
+          * one chart does not want is the space the other one does.
+          *
+          * Only where a third is wide enough to label, though. Below that the
+          * five names run into each other and the figures over the bars
+          * collide, so the row falls back to halves before it falls back to
+          * one on top of the other.
+          */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {shape && (
             <Card className="flex h-full flex-col">
               <CardHeader
@@ -499,7 +513,7 @@ export default function YearPage() {
             * from the same three shared definitions.
             */}
           {balanceBars.length > 1 && (
-            <Card className="flex h-full flex-col">
+            <Card className="flex h-full flex-col xl:col-span-2">
               <CardHeader
                 title="Asset allocation at year end"
                 subtitle="Share of everything you own, at the close of each year"
