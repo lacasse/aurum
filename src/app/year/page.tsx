@@ -370,12 +370,12 @@ export default function YearPage() {
         )}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card>
+          <Card className="flex h-full flex-col">
             <CardHeader
               title="Income, expenses and net savings"
               subtitle="Every year on record, side by side"
             />
-            <div className="px-3 pb-4">
+            <div className="min-h-[260px] flex-1 px-3 pb-4">
               {/*
                 * Saved is the difference, in dollars, so it shares the axis. A
                 * rate would not: a percentage against a scale of dollars is a
@@ -390,7 +390,7 @@ export default function YearPage() {
                   { key: "expenses", name: "Expenses", color: accentFor("negative") },
                   { key: "saved", name: "Saved", color: accentFor("brand") },
                 ]}
-                height={260}
+                height="100%"
                 yFmt={fmtCompact}
               />
             </div>
@@ -404,7 +404,7 @@ export default function YearPage() {
             * and not needing one.
             */}
           {typeShares.length > 1 && (
-            <Card>
+            <Card className="flex h-full flex-col">
               <CardHeader
                 title="Active and passive income mix"
                 subtitle={
@@ -421,7 +421,7 @@ export default function YearPage() {
                 * trade in a chart whose whole subject is proportion. The figures
                 * underneath are what answer for a band too thin to read.
                 */}
-              <div className="px-3 pb-2">
+              <div className="min-h-[280px] flex-1 px-3 pb-2">
                 <SeriesChart
                   data={typeShares as unknown as Record<string, unknown>[]}
                   xKey="label"
@@ -438,7 +438,7 @@ export default function YearPage() {
                     { key: "Active", name: "Active", color: accentFor("brand") },
                     { key: "Passive", name: "Passive", color: accentFor("cost") },
                   ]}
-                  height={280}
+                  height="100%"
                   yDomain={[0, 100]}
                   yFmt={(n: number) => `${Math.round(n)}%`}
                 />
@@ -474,13 +474,17 @@ export default function YearPage() {
         <SectionHeading title="Net worth" hint="What the year built, and what it is made of" />
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {shape && (
-            <Card>
+            <Card className="flex h-full flex-col">
               <CardHeader
                 title="Net worth roll-forward"
                 subtitle={`From opening to closing net worth in ${selected.year}`}
               />
-              <div className="px-3 pb-4">
-                <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} />
+              <div className="min-h-[300px] flex-1 px-3 pb-4">
+                <Waterfall
+                  steps={yearWaterfall(shape)}
+                  format={(n) => fmtCompact(n)}
+                  height="100%"
+                />
               </div>
             </Card>
           )}
@@ -495,7 +499,7 @@ export default function YearPage() {
             * from the same three shared definitions.
             */}
           {balanceBars.length > 1 && (
-            <Card>
+            <Card className="flex h-full flex-col">
               <CardHeader
                 title="Asset allocation at year end"
                 subtitle="Share of everything you own, at the close of each year"
@@ -518,7 +522,7 @@ export default function YearPage() {
                 * A band worth very little is still only a few pixels tall, and
                 * the figures underneath are what answer for it.
                 */}
-              <div className="px-3 pb-2">
+              <div className="min-h-[280px] flex-1 px-3 pb-2">
                 <SeriesChart
                   data={balanceMix as unknown as Record<string, unknown>[]}
                   xKey="label"
@@ -529,7 +533,7 @@ export default function YearPage() {
                     name,
                     color: CLASS_COLORS[name],
                   }))}
-                  height={280}
+                  height="100%"
                   yDomain={[0, 100]}
                   yFmt={(n: number) => `${Math.round(n)}%`}
                 />
@@ -606,12 +610,12 @@ export default function YearPage() {
             * rather than received.
             */}
           {contributions.length > 1 && (
-            <Card>
+            <Card className="flex h-full flex-col">
               <CardHeader
                 title="Net contributions against market value"
                 subtitle="Everything paid into the portfolio, beside what it is worth"
               />
-              <div className="px-3 pb-4">
+              <div className="min-h-[240px] flex-1 px-3 pb-4">
                 <SeriesChart
                   data={contributions as unknown as Record<string, unknown>[]}
                   xKey="label"
@@ -620,7 +624,7 @@ export default function YearPage() {
                     { key: "value", name: "Worth", color: accentFor("brand") },
                   ]}
                   yFmt={(n: number) => fmtCompact(n)}
-                  height={240}
+                  height="100%"
                 />
               </div>
               {latestGap !== null && (
@@ -640,7 +644,7 @@ export default function YearPage() {
             * years ago, all of it stated on a notice of assessment — so the
             * figure is entered, and what has been paid in against it is counted.
             */}
-          <Card>
+          <Card className="flex h-full flex-col">
             <CardHeader
               title="Registered plan contribution room"
               subtitle={`What you have paid into each plan in ${selected.year}`}
@@ -650,7 +654,7 @@ export default function YearPage() {
                 </Button>
               }
             />
-            <div className="grid grid-cols-1 gap-6 px-4 pb-5 pt-1 sm:grid-cols-3">
+            <div className="grid min-h-0 flex-1 grid-cols-1 content-center gap-6 px-4 pb-5 pt-1 sm:grid-cols-3">
               {room.map((r) => (
                 <RoomGauge
                   key={r.plan}

@@ -440,7 +440,8 @@ export function GroupedBars({
   data: Record<string, unknown>[];
   xKey: string;
   bars: SeriesDef[];
-  height?: number;
+  /** A percentage fills whatever box the card gives it. See SeriesChart. */
+  height?: number | `${number}%`;
   yFmt?: (n: number) => string;
   stacked?: boolean;
 }) {
@@ -1063,7 +1064,8 @@ export function Waterfall({
 }: {
   steps: { label: string; delta: number; base: number; top: number; kind: "total" | "up" | "down" }[];
   format: (n: number) => string;
-  height?: number;
+  /** A percentage fills whatever box the card gives it. See SeriesChart. */
+  height?: number | `${number}%`;
 }) {
   /*
    * The axis starts below the lowest level the year reaches, not at zero.
@@ -1130,9 +1132,22 @@ export function Waterfall({
         ? accent("positive")
         : accent("negative");
 
+  /*
+   * A percentage height has to be passed down, not just set.
+   *
+   * The note under the chart means there is a wrapper between the card and the
+   * plot, and a wrapper of its own height is nothing for a percentage to
+   * resolve against — the plot collapsed to nought and the card drew a caption
+   * over empty space. Told to fill, the wrapper becomes the column that fills
+   * and the plot takes what the note leaves.
+   */
+  const fills = typeof height === "string";
   return (
-    <div className="w-full">
-      <div style={{ width: "100%", height }}>
+    <div className={cn("w-full", fills && "flex h-full flex-col")}>
+      <div
+        className={fills ? "min-h-0 flex-1" : undefined}
+        style={fills ? { width: "100%" } : { width: "100%", height }}
+      >
       <ResponsiveContainer>
         <ComposedChart
           data={rows}
