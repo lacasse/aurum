@@ -1093,6 +1093,14 @@ export const PASSIVE_INCOME_CATEGORIES = new Set(["Dividends", "Interest"]);
  * Interest is not here, and neither is cashback: both land in the account and
  * are recorded together under Interest.
  */
+/*
+ * Income that arrives but cannot be spent this month.
+ *
+ * A pension *contribution* qualifies: it comes off the pay and lands in a plan
+ * nobody can draw on for decades. A pension *payment* does not — the plan
+ * paying out is the most spendable income there is, and the whole point of
+ * having made the contributions. They are deliberately different categories.
+ */
 export const NON_SPENDABLE_INCOME = new Set(["RSP / Pension", "Dividends"]);
 
 /**

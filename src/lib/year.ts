@@ -732,7 +732,23 @@ export function incomeMix(transactions: Transaction[], limit = 5): IncomeMix {
 export function unearnedShare(
   transactions: Transaction[],
   year: string,
-  workCategories = new Set(["Salary", "Additional Income"]),
+  /*
+   * What counts as working for it.
+   *
+   * A pension *contribution* belongs here: it is deferred pay, earned by the
+   * same hours as the salary it comes off, and counting it as unearned would
+   * report someone as further from living on their assets than they are the
+   * more they save into a plan. A pension *payment* is the opposite — the plan
+   * paying you whether you work or not — and is deliberately absent.
+   *
+   * Freelance income was absent by oversight, which flattered the figure.
+   */
+  workCategories = new Set([
+    "Salary",
+    "Additional Income",
+    "Freelance",
+    "RSP / Pension",
+  ]),
 ): number | null {
   let total = 0;
   let unearned = 0;

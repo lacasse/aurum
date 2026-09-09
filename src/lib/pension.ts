@@ -13,10 +13,34 @@ import { fromCents, roundMoney, toCents } from "./money";
  * between them is the part of the pension that is not your own money.
  */
 
-/** The category a pension contribution is recorded under. */
+/** The category a pension *contribution* is recorded under. */
 export const PENSION_CATEGORY = "RSP / Pension";
 
-/** Contributions per month, from the transactions that record them. */
+/**
+ * The category a pension *payment* is recorded under, once the plan is paying.
+ *
+ * Two opposite flows through the same plan, and they must not share a
+ * category. A contribution is deferred pay that never reaches an account you
+ * can spend from and that increases what the plan owes you. An annuity is the
+ * plan paying it back: ordinary spendable income, and no longer anything to do
+ * with what you put in.
+ *
+ * Filed together they would break three things at once. `contributionsByMonth`
+ * reads its category to estimate what the plan is worth, so a monthly payment
+ * would be counted as a monthly deposit and inflate the pension every month it
+ * paid out. The income that funds a retirement would be marked non-spendable,
+ * which is exactly backwards. And the income mix would draw one source where
+ * there are two, moving in opposite directions.
+ */
+export const PENSION_INCOME_CATEGORY = "Pension Income";
+
+/**
+ * Contributions per month, from the transactions that record them.
+ *
+ * Contributions only. A payment out of the plan is a different category by
+ * design — see `PENSION_INCOME_CATEGORY` — so it cannot be read here as money
+ * arriving into the plan.
+ */
 export function contributionsByMonth(
   transactions: Transaction[],
 ): Record<string, number> {

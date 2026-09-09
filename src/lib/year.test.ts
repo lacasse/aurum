@@ -609,3 +609,39 @@ describe("income as shares of each year", () => {
     assert.equal(gap[1].Salary, 0);
   });
 });
+
+describe("pension in, pension out", () => {
+  const txns = [
+    txn("2026-01-31", "income", 60000, "Salary"),
+    txn("2026-02-28", "income", 6000, "RSP / Pension"),
+    txn("2026-03-31", "income", 30000, "Pension Income"),
+    txn("2026-04-30", "income", 4000, "Dividends"),
+  ];
+
+  test("a contribution is earned; an annuity is not", () => {
+    // 30,000 of annuity and 4,000 of dividends against 100,000 of income.
+    assert.equal(Math.round(unearnedShare(txns, "2026")!), 34);
+  });
+
+  test("saving into a plan does not make you look less independent", () => {
+    const saving = [
+      txn("2026-01-31", "income", 60000, "Salary"),
+      txn("2026-02-28", "income", 40000, "RSP / Pension"),
+    ];
+    assert.equal(unearnedShare(saving, "2026"), 0);
+  });
+
+  test("freelance work counts as work", () => {
+    const gig = [
+      txn("2026-01-31", "income", 50000, "Salary"),
+      txn("2026-02-28", "income", 50000, "Freelance"),
+    ];
+    assert.equal(unearnedShare(gig, "2026"), 0);
+  });
+
+  test("the two show as separate sources in the mix", () => {
+    const { sources } = incomeMix(txns);
+    assert.ok(sources.includes("RSP / Pension"));
+    assert.ok(sources.includes("Pension Income"));
+  });
+});
