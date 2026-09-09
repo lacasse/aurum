@@ -261,6 +261,26 @@ export function SeriesChart({
 }) {
   const gid = useId().replace(/[:]/g, "");
   const stackId = stacked ? "1" : undefined;
+  /*
+   * A ramp per series, but only where it has something to say.
+   *
+   * The fade is drawn as a gradient in objectBoundingBox units, and SVG does
+   * not render one of those on a path whose bounding box has no height. The
+   * top band of a share chart is exactly that path: a series that is every
+   * year the whole of the stack draws a dead-flat line along the ceiling, so
+   * its stroke was dropped entirely and the band the reader was being asked to
+   * follow was the one line on the chart that did not exist. The gradient in
+   * that case was a no-op anyway — every stop opaque, because the series is
+   * never absent — so it was destroying the line in exchange for nothing.
+   *
+   * Null means paint the colour straight on, which is both correct and what a
+   * series that never disappears wants.
+   */
+  const fades = series.map((s) => {
+    if (!fadeAtZero) return null;
+    const ramp = presenceRamp(data, s.key);
+    return ramp.some((o) => o < 1) ? ramp : null;
+  });
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
@@ -277,8 +297,8 @@ export function SeriesChart({
             * has nothing, so the stroke dissolves across the months either
             * side instead of stopping dead at one of them.
             */}
-          {fadeAtZero &&
-            series.map((s, i) => (
+          {series.map((s, i) =>
+            fades[i] === null ? null : (
               <linearGradient
                 key={`fade-${s.key}`}
                 id={`fade-${gid}-${i}`}
@@ -287,7 +307,7 @@ export function SeriesChart({
                 x2="1"
                 y2="0"
               >
-                {presenceRamp(data, s.key).map((op, j, all) => (
+                {fades[i]!.map((op, j, all) => (
                   <stop
                     key={j}
                     offset={`${all.length > 1 ? (j / (all.length - 1)) * 100 : 0}%`}
@@ -296,7 +316,8 @@ export function SeriesChart({
                   />
                 ))}
               </linearGradient>
-            ))}
+            ),
+          )}
         </defs>
         <CartesianGrid {...GRID_PROPS} />
         <XAxis
@@ -361,7 +382,7 @@ export function SeriesChart({
               type="monotone"
               dataKey={s.key}
               name={s.name}
-              stroke={fadeAtZero ? `url(#fade-${gid}-${i})` : s.color}
+              stroke={fades[i] ? `url(#fade-${gid}-${i})` : s.color}
               strokeWidth={2}
               fill={strokeOnly ? "none" : `url(#${gid}-${i})`}
               stackId={stackId}
