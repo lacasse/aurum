@@ -1057,6 +1057,9 @@ export function RoomGauge({
  * visible one off the axis — because a bar chart cannot otherwise start
  * anywhere but zero.
  */
+/** One definition, so the connector maths below cannot drift from the plot. */
+const WATERFALL_MARGIN = { top: 28, right: 4, left: 4, bottom: 0 };
+
 export function Waterfall({
   steps,
   format,
@@ -1151,7 +1154,7 @@ export function Waterfall({
       <ResponsiveContainer>
         <ComposedChart
           data={rows}
-          margin={{ top: 28, right: 4, left: 4, bottom: 0 }}
+          margin={WATERFALL_MARGIN}
           /*
            * All but touching.
            *
@@ -1200,12 +1203,73 @@ export function Waterfall({
             dataKey="range"
             radius={[2, 2, 0, 0]}
             /*
+             * The same width every other bar on a page gets. Left to fill its
+             * slot, a five-step waterfall in a narrow card drew columns twice
+             * the width of the bars beside it, which read as a different kind
+             * of chart rather than a smaller one.
+             */
+            maxBarSize={32}
+            /*
              * A step small beside the totals still has to be visible. Without a
              * floor a rounding-error year is drawn as nothing at all, which
              * reads as "this did not happen" rather than "this was small".
              */
             minPointSize={3}
             isAnimationActive={false}
+            /*
+             * A line from where one step ends to where the next begins.
+             *
+             * Narrowing the columns took away what carried the hand-off: they
+             * were all but touching, so the eye followed the level across. With
+             * air between them the staircase reads as five separate columns,
+             * and the connector puts the path back — it is the level itself,
+             * drawn, which is what a waterfall is claiming.
+             *
+             * An up step hands over at its top edge and a down step at its
+             * bottom, since that is where the running balance stands when the
+             * step is done.
+             */
+            shape={(props: unknown) => {
+              const { x, y, width, height, index, fill, parentViewBox } = props as {
+                x: number; y: number; width: number; height: number;
+                index: number; fill: string;
+                parentViewBox?: { width: number };
+              };
+              const r = rows[index];
+              const handOff = r?.kind === "down" ? y + height : y;
+              /*
+               * Where the next column starts. Every step gets the same slice of
+               * the plot and sits in the middle of it, so one pitch to the right
+               * of this column's left edge is the next column's left edge.
+               */
+              const plot = parentViewBox
+                ? parentViewBox.width - WATERFALL_MARGIN.left - WATERFALL_MARGIN.right
+                : null;
+              const next = plot !== null ? x + plot / rows.length : null;
+              return (
+                <Layer>
+                  <Rectangle
+                    x={x}
+                    y={y}
+                    width={width}
+                    height={height}
+                    radius={[2, 2, 0, 0]}
+                    fill={fill}
+                  />
+                  {next !== null && index < rows.length - 1 && (
+                    <line
+                      x1={x + width}
+                      y1={handOff}
+                      x2={next}
+                      y2={handOff}
+                      stroke="var(--ink-faint)"
+                      strokeWidth={1}
+                      strokeDasharray="2 2"
+                    />
+                  )}
+                </Layer>
+              );
+            }}
             label={{
               position: "top",
               offset: 8,
