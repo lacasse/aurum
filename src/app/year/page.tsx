@@ -552,31 +552,6 @@ export default function YearPage() {
                 format={(n) => fmtCompact(n)}
               />
             </div>
-            <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
-              The second column is everything that arrived in an account you can
-              spend from, and each bar balances on its own. Cards count as
-              spendable: paying one off is a transfer between your own accounts,
-              which this chart leaves out, so drawing the card apart left its
-              spending with no visible funding. Pay that goes straight into a
-              registered plan never arrives in one of your accounts, so it is not
-              counted here — which is why this is smaller than the
-              year&rsquo;s income. Spending ends at necessity or discretion
-              rather than at a column of categories: the same split as the
-              Expenses page, and reassignable there. A deposit into the invested
-              bar and a purchase inside it are two different events, so the
-              deposit moves the money and the purchase is what it became, broken
-              down by asset class. A pension contribution is its own class there,
-              beside the things that were bought — the plan has no trades to
-              import, an entitlement accrues instead, and measured against
-              purchases it would read as a shortfall. Selling appears on the left, because a sale is
-              money arriving. Dividends are not taken from the trade history —
-              they are already income under their own category. Transfers between
-              two cash accounts are left out, because the same dollar would be
-              counted twice. Anything that left an account income never reached
-              comes in as “From savings”; anything the invested bar took in with
-              no purchase to account for is “Not itemised”, which is cash sitting
-              there or trades that were never imported.
-            </p>
           </Card>
         )}
 
