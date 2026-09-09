@@ -383,7 +383,6 @@ export function GroupedBars({
   height = 280,
   yFmt,
   stacked,
-  rightBar,
 }: {
   data: Record<string, unknown>[];
   xKey: string;
@@ -391,16 +390,6 @@ export function GroupedBars({
   height?: number;
   yFmt?: (n: number) => string;
   stacked?: boolean;
-  /**
-   * A series measured in something other than the left axis's unit, drawn
-   * against its own scale on the right.
-   *
-   * A savings rate beside income and spending is the case this exists for: a
-   * percentage plotted on a axis of dollars is a flat line on the floor, and
-   * scaling it to fit would make a rate look like an amount. Two axes say
-   * plainly that these are two different quantities.
-   */
-  rightBar?: SeriesDef & { fmt?: (n: number) => string };
 }) {
   const stackId = stacked ? "a" : undefined;
   /*
@@ -420,26 +409,12 @@ export function GroupedBars({
         <CartesianGrid {...GRID_PROPS} />
         <XAxis dataKey={xKey} tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={16} />
         <YAxis
-          yAxisId="left"
           tick={AXIS_TICK}
           tickLine={false}
           axisLine={false}
           width={56}
           tickFormatter={(v) => (yFmt ? yFmt(Number(v)) : String(v))}
         />
-        {rightBar ? (
-          <YAxis
-            yAxisId="right"
-            orientation="right"
-            tick={AXIS_TICK}
-            tickLine={false}
-            axisLine={false}
-            width={44}
-            tickFormatter={(v) =>
-              rightBar.fmt ? rightBar.fmt(Number(v)) : String(v)
-            }
-          />
-        ) : null}
         <Tooltip
           cursor={{ fill: "var(--elevated)", opacity: 0.6 }}
           content={<ChartTooltip fmt={yFmt} />}
@@ -450,7 +425,6 @@ export function GroupedBars({
         {bars.map((b, i) => (
           <Bar
             key={b.key}
-            yAxisId="left"
             dataKey={b.key}
             name={b.name}
             fill={b.color}
@@ -459,16 +433,6 @@ export function GroupedBars({
             stackId={stackId}
           />
         ))}
-        {rightBar ? (
-          <Bar
-            yAxisId="right"
-            dataKey={rightBar.key}
-            name={rightBar.name}
-            fill={rightBar.color}
-            radius={[4, 4, 0, 0]}
-            maxBarSize={26}
-          />
-        ) : null}
       </ComposedChart>
     </ResponsiveContainer>
   );

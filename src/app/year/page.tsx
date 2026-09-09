@@ -45,8 +45,8 @@ import {
   categoryShifts,
   contributionsVsValue,
   incomeAllocation,
+  incomeTypeAmounts,
   incomeTypeShares,
-  passiveAxisCeiling,
   yearFlow,
   unearnedShare,
   yearInsights,
@@ -195,7 +195,9 @@ export default function YearPage() {
       label: r.year,
       income: r.income,
       expenses: r.expenses,
-      savingsRate: r.savingsRate ?? 0,
+      // The difference, not the rate: it belongs on the same axis as the two
+      // figures it comes from.
+      saved: r.income - r.expenses,
     }));
 
   const room = contributionRoom(selected.year, transactions, accounts, limits);
@@ -215,8 +217,15 @@ export default function YearPage() {
         contributions[contributions.length - 1].contributed
       : null;
   const typeShares = incomeTypeShares(transactions);
+  /*
+   * The figures beside the chart, for the year being read — a band too thin to
+   * see is answered by the number under it rather than by drawing it bigger.
+   */
+  const typeRow = typeShares.find((r) => r.label === selected.year);
+  const typeLast = typeRow
+    ? { ...incomeTypeAmounts(transactions, selected.year), shares: typeRow }
+    : null;
   const flow = yearFlow(transactions, selected.year);
-  const passiveCeiling = passiveAxisCeiling(typeShares);
   const unearned = unearnedShare(transactions, selected.year);
   const balanceBars = data.shapes.map((sh) => ({
     label: sh.year,
@@ -621,39 +630,58 @@ export default function YearPage() {
                   : `${Math.round(unearned)}% of ${selected.year} did not come from working`
               }
             />
-            <div className="px-3 pb-4">
+            {/*
+              * The same treatment as net worth composition on the dashboard,
+              * and for the same reason. Drawing a small band larger than it is
+              * was tried there and rejected: it buys the thin band a visible
+              * line at the cost of every other band being wrong, which is a bad
+              * trade in a chart whose whole subject is proportion. The figures
+              * underneath are what answer for a band too thin to read.
+              */}
+            <div className="px-3 pb-2">
               <SeriesChart
                 data={typeShares as unknown as Record<string, unknown>[]}
                 xKey="label"
                 stacked
-                yDomain={[0, passiveCeiling]}
+                fadeAtZero
                 series={[
                   /*
-                   * Passive first, so it stacks along the bottom where the
-                   * axis is. It is the band whose movement matters, and a band
-                   * floating in the middle of a chart is one whose changes you
-                   * have to measure rather than see.
+                   * Passive first, so it stacks along the bottom where the axis
+                   * is. It is the band whose movement matters, and one floating
+                   * in the middle is one whose changes have to be measured
+                   * rather than seen.
                    */
                   { key: "Passive", name: "Passive", color: accentFor("brand") },
                   { key: "Active", name: "Active", color: accentFor("cost") },
                 ]}
+                height={280}
+                yDomain={[0, 100]}
                 yFmt={(n: number) => `${Math.round(n)}%`}
-                height={260}
               />
             </div>
+            {typeLast && (
+              <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
+                {(["Passive", "Active"] as const).map((k) => (
+                  <div key={k} className="flex items-baseline gap-2">
+                    <span
+                      className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
+                      style={{ background: accentFor(k === "Passive" ? "brand" : "cost") }}
+                    />
+                    <span className="text-[0.6875rem] text-ink-faint">{k}</span>
+                    <span className="text-sm font-semibold tabular-nums">
+                      {fmtCompact(typeLast[k])}
+                    </span>
+                    <span className="text-[0.6875rem] tabular-nums text-ink-faint">
+                      {Math.round(Number(typeLast.shares[k]))}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
               A pension contribution counts as active — it is deferred pay off
               the same hours as the salary it comes from. A pension paying out
               counts as passive.
-              {passiveCeiling < 100 && (
-                <>
-                  {" "}
-                  The axis stops at {passiveCeiling}% so the passive band is
-                  readable; active fills everything above it. The ceiling rises
-                  as passive income does, and becomes the full hundred once it
-                  passes about two thirds.
-                </>
-              )}
             </p>
           </Card>
         )}
@@ -665,9 +693,10 @@ export default function YearPage() {
           />
           <div className="px-3 pb-4">
             {/*
-              * The savings rate has its own axis on the right. A percentage
-              * plotted against dollars is a flat line on the floor, and
-              * scaling it to fit would make a rate look like an amount.
+              * Saved is the difference, in dollars, so it shares the axis. A
+              * rate would not: a percentage against a scale of dollars is a
+              * flat line on the floor, and it would need an axis of its own to
+              * say anything.
               */}
             <GroupedBars
               data={bars as unknown as Record<string, unknown>[]}
@@ -675,13 +704,8 @@ export default function YearPage() {
               bars={[
                 { key: "income", name: "Income", color: accentFor("positive") },
                 { key: "expenses", name: "Expenses", color: accentFor("negative") },
+                { key: "saved", name: "Saved", color: accentFor("brand") },
               ]}
-              rightBar={{
-                key: "savingsRate",
-                name: "Saved",
-                color: accentFor("brand"),
-                fmt: (n: number) => `${Math.round(n)}%`,
-              }}
               height={260}
               yFmt={fmtCompact}
             />
