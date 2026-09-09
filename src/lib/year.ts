@@ -1,4 +1,9 @@
-import { NON_SPENDABLE_INCOME, chainedReturns, isIncome } from "./analytics";
+import {
+  NON_SPENDABLE_INCOME,
+  PASSIVE_INCOME_CATEGORIES,
+  chainedReturns,
+  isIncome,
+} from "./analytics";
 import type { ClassPoint, NetWorthPoint, PortfolioPoint } from "./analytics";
 import type { Account, AccountKind, Holding } from "./types";
 import { Transaction } from "./types";
@@ -588,38 +593,65 @@ export function incomeMixShares(mix: IncomeMix): Record<string, string | number>
  * income appear to shrink.
  */
 /** The same split as amounts, for the figures beside the chart. */
+/**
+ * Three kinds, because "not active" was never the same thing as passive.
+ *
+ * Passive income is what your assets pay you while you do nothing: interest,
+ * cashback and dividends — cashback lands under Interest, which is where the
+ * record already keeps it. Read instead as everything that was not earned by
+ * working, the band quietly collected gifts as well, and a year with a large
+ * one reported a quarter of its income as coming from assets when the true
+ * figure was near enough nothing. That is the one reading of this chart that
+ * matters — how close the assets are to covering the year — and it was the
+ * one being flattered.
+ *
+ * A gift is neither. It was not worked for and no asset produced it, and
+ * forcing it into one of the two bands makes that band mean less. Refunds and
+ * borrowing are not here at all: neither is income, and `NOT_INCOME` keeps
+ * them out of every total that answers what came in.
+ */
 export function incomeTypeAmounts(
   transactions: Transaction[],
   year: string,
-): { Active: number; Passive: number } {
+): { Active: number; Passive: number; Other: number } {
   let active = 0;
   let passive = 0;
+  let other = 0;
   for (const t of transactions) {
     if (!isIncome(t) || t.date.slice(0, 4) !== year) continue;
-    if (WORK_CATEGORIES.has(t.category)) active += toCents(t.amount);
-    else passive += toCents(t.amount);
+    const cents = toCents(t.amount);
+    if (WORK_CATEGORIES.has(t.category)) active += cents;
+    else if (PASSIVE_INCOME_CATEGORIES.has(t.category)) passive += cents;
+    else other += cents;
   }
-  return { Active: fromCents(active), Passive: fromCents(passive) };
+  return {
+    Active: fromCents(active),
+    Passive: fromCents(passive),
+    Other: fromCents(other),
+  };
 }
 
 export function incomeTypeShares(
   transactions: Transaction[],
 ): Record<string, string | number>[] {
-  const byYear = new Map<string, { active: number; passive: number }>();
+  const byYear = new Map<string, { active: number; passive: number; other: number }>();
   for (const t of transactions) {
     if (!isIncome(t)) continue;
     const year = t.date.slice(0, 4);
-    const slot = byYear.get(year) ?? { active: 0, passive: 0 };
-    if (WORK_CATEGORIES.has(t.category)) slot.active += toCents(t.amount);
-    else slot.passive += toCents(t.amount);
+    const slot = byYear.get(year) ?? { active: 0, passive: 0, other: 0 };
+    const cents = toCents(t.amount);
+    if (WORK_CATEGORIES.has(t.category)) slot.active += cents;
+    else if (PASSIVE_INCOME_CATEGORIES.has(t.category)) slot.passive += cents;
+    else slot.other += cents;
     byYear.set(year, slot);
   }
   return [...byYear.keys()].sort().map((year) => {
-    const { active, passive } = byYear.get(year)!;
-    const total = active + passive;
+    const { active, passive, other } = byYear.get(year)!;
+    const total = active + passive + other;
     return {
       label: year,
       Active: total > 0 ? (active / total) * 100 : 0,
+      Other: total > 0 ? (other / total) * 100 : 0,
       Passive: total > 0 ? (passive / total) * 100 : 0,
     };
   });
@@ -783,6 +815,18 @@ const SOLD = "Sold investments";
  * not income, and plainly not savings either.
  */
 const BORROWED = "Borrowed";
+/**
+ * Money of yours coming back — a refund, a reimbursement, a returned item.
+ *
+ * Not income, for the reason `NOT_INCOME` gives: the spending that sent it out
+ * was already counted, so counting the return as earnings books one movement
+ * twice. But it arrives in an account and it funds what comes next, so a flow
+ * chart has to draw it or invent a balance to stand in for it.
+ *
+ * Told apart from borrowing because they are opposites. One is somebody else's
+ * money arriving with a debt attached; the other is your own coming home.
+ */
+const RETURNED = "Money back";
 /** What an invested account took in and has no purchases to account for. */
 const UNITEMISED = "Not itemised";
 
@@ -934,9 +978,10 @@ export function yearFlow(
        */
       const hub = hubOf(t.destinationAccountId);
       if (hub === INVESTMENTS) anyInvested = true;
-      note(incomeTotals, BORROWED, cents);
+      const band = t.category === "Loan Proceeds" ? BORROWED : RETURNED;
+      note(incomeTotals, band, cents);
       note(hubTotals, hub, cents);
-      rows.push({ from: BORROWED, to: hub, cents, stage: 1 });
+      rows.push({ from: band, to: hub, cents, stage: 1 });
     } else if (t.type === "expense") {
       const hub = hubOf(t.sourceAccountId);
       note(spendTotals, SPEND_GROUP_LABELS[spendGroup(t.category)], cents);
@@ -1060,7 +1105,9 @@ export function yearFlow(
    * take one of their places in the ranking.
    */
   const categoryTotals = new Map(
-    [...incomeTotals].filter(([k]) => k !== SOLD && k !== BORROWED),
+    [...incomeTotals].filter(
+      ([k]) => k !== SOLD && k !== BORROWED && k !== RETURNED,
+    ),
   );
   const sourceName = pool(categoryTotals, limit, OTHER_INCOME, MIN_SOURCE_SHARE);
   /*
@@ -1091,7 +1138,7 @@ export function yearFlow(
   for (const r of rows) {
     if (r.stage === 1) {
       const to = hubName(r.to);
-      const named = r.from === SOLD || r.from === BORROWED;
+      const named = r.from === SOLD || r.from === BORROWED || r.from === RETURNED;
       link(named ? r.from : sourceName(r.from), to, r.cents);
       note(inflow, to, r.cents);
       continue;
@@ -1136,7 +1183,7 @@ export function yearFlow(
   }
 
   const hubs = [...new Set([...inflow.keys(), ...outflow.keys()])]
-    .filter((n) => n !== SOLD && n !== BORROWED)
+    .filter((n) => n !== SOLD && n !== BORROWED && n !== RETURNED)
     .sort(
       (a, b) =>
         (inflow.get(b) ?? 0) + (outflow.get(b) ?? 0) -

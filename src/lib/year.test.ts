@@ -489,9 +489,34 @@ describe("income split active against passive", () => {
     assert.equal(Math.round(Number(row.Active)), 66);
   });
 
-  test("it agrees with the sentence beside it", () => {
-    const [row] = incomeTypeShares(txns);
-    assert.equal(Math.round(Number(row.Passive)), Math.round(unearnedShare(txns, "2026")!));
+  test("a gift is neither, and does not flatter the passive band", () => {
+    /*
+     * Read as "everything not earned by working", the passive band collected
+     * gifts too, and a year with a large one reported a quarter of its income
+     * as coming from assets when almost none of it had.
+     */
+    const withGift = [...txns, txn("2026-05-31", "income", 100000, "Gifts")];
+    const [row] = incomeTypeShares(withGift);
+    assert.equal(Math.round(Number(row.Passive)), 17, "the dividends and the annuity, and nothing else");
+    assert.equal(Math.round(Number(row.Other)), 50, "the gift stands on its own");
+    assert.equal(
+      Math.round(Number(row.Active) + Number(row.Passive) + Number(row.Other)),
+      100,
+      "the three still account for the whole year",
+    );
+  });
+
+  test("a refund and a drawdown are not income at all", () => {
+    const withBoth = [
+      ...txns,
+      txn("2026-06-30", "income", 50000, "Refund"),
+      txn("2026-07-31", "income", 50000, "Loan Proceeds"),
+    ];
+    assert.deepEqual(
+      incomeTypeShares(withBoth)[0],
+      incomeTypeShares(txns)[0],
+      "money of yours coming back, and money that is not yours, change nothing",
+    );
   });
 });
 

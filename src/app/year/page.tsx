@@ -222,8 +222,13 @@ export default function YearPage() {
     holdings,
     spendGroup: (c) => groupOf(c, spendGroups),
   });
-  const unearned = unearnedShare(transactions, selected.year);
-  const balanceBars = data.shapes.map((sh) => ({
+  /*
+   * The passive share, which is what the chart is titled after. "Did not come
+   * from working" was the figure before, and it counted a gift as though an
+   * asset had produced it.
+   */
+  const passiveShare = typeRow ? Number(typeRow.Passive) : null;
+  const allBalanceBars = data.shapes.map((sh) => ({
     label: sh.year,
     Cash: sh.cash,
     Bonds: sh.bonds,
@@ -231,6 +236,21 @@ export default function YearPage() {
     Crypto: sh.crypto,
     Pension: sh.pension,
   }));
+  /*
+   * The record starts where there was something to own.
+   *
+   * Transactions can begin years before the first holding or balance, and a
+   * year with nothing in it normalises to nothing — a flat empty band, then a
+   * cliff into the first real mix. That opening is not a composition that
+   * changed; it is a composition that did not exist yet, and drawing it as
+   * zero percent of everything invites the reader to see a collapse where the
+   * record simply had not started. Trailing years are kept: a year that ends
+   * owning nothing is a fact about that year.
+   */
+  const owned = (b: (typeof allBalanceBars)[number]) =>
+    b.Cash + b.Bonds + b.Stocks + b.Crypto + b.Pension > 0;
+  const opening = allBalanceBars.findIndex(owned);
+  const balanceBars = opening < 0 ? [] : allBalanceBars.slice(opening);
   /*
    * Only the bands the record actually holds somewhere in it. A colour in the
    * chart with no key beside it is a colour you cannot name, and a class never
@@ -408,9 +428,9 @@ export default function YearPage() {
               <CardHeader
                 title="Active and passive income mix"
                 subtitle={
-                  unearned === null
-                    ? "Active against passive, year by year"
-                    : `${Math.round(unearned)}% of ${selected.year} did not come from working`
+                  passiveShare === null
+                    ? "What paid for the year, by where it came from"
+                    : `${passiveShare.toFixed(1)}% of ${selected.year} came from what you own`
                 }
               />
               {/*
@@ -429,13 +449,14 @@ export default function YearPage() {
                   fadeAtZero
                   series={[
                     /*
-                     * Active along the bottom, passive above it. The boundary
-                     * between the two is then a single line, and passive is the
-                     * gap between that line and the top of the chart — a distance
-                     * to the ceiling rather than a sliver on the floor, which is
-                     * the easier of the two to see change.
+                     * Active along the bottom and passive at the top, so the
+                     * band that matters is measured against the ceiling rather
+                     * than drawn as a sliver on the floor — a distance to the
+                     * top is the easier of the two to watch move. Whatever was
+                     * neither sits between them, out of the way of both.
                      */
                     { key: "Active", name: "Active", color: accentFor("brand") },
+                    { key: "Other", name: "Neither", color: accentFor("passive") },
                     { key: "Passive", name: "Passive", color: accentFor("cost") },
                   ]}
                   height="100%"
@@ -445,13 +466,17 @@ export default function YearPage() {
               </div>
               {typeLast && (
                 <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
-                  {(["Passive", "Active"] as const).map((k) => (
+                  {([
+                    ["Passive", "Passive", "cost"],
+                    ["Other", "Neither", "passive"],
+                    ["Active", "Active", "brand"],
+                  ] as const).map(([k, label, tone]) => (
                     <div key={k} className="flex items-baseline gap-2">
                       <span
                         className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
-                        style={{ background: accentFor(k === "Passive" ? "cost" : "brand") }}
+                        style={{ background: accentFor(tone) }}
                       />
-                      <span className="text-[0.6875rem] text-ink-faint">{k}</span>
+                      <span className="text-[0.6875rem] text-ink-faint">{label}</span>
                       <span className="text-sm font-semibold tabular-nums">
                         {fmtCompact(typeLast[k])}
                       </span>
@@ -463,9 +488,11 @@ export default function YearPage() {
                 </div>
               )}
               <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
-                A pension contribution counts as active — it is deferred pay off
-                the same hours as the salary it comes from. A pension paying out
-                counts as passive.
+                Passive is what you own paying you: interest, cashback and
+                dividends. A pension contribution counts as active, being
+                deferred pay off the same hours as the salary it comes from. A
+                gift is neither, and a refund or a drawdown is not income at
+                all, so neither appears here.
               </p>
             </Card>
           )}

@@ -1077,7 +1077,19 @@ export function monthTotals(
 /* ── Monthly averages ── */
 
 /** Money the holdings made, as opposed to money the job made. */
-export const PASSIVE_INCOME_CATEGORIES = new Set(["Dividends", "Interest"]);
+/**
+ * Income your assets pay you while you do nothing.
+ *
+ * Cashback is not listed because the record keeps it under Interest, which is
+ * where it lands. A pension *paying out* is here — the plan pays whether you
+ * work or not, which is the whole test — while a pension *contribution* is
+ * deferred pay and counts as active.
+ */
+export const PASSIVE_INCOME_CATEGORIES = new Set([
+  "Dividends",
+  "Interest",
+  "Pension Income",
+]);
 
 /**
  * Income that does not arrive as money you can spend.
@@ -1116,8 +1128,15 @@ export const NON_SPENDABLE_INCOME = new Set(["RSP / Pension", "Dividends"]);
  * totals, the averages, the cash-flow charts and the year rollups. The
  * transaction is untouched, and the money is still in the balance it landed
  * in, which is where a loan belongs.
+ *
+ * A refund is here for a different reason and the same effect. It is money of
+ * yours coming back: the spending that sent it out was already counted, so
+ * counting the return as income books one movement twice and reports a month
+ * as having earned what it only failed to lose. Neither is a windfall and
+ * neither is a wage; both arrive, and both belong in the balance rather than
+ * in the total.
  */
-export const NOT_INCOME = new Set(["Loan Proceeds"]);
+export const NOT_INCOME = new Set(["Loan Proceeds", "Refund"]);
 
 /** True for a row that counts as money coming in. */
 export function isIncome(t: Pick<Transaction, "type" | "category">): boolean {
