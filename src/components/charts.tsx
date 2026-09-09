@@ -1395,8 +1395,17 @@ export function YearSankey({
   const spacerOf = new Map<number, number>();
   const drawNodes: { name: string; role?: string }[] = [];
   const place = (pos: number) => {
-    for (const [li, at] of detour) {
-      if (at !== pos) continue;
+    /*
+     * Where several ribbons reserve a slot in the same column, the slots go in
+     * the order of the ribbons that need them. Taking them in the order the
+     * links happen to be listed put a pension contribution's slot above a
+     * drawn balance's while its source sat below, so the two crossed on the
+     * way in for no reason other than the order they were written down.
+     */
+    const here = [...detour]
+      .filter(([, at]) => at === pos)
+      .sort(([a], [b]) => links[a].source - links[b].source || links[a].target - links[b].target);
+    for (const [li] of here) {
       spacerOf.set(li, drawNodes.length);
       const end = nodes[links[li].target];
       drawNodes.push({ name: end.name, role: end.role });

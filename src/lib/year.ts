@@ -1311,6 +1311,22 @@ export function yearFlow(
     .filter(([h]) => investedHubs.has(h))
     .reduce((a, [, v]) => a + v, 0);
 
+  /*
+   * An account with money left over goes to the foot of its column.
+   *
+   * What it did not spend runs to Kept, which sits below everything the money
+   * was spent on — so from anywhere but the bottom that ribbon has to dive
+   * past every other account's spending on the way. Ranked purely by size the
+   * account that holds the salary is first, and with half a dozen others
+   * under it the chart was six crossings that say nothing.
+   *
+   * Only what is left over decides this, not the size of the account: the one
+   * with a remainder is the only one whose ribbon reaches past the column of
+   * things the money became.
+   */
+  const holdsRemainder = (h: string) => spare.has(h) && !investedHubs.has(h);
+  hubs.sort((a, b) => Number(holdsRemainder(a)) - Number(holdsRemainder(b)));
+
   const nodes: FlowNode[] = [];
   const index = new Map<string, number>();
   const id = (name: string, role?: FlowNode["role"]) => {
@@ -1362,14 +1378,40 @@ export function yearFlow(
     }
   }
   /*
-   * Group first, then the pooled remainder, then size. What is left over does
-   * not belong among the named things ranked by weight — it is the floor of
-   * the group whatever it happens to add up to, and a reader who finds it
-   * partway up the column has to check that it is not a category.
+   * Then each source sits beside the account it pays into.
+   *
+   * Moving the account with the remainder to the foot of its column is only
+   * half of it: the salary that feeds that account has to come down with it,
+   * or the crossing simply moves one column to the left, which is what
+   * happened when the accounts were reordered on their own. Ordering a column
+   * to agree with the next one is the whole rule, and it has to be applied to
+   * every column or it buys nothing.
+   *
+   * Where a source pays into more than one account it follows the highest of
+   * them, which is the only choice that cannot cross the ones above it.
+   */
+  const hubRank = new Map<string, number>();
+  for (const e of edgeList) {
+    if (!hubs.includes(e.to) || hubs.includes(e.from)) continue;
+    const rank = hubs.indexOf(e.to);
+    hubRank.set(e.from, Math.min(hubRank.get(e.from) ?? rank, rank));
+  }
+  for (const hub of shortfall.keys()) {
+    const rank = hubs.indexOf(hub);
+    hubRank.set("From savings", Math.min(hubRank.get("From savings") ?? rank, rank));
+  }
+  const rankOf = (name: string) => hubRank.get(name) ?? hubs.length;
+  /*
+   * Group first, then the account it lands in, then the pooled remainder,
+   * then size. What is left over does not belong among the named things
+   * ranked by weight — it is the floor of the group whatever it happens to
+   * add up to, and a reader who finds it partway up the column has to check
+   * that it is not a category.
    */
   const orderedSources = [...sourceTotals.entries()].sort(
     (a, b) =>
       Number(reachesFirstBar.has(b[0])) - Number(reachesFirstBar.has(a[0])) ||
+      rankOf(a[0]) - rankOf(b[0]) ||
       Number(a[0] === OTHER_INCOME) - Number(b[0] === OTHER_INCOME) ||
       b[1] - a[1] ||
       a[0].localeCompare(b[0]),
