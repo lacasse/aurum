@@ -672,8 +672,10 @@ export default function YearPage() {
                 <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
                   The gap is {fmtCAD(Math.abs(latestGap))} the portfolio{" "}
                   {latestGap >= 0 ? "has earned" : "is behind"} on what was paid
-                  into it. Withdrawals pull the lower line down, so a year that
-                  sold something narrows the gap without anything having been lost.
+                  into it, and still holds. Money leaving pulls both lines down
+                  by the same amount — a sale, or a dividend paid across to the
+                  account&rsquo;s cash — so the gap holds steady rather than
+                  closing, and what was taken out is simply no longer in it.
                 </p>
               )}
             </Card>
