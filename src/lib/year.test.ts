@@ -1142,3 +1142,69 @@ describe("an account is invested by what it is", () => {
     assert.equal(got("Pension"), 3000);
   });
 });
+
+/*
+ * Cards. The demo fixture has no card payments at all, so nothing exercised
+ * this until the numbers were questioned.
+ */
+describe("spending on a card is spending", () => {
+  const accounts = [
+    { id: "a-chq", name: "Chequing", kind: "checking" as const },
+    { id: "a-card", name: "Gold Card", kind: "credit" as const },
+  ];
+  const t = (
+    date: string,
+    type: "income" | "expense" | "transfer",
+    amount: number,
+    category: string,
+    from?: string,
+    to?: string,
+  ) =>
+    ({
+      ...txn(date, type === "transfer" ? "expense" : type, amount, category),
+      type,
+      sourceAccountId: from,
+      destinationAccountId: to,
+    }) as unknown as Transaction;
+
+  const rows = [
+    t("2026-01-31", "income", 50000, "Salary", undefined, "a-chq"),
+    t("2026-02-10", "expense", 12000, "Groceries", "a-card"),
+    t("2026-03-10", "expense", 8000, "Housing", "a-chq"),
+    // Paying the card off: a transfer between two of your own accounts.
+    t("2026-02-28", "transfer", 12000, "Transfer", "a-chq", "a-card"),
+  ];
+  const f = yearFlow(rows, "2026", { accounts });
+  const into = (n: string) =>
+    f.links.filter((l) => f.nodes[l.target].name === n).reduce((a, l) => a + l.value, 0);
+  const outOf = (n: string) =>
+    f.links.filter((l) => f.nodes[l.source].name === n).reduce((a, l) => a + l.value, 0);
+
+  test("a card is not a place of its own", () => {
+    assert.equal(f.nodes.some((n) => n.name === "Gold Card"), false);
+    assert.equal(f.nodes.some((n) => n.name === "Credit"), false);
+  });
+
+  test("the card's spending is funded by the year, not invented on the left", () => {
+    // The old shape charged the card's 12k to "From savings" and let the
+    // salary that paid it fall out as "Kept" — two equal errors that cancelled.
+    assert.equal(f.nodes.some((n) => n.name === "From savings"), false);
+    assert.equal(into("Spending"), 20000);
+    assert.equal(into("Kept"), 30000);
+  });
+
+  test("paying the card off is not a second flow", () => {
+    // 50k in, 20k spent, 30k kept. The payment moves nothing the chart can see.
+    assert.equal(into("Cash"), 50000);
+    assert.equal(outOf("Cash"), 50000);
+  });
+
+  test("the same year without the payment reads identically", () => {
+    // Whether the balance was settled before year end is a question about a
+    // balance, not about what the year spent.
+    const unpaid = yearFlow(rows.slice(0, 3), "2026", { accounts });
+    const spend = (g: ReturnType<typeof yearFlow>) =>
+      g.links.filter((l) => g.nodes[l.target].name === "Spending").reduce((a, l) => a + l.value, 0);
+    assert.equal(spend(unpaid), spend(f));
+  });
+});

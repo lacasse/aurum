@@ -898,17 +898,34 @@ const INVESTED_KINDS = new Set<AccountKind>(["investment", "crypto", "pension"])
 const INVESTMENTS = "Investments";
 
 /**
- * The accounts money is simply held in, likewise as one bar.
+ * Everything that is not invested, as one bar. Cards included.
  *
  * Five chequing and savings accounts down the middle answered "which one" for
- * a reader who was not asking. What the column is worth saying is the kind of
- * place the money sat: spendable, borrowed, or invested. Credit is kept apart
- * from cash because a card balance is not money you have.
+ * a reader who was not asking, so the column says the kind of place the money
+ * sat rather than which account it was.
+ *
+ * Cards belong in it, and drawing them apart was wrong rather than merely
+ * busy. A card is paid off by a transfer from a chequing account, and this
+ * chart drops transfers between your own accounts — so a card's spending had
+ * no visible funding and was invented on the left as "From savings", while the
+ * salary that really paid it sat in cash with nothing to buy and fell out the
+ * far end as "Kept". Two errors of exactly the same size, cancelling, which is
+ * why the chart balanced perfectly while telling you that money earned this
+ * year had been saved in some earlier one.
+ *
+ * Merged, the payment becomes a link from the bar to itself, which is no flow
+ * and needs no rule to exclude it, and a card expense is simply spending — the
+ * thing it always was. What is lost is the distinction between paying now and
+ * paying next month, which is a question about a balance rather than about a
+ * year's spending, and the balance sheet answers it.
  */
 const CASH = "Cash";
-const CREDIT = "Credit";
-const CASH_KINDS = new Set<AccountKind>(["checking", "savings", "cash"]);
-const CREDIT_KINDS = new Set<AccountKind>(["credit", "loan"]);
+const CASH_KINDS = new Set<AccountKind>([
+  "checking",
+  "savings",
+  "cash",
+  "credit",
+]);
 
 /**
  * A pension contribution is not a purchase, and it is not idle cash either.
@@ -1028,7 +1045,6 @@ export function yearFlow(
     const a = byId.get(id ?? "");
     if (!a) return TRUNK;
     if (INVESTED_KINDS.has(a.kind)) return INVESTMENTS;
-    if (CREDIT_KINDS.has(a.kind)) return CREDIT;
     if (CASH_KINDS.has(a.kind)) return CASH;
     return a.name;
   };
