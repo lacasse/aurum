@@ -1325,17 +1325,102 @@ export function YearSankey({
    * an account that paid a bill are the same kind of thing and have to read
    * that way.
    */
-  const depth = nodes.map(() => 0);
-  for (let pass = 0; pass < nodes.length; pass++) {
-    let moved = false;
-    for (const l of links) {
-      if (depth[l.target] < depth[l.source] + 1) {
-        depth[l.target] = depth[l.source] + 1;
-        moved = true;
+  const columns = (
+    ns: { name: string }[],
+    ls: { source: number; target: number }[],
+  ) => {
+    const d = ns.map(() => 0);
+    for (let pass = 0; pass < ns.length; pass++) {
+      let moved = false;
+      for (const l of ls) {
+        if (d[l.target] < d[l.source] + 1) {
+          d[l.target] = d[l.source] + 1;
+          moved = true;
+        }
       }
+      if (!moved) break;
     }
-    if (!moved) break;
-  }
+    /*
+     * The column the layout will actually use. Recharts pushes a node with
+     * nothing leaving it to the far edge however short its path from a source
+     * was, so counting hops alone puts what was kept in the middle — which is
+     * neither where it is drawn nor where the ribbon reaching it has to pass.
+     */
+    const end = Math.max(...d);
+    const leaves = new Set(ls.map((l) => l.source));
+    ns.forEach((_, i) => {
+      if (!leaves.has(i)) d[i] = end;
+    });
+    return d;
+  };
+
+  /*
+   * A ribbon that skips a column gets a slot reserved in it.
+   *
+   * What was kept goes from the middle to the last column in one hop, so it
+   * has to cross whatever stands in between. Ordering cannot help: a lone bar
+   * in that column is centred on its neighbour by the layout's relaxation,
+   * which leaves no gap to pass through, and where two bars did happen to
+   * leave one it was luck rather than design — a year with no invested
+   * accounts has a single Spending bar and the ribbon went straight through
+   * it, reading as money that spending gave off.
+   *
+   * So the ribbon is routed through a node of its own in that column instead
+   * of over it. The node is drawn as nothing — no bar, no label — and carries
+   * the name and colour of where the ribbon ends, so the two halves read as
+   * one band and the tooltip still names the real destination. What it does
+   * is take up room: the column now has to part by exactly the width of the
+   * ribbon, and the bars either side are pushed clear of it.
+   */
+  const before = columns(nodes, links);
+  const detour = new Map<number, number>();
+  links.forEach((l, i) => {
+    if (before[l.target] - before[l.source] <= 1) return;
+    const mid = before[l.source] + 1;
+    let at = nodes.length;
+    for (let k = 0; k < nodes.length; k++) {
+      if (before[k] !== mid) continue;
+      const outs = links.filter((x) => x.source === k).map((x) => x.target);
+      // Ahead of the first bar in that column whose own ends come after this one.
+      if (outs.length === 0 || Math.min(...outs) > l.target) {
+        at = k;
+        break;
+      }
+      at = k + 1;
+    }
+    detour.set(i, at);
+  });
+
+  const moved = new Map<number, number>();
+  const spacerOf = new Map<number, number>();
+  const drawNodes: { name: string; role?: string }[] = [];
+  const place = (pos: number) => {
+    for (const [li, at] of detour) {
+      if (at !== pos) continue;
+      spacerOf.set(li, drawNodes.length);
+      const end = nodes[links[li].target];
+      drawNodes.push({ name: end.name, role: end.role });
+    }
+  };
+  nodes.forEach((node, k) => {
+    place(k);
+    moved.set(k, drawNodes.length);
+    drawNodes.push(node);
+  });
+  place(nodes.length);
+  const ghosts = new Set(spacerOf.values());
+  const drawLinks = links.flatMap((l, i) => {
+    const sp = spacerOf.get(i);
+    const from = moved.get(l.source) ?? l.source;
+    const to = moved.get(l.target) ?? l.target;
+    if (sp === undefined) return [{ source: from, target: to, value: l.value }];
+    return [
+      { source: from, target: sp, value: l.value },
+      { source: sp, target: to, value: l.value },
+    ];
+  });
+
+  const depth = columns(drawNodes, drawLinks);
   const last = Math.max(...depth);
 
   /*
@@ -1345,7 +1430,7 @@ export function YearSankey({
    * reading it off the name meant the chart had to keep a list of them.
    */
   const colourOf = (index: number) => {
-    const role = nodes[index]?.role;
+    const role = drawNodes[index]?.role;
     if (role && FLOW_TONE[role]) return accent(FLOW_TONE[role]);
     if (depth[index] === 0) return accent("positive");
     return depth[index] < last ? accent("brand") : accent("negative");
@@ -1360,8 +1445,8 @@ export function YearSankey({
    * with the year instead: someone with four categories gets a short chart and
    * someone with twenty gets a legible one.
    */
-  const perColumn = depth.reduce<Record<number, number>>((acc, d) => {
-    acc[d] = (acc[d] ?? 0) + 1;
+  const perColumn = depth.reduce<Record<number, number>>((acc, d, i) => {
+    if (!ghosts.has(i)) acc[d] = (acc[d] ?? 0) + 1;
     return acc;
   }, {});
   const busiest = Math.max(...Object.values(perColumn));
@@ -1371,7 +1456,7 @@ export function YearSankey({
     <div style={{ width: "100%", height: drawHeight }}>
       <ResponsiveContainer>
         <Sankey
-          data={{ nodes, links }}
+          data={{ nodes: drawNodes, links: drawLinks }}
           nodePadding={26}
           nodeWidth={12}
           /*
@@ -1392,17 +1477,12 @@ export function YearSankey({
           /*
            * Ribbons carry the colour of where they end.
            *
-           * What was kept goes from the middle to the last column in one hop,
-           * skipping the column that says what the money was for — so it
-           * passes behind the Spending bar, entering one edge and leaving the
-           * other, which reads as money coming out of spending. Nothing is
-           * wrong with the figure and no placement fixes it: a link that skips
-           * a column crosses whatever stands in that column.
-           *
-           * Tinting the ribbon is what fixes it. A band that arrives at Kept
-           * is that colour for its whole length, so the eye follows it past
-           * the bar instead of losing it there, and it never takes the colour
-           * of something it merely passed.
+           * A band that arrives at Kept is that colour for its whole length,
+           * so the eye follows it across the chart, and it never takes the
+           * colour of something it merely passed. The band that skips a column
+           * is routed through a reserved slot rather than over the bar there —
+           * see the detour above — so the two carry the same colour and read
+           * as one.
            */
           link={(props: unknown) => {
             const { sourceX, sourceY, sourceControlX, targetX, targetY, targetControlX, linkWidth, payload } =
@@ -1412,7 +1492,7 @@ export function YearSankey({
                 linkWidth: number;
                 payload?: { target?: { name?: string } };
               };
-            const at = nodes.findIndex((n) => n.name === payload?.target?.name);
+            const at = drawNodes.findIndex((n) => n.name === payload?.target?.name);
             return (
               <Layer>
                 <path
@@ -1430,6 +1510,26 @@ export function YearSankey({
               x: number; y: number; width: number; height: number; index: number;
               payload: { name: string; value: number; depth?: number };
             };
+            /*
+             * The reserved slot is drawn as the ribbon passing through it, not
+             * as a bar. Its box is exactly as wide as every other node and as
+             * tall as the band that runs through it, so filling it with the
+             * ribbon's own colour and opacity closes the gap the node would
+             * otherwise leave — the two halves either side read as one band.
+             */
+            if (ghosts.has(index))
+              return (
+                <Layer key={index}>
+                  <Rectangle
+                    x={x}
+                    y={y}
+                    width={width}
+                    height={h}
+                    fill={colourOf(index)}
+                    fillOpacity={0.2}
+                  />
+                </Layer>
+              );
             const colour = colourOf(index);
             /*
              * Labels outside the column rather than on it. A node can be a few
