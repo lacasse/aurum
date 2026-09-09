@@ -3,6 +3,7 @@ import type { ClassPoint, NetWorthPoint, PortfolioPoint } from "./analytics";
 import type { Account, AccountKind, Holding } from "./types";
 import { Transaction } from "./types";
 import { fromCents, roundMoney, toCents } from "./money";
+import { PENSION_CATEGORY } from "./pension";
 import {
   SPEND_GROUP_LABELS,
   groupOf,
@@ -754,6 +755,13 @@ const SPENDING = "Spending";
 const ASSET = "__asset";
 /** Money moved to another of your own accounts, which is not a purpose. */
 const DEPOSIT = "__deposit";
+/**
+ * Spending that goes straight to what it was for, with no bar in between.
+ *
+ * Only the invested bar needs this, and only because it already stands in the
+ * column the Spending bar stands in. See where it is set.
+ */
+const DIRECT = "__direct";
 /** Selling a position, which is money arriving rather than leaving. */
 const SOLD = "Sold investments";
 /** What an invested account took in and has no purchases to account for. */
@@ -876,9 +884,27 @@ export function yearFlow(
     const cents = toCents(t.amount);
     if (cents <= 0) continue;
     if (isIncome(t)) {
-      const hub = hubOf(t.destinationAccountId);
+      /*
+       * A pension contribution is decided by its category, not by the account
+       * the row happens to name.
+       *
+       * `contributionsByMonth` reads the category to work out what the plan is
+       * worth, and the import files a contribution under it whatever account
+       * the statement line came from — payroll deducts it before the money
+       * ever reaches an account you hold. Reading the destination instead meant
+       * a contribution recorded against chequing, which is what payroll shows,
+       * was drawn arriving in the spendable bar and then spent, so the plan it
+       * actually went into never appeared on the chart at all.
+       *
+       * Two code paths were answering "is this a pension contribution" and only
+       * one of them was right.
+       */
+      const contribution = t.category === PENSION_CATEGORY;
+      const hub = contribution ? INVESTMENTS : hubOf(t.destinationAccountId);
       if (hub === INVESTMENTS) anyInvested = true;
-      if (byId.get(t.destinationAccountId ?? "")?.kind === "pension") pensionIn += cents;
+      if (contribution || byId.get(t.destinationAccountId ?? "")?.kind === "pension") {
+        pensionIn += cents;
+      }
       note(incomeTotals, t.category, cents);
       note(hubTotals, hub, cents);
       rows.push({ from: t.category, to: hub, cents, stage: 1 });
@@ -886,12 +912,29 @@ export function yearFlow(
       const hub = hubOf(t.sourceAccountId);
       note(spendTotals, SPEND_GROUP_LABELS[spendGroup(t.category)], cents);
       note(hubTotals, hub, cents);
+      /*
+       * A fee or a tax charged inside an investment account is spending, and it
+       * came out of that account — but it must not pass through the Spending
+       * bar on the way.
+       *
+       * That bar stands in the column after the accounts, so a link into it
+       * from the invested bar, which is already in that column, pushes it into
+       * the next one. The chart then runs five columns deep, every ordinary
+       * link from an account to a category looks like it skips one, and each
+       * gets a slot reserved for a crossing it was never making. Three
+       * transactions out of a hundred and fifty rearranged the whole picture.
+       *
+       * Drawn straight to what it was for instead: the leaves still add up to
+       * every dollar spent, and the Spending bar becomes what was spent out of
+       * an account you can spend from, which is what the column beside it is
+       * already about.
+       */
       rows.push({
         from: hub,
         to: SPEND_GROUP_LABELS[spendGroup(t.category)],
         cents,
         stage: 2,
-        group: SPENDING,
+        group: hub === INVESTMENTS ? DIRECT : SPENDING,
       });
     } else if (t.type === "transfer") {
       const dest = byId.get(t.destinationAccountId ?? "");
@@ -1037,11 +1080,13 @@ export function yearFlow(
     }
     const group = r.group ?? SPENDING;
     const leaf = (leafName[group] ?? ((n: string) => n))(r.to);
-    if (group === ASSET) {
-      // Straight off the account that bought it. See ASSET.
+    if (group === ASSET || group === DIRECT) {
+      // Straight off the account it came out of. See ASSET and DIRECT.
       link(from, leaf, r.cents);
       leaves.add(leaf);
-      assetLeaves.add(leaf);
+      // A fee is still a fee: it keeps the colour and the place its category
+      // has among the other spending, rather than joining the asset classes.
+      if (group === ASSET) assetLeaves.add(leaf);
       note(outflow, from, r.cents);
       continue;
     }
@@ -1169,13 +1214,26 @@ export function yearFlow(
    * them, which is the only choice that cannot cross the ones above it.
    */
   const hubRank = new Map<string, number>();
+  /*
+   * Ranked among the bars in the first column only.
+   *
+   * `hubs` holds the invested bar as well, and it stands a column further
+   * along, so ranking against the whole list let a source that pays a little
+   * into investments as well as into cash take the invested bar's index and
+   * sort above everything — which is how the pooled remainder ended up at the
+   * top of the column it is supposed to sit at the foot of. The first
+   * grouping already puts anything reaching past the first bar underneath; the
+   * ordering within a group is only ever about the bars in that group.
+   */
+  const firstBarOrder = hubs.filter((h) => firstBars.has(h));
   for (const e of edgeList) {
-    if (!hubs.includes(e.to) || hubs.includes(e.from)) continue;
-    const rank = hubs.indexOf(e.to);
+    if (!firstBars.has(e.to) || hubs.includes(e.from)) continue;
+    const rank = firstBarOrder.indexOf(e.to);
     hubRank.set(e.from, Math.min(hubRank.get(e.from) ?? rank, rank));
   }
   for (const hub of shortfall.keys()) {
-    const rank = hubs.indexOf(hub);
+    if (!firstBars.has(hub)) continue;
+    const rank = firstBarOrder.indexOf(hub);
     hubRank.set("From savings", Math.min(hubRank.get("From savings") ?? rank, rank));
   }
   const rankOf = (name: string) => hubRank.get(name) ?? hubs.length;
@@ -1220,7 +1278,9 @@ export function yearFlow(
    * Between the two, it crosses the gap between them instead.
    */
   for (const e of edgeList) {
-    if (leaves.has(e.to) && !assetLeaves.has(e.to)) id(e.to, roleOfLeaf.get(e.to));
+    if (leaves.has(e.to) && !assetLeaves.has(e.to)) {
+      id(e.to, roleOfLeaf.get(e.to) ?? LEAF_ROLE[e.to]);
+    }
   }
   if (kept > 0) id("Kept", "kept");
   for (const e of edgeList) {

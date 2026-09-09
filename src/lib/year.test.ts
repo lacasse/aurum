@@ -1168,3 +1168,127 @@ describe("categoryByYear", () => {
     assert.deepEqual(categoryByYear([]), { years: [], rows: [] });
   });
 });
+
+/*
+ * Three faults found by looking at a real year rather than a made-up one. Each
+ * was a rule that worked on data shaped the way the sample data is shaped.
+ */
+describe("the flow, on shapes the sample data does not have", () => {
+  const accounts = [
+    { id: "a-chq", name: "Chequing", kind: "checking" as const },
+    { id: "a-inv", name: "Brokerage", kind: "investment" as const },
+    { id: "a-rsp", name: "Plan", kind: "pension" as const },
+  ];
+  const at = (
+    type: "income" | "expense" | "transfer",
+    amount: number,
+    category: string,
+    from?: string,
+    to?: string,
+  ) =>
+    ({
+      id: `${category}${amount}${from ?? ""}${to ?? ""}`,
+      date: "2026-06-15",
+      type,
+      amount,
+      category,
+      payee: "p",
+      sourceAccountId: from,
+      destinationAccountId: to,
+    }) as unknown as Transaction;
+
+  const columnsOf = (f: ReturnType<typeof yearFlow>) => {
+    const d = f.nodes.map(() => 0);
+    for (let pass = 0; pass < f.nodes.length; pass++) {
+      let moved = false;
+      for (const l of f.links) {
+        if (d[l.target] < d[l.source] + 1) { d[l.target] = d[l.source] + 1; moved = true; }
+      }
+      if (!moved) break;
+    }
+    return Math.max(...d) + 1;
+  };
+  const edge = (f: ReturnType<typeof yearFlow>, from: string, to: string) =>
+    f.links
+      .filter((l) => f.nodes[l.source].name === from && f.nodes[l.target].name === to)
+      .reduce((a, l) => a + l.value, 0);
+
+  test("a contribution filed against chequing still goes into the plan", () => {
+    /*
+     * Payroll deducts it before the money reaches an account, so the statement
+     * line names the chequing account it was deducted from. Read off the
+     * account it arrived in the plan never appeared at all.
+     */
+    const f = yearFlow(
+      [at("income", 50000, "Salary", undefined, "a-chq"),
+       at("income", 8000, "RSP / Pension", undefined, "a-chq")],
+      "2026",
+      { accounts },
+    );
+    assert.equal(edge(f, "RSP / Pension", "Investments"), 8000, "straight to the invested bar");
+    assert.equal(edge(f, "RSP / Pension", "Money in"), 0, "not into the spendable bar");
+    assert.equal(edge(f, "Investments", "Pension"), 8000, "and it comes out as pension");
+  });
+
+  test("a fee charged inside an investment account does not deepen the chart", () => {
+    /*
+     * The Spending bar shares a column with the invested bar, so a link from
+     * one to the other pushes it into the next column and every ordinary link
+     * downstream starts to look like it skips one.
+     */
+    const rows = [
+      at("income", 90000, "Salary", undefined, "a-chq"),
+      at("expense", 30000, "Housing", "a-chq"),
+      at("transfer", 20000, "Transfer", "a-chq", "a-inv"),
+      at("expense", 40, "Other", "a-inv"),
+    ];
+    const f = yearFlow(rows, "2026", { accounts });
+    assert.equal(columnsOf(f), 4, "four columns, not five");
+    assert.equal(edge(f, "Investments", "Spending"), 0, "never through the Spending bar");
+    assert.ok(
+      f.links.some((l) => f.nodes[l.source].name === "Investments" && f.nodes[l.target].name === "Discretionary"),
+      "straight to what it was for",
+    );
+  });
+
+  test("the leaves still hold every dollar spent", () => {
+    const f = yearFlow(
+      [at("income", 90000, "Salary", undefined, "a-chq"),
+       at("expense", 30000, "Housing", "a-chq"),
+       at("transfer", 20000, "Transfer", "a-chq", "a-inv"),
+       at("expense", 40, "Other", "a-inv")],
+      "2026",
+      { accounts },
+    );
+    const into = (name: string) =>
+      f.links.filter((l) => f.nodes[l.target].name === name).reduce((a, l) => a + l.value, 0);
+    assert.equal(into("Necessity") + into("Discretionary"), 30040, "nothing is lost by the shortcut");
+  });
+
+  test("the pooled remainder stays at the foot even when it also feeds investments", () => {
+    /*
+     * Ranked against every bar rather than the ones in its own group, a source
+     * paying a little into investments took the invested bar's place and sorted
+     * to the top of the column it belongs at the bottom of.
+     */
+    const rows = [
+      at("income", 90000, "Salary", undefined, "a-chq"),
+      at("income", 9000, "Freelance", undefined, "a-chq"),
+      at("income", 300, "Gifts", undefined, "a-chq"),
+      at("income", 200, "Refund", undefined, "a-chq"),
+      at("income", 100, "Other", undefined, "a-inv"),
+      at("expense", 40000, "Housing", "a-chq"),
+    ];
+    const f = yearFlow(rows, "2026", { accounts, limit: 2 });
+    const sources = f.nodes.filter((n) => n.role === "source").map((n) => n.name);
+    const reaching = sources.filter((n) => n !== "Sold investments");
+    assert.equal(
+      reaching[reaching.indexOf("Other income")],
+      "Other income",
+      "the remainder is drawn",
+    );
+    const before = sources.indexOf("Other income");
+    const salary = sources.indexOf("Salary");
+    assert.ok(before > salary, `Other income (${before}) must sit below Salary (${salary})`);
+  });
+});
