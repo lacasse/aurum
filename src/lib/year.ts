@@ -4,6 +4,11 @@ import type { Account, AccountKind } from "./types";
 import { Transaction } from "./types";
 import { fromCents, roundMoney, toCents } from "./money";
 import { labelMonth } from "./format";
+import {
+  SPEND_GROUP_LABELS,
+  groupOf,
+  type SpendGroup,
+} from "./expenses";
 
 /**
  * A year at a time.
@@ -845,6 +850,20 @@ export function incomeTypeShares(
 
 export interface FlowNode {
   name: string;
+  /**
+   * What this node is, so the chart can colour by meaning rather than by
+   * guessing from the name or from which column the layout happened to put it
+   * in. The data layer is the only place that knows a node is a necessity
+   * rather than a choice.
+   */
+  role?:
+    | "source"
+    | "account"
+    | "necessity"
+    | "discretionary"
+    | "debt"
+    | "investing"
+    | "kept";
 }
 export interface FlowLink {
   source: number;
@@ -886,11 +905,33 @@ export interface YearFlow {
  */
 const INVESTED_KINDS = new Set<AccountKind>(["investment", "crypto", "pension"]);
 
+/**
+ * What a dollar leaving an account was for. Kept is not one of these: it is
+ * what no account paid out at all, so it has nothing to break down.
+ *
+ * The spending side is split the way the rest of the app splits it — by
+ * `groupOf`, which is the one answer to "could this have been avoided". A
+ * second answer here would drift from the Expenses page within a release.
+ */
+const SPENDING = "Spending";
+const INVESTING = "Investing";
+const GROUP_ROLE: Record<string, FlowNode["role"]> = {
+  [SPENDING]: "necessity",
+  [INVESTING]: "investing",
+};
+/** The three ends of the spending branch, each its own colour. */
+const LEAF_ROLE: Record<string, FlowNode["role"]> = {
+  [SPEND_GROUP_LABELS.necessity]: "necessity",
+  [SPEND_GROUP_LABELS.discretionary]: "discretionary",
+  [SPEND_GROUP_LABELS.excluded]: "debt",
+};
+
 export function yearFlow(
   transactions: Transaction[],
   year: string,
   accounts: Pick<Account, "id" | "name" | "kind">[] = [],
   limit = 8,
+  spendGroup: (category: string) => SpendGroup = (c) => groupOf(c),
 ): YearFlow {
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const TRUNK = year;
@@ -900,8 +941,22 @@ export function yearFlow(
 
   const incomeTotals = new Map<string, number>();
   const spendTotals = new Map<string, number>();
+  const investTotals = new Map<string, number>();
   const hubTotals = new Map<string, number>();
-  const rows: { from: string; to: string; cents: number; stage: 1 | 2 }[] = [];
+  /*
+   * Every dollar leaving an account leaves it *for* something, and the purpose
+   * is a shorter list than the destinations. Carrying it on the row lets the
+   * chart put the split before the detail: how the year divided between
+   * spending and investing is one glance, and which categories and which
+   * accounts is the glance after it.
+   */
+  const rows: {
+    from: string;
+    to: string;
+    cents: number;
+    stage: 1 | 2;
+    group?: string;
+  }[] = [];
 
   const note = (m: Map<string, number>, k: string, v: number) =>
     m.set(k, (m.get(k) ?? 0) + v);
@@ -917,18 +972,24 @@ export function yearFlow(
       rows.push({ from: t.category, to: hub, cents, stage: 1 });
     } else if (t.type === "expense") {
       const hub = hubOf(t.sourceAccountId);
-      note(spendTotals, t.category, cents);
+      note(spendTotals, SPEND_GROUP_LABELS[spendGroup(t.category)], cents);
       note(hubTotals, hub, cents);
-      rows.push({ from: hub, to: t.category, cents, stage: 2 });
+      rows.push({
+        from: hub,
+        to: SPEND_GROUP_LABELS[spendGroup(t.category)],
+        cents,
+        stage: 2,
+        group: SPENDING,
+      });
     } else if (t.type === "transfer") {
       const dest = byId.get(t.destinationAccountId ?? "");
       if (!dest || !INVESTED_KINDS.has(dest.kind)) continue;
       const hub = hubOf(t.sourceAccountId);
       // A deposit from the invested account into itself is not a deposit.
       if (hub === dest.name) continue;
-      note(spendTotals, dest.name, cents);
+      note(investTotals, dest.name, cents);
       note(hubTotals, hub, cents);
-      rows.push({ from: hub, to: dest.name, cents, stage: 2 });
+      rows.push({ from: hub, to: dest.name, cents, stage: 2, group: INVESTING });
     }
   }
 
@@ -948,7 +1009,20 @@ export function yearFlow(
     return (name: string) => (kept.has(name) ? name : other);
   };
   const sourceName = pool(incomeTotals, limit, "Other income");
-  const outName = pool(spendTotals, limit, "Other spending");
+  /*
+   * A pool per group, not one across both. Sharing it meant an investment
+   * account could be collapsed into "Other spending" and then hang off the
+   * investing branch under a spending label.
+   */
+  /*
+   * Only the investment side is pooled. The spending side is already three
+   * leaves at most -- what had to be paid, what was chosen, and what bought
+   * nothing -- which is the whole point of ending it there rather than in a
+   * column of categories that has to be read one label at a time.
+   */
+  const leafName: Record<string, (name: string) => string> = {
+    [INVESTING]: pool(investTotals, limit, "Other investments"),
+  };
   // The year node is the spine for account-less rows and never pools away.
   const hubName = (() => {
     const named = new Map([...hubTotals].filter(([k]) => k !== TRUNK));
@@ -959,13 +1033,33 @@ export function yearFlow(
   const edges = new Map<string, number>();
   const inflow = new Map<string, number>();
   const outflow = new Map<string, number>();
+  const groups = new Set<string>();
+  const leaves = new Set<string>();
+  const link = (from: string, to: string, cents: number) => {
+    if (from === to) return;
+    edges.set(`${from}\u0000${to}`, (edges.get(`${from}\u0000${to}`) ?? 0) + cents);
+  };
   for (const r of rows) {
-    const from = r.stage === 1 ? sourceName(r.from) : hubName(r.from);
-    const to = r.stage === 1 ? hubName(r.to) : outName(r.to);
-    if (from === to) continue;
-    edges.set(`${from}\u0000${to}`, (edges.get(`${from}\u0000${to}`) ?? 0) + r.cents);
-    if (r.stage === 1) note(inflow, to, r.cents);
-    else note(outflow, from, r.cents);
+    if (r.stage === 1) {
+      const to = hubName(r.to);
+      link(sourceName(r.from), to, r.cents);
+      note(inflow, to, r.cents);
+      continue;
+    }
+    /*
+     * Two links for one row: the account to what it was for, and that to the
+     * thing itself. The pair is what puts a column between them, and because
+     * both carry the same amount the account still balances exactly as it did
+     * when it paid the destination directly.
+     */
+    const from = hubName(r.from);
+    const group = r.group ?? SPEND_GROUP_LABELS.discretionary;
+    const leaf = (leafName[group] ?? ((n: string) => n))(r.to);
+    link(from, group, r.cents);
+    link(group, leaf, r.cents);
+    groups.add(group);
+    leaves.add(leaf);
+    note(outflow, from, r.cents);
   }
 
   const hubs = [...new Set([...inflow.keys(), ...outflow.keys()])].sort(
@@ -984,13 +1078,15 @@ export function yearFlow(
 
   const nodes: FlowNode[] = [];
   const index = new Map<string, number>();
-  const id = (name: string) => {
+  const id = (name: string, role?: FlowNode["role"]) => {
     const existing = index.get(name);
     if (existing !== undefined) return existing;
-    const next = nodes.push({ name }) - 1;
+    const next = nodes.push(role ? { name, role } : { name }) - 1;
     index.set(name, next);
     return next;
   };
+  /** A leaf is whatever its branch is: a necessity, a choice, a deposit. */
+  const roleOfLeaf = new Map<string, FlowNode["role"]>();
 
   /*
    * Nodes in reading order — sources, then hubs, then uses — so the layout has
@@ -1001,11 +1097,18 @@ export function yearFlow(
     const [from, to] = k.split("\u0000");
     return { from, to, cents: v };
   });
-  for (const e of edgeList) if (hubs.includes(e.to)) id(e.from);
-  if (shortfall.size > 0) id("From savings");
-  for (const hub of hubs) id(hub);
-  for (const e of edgeList) if (!hubs.includes(e.to)) id(e.to);
-  if (kept > 0) id("Kept");
+  for (const e of edgeList) if (hubs.includes(e.to)) id(e.from, "source");
+  if (shortfall.size > 0) id("From savings", "source");
+  for (const hub of hubs) id(hub, "account");
+  const groupOrder = [SPENDING, INVESTING];
+  for (const g of groupOrder) if (groups.has(g)) id(g, GROUP_ROLE[g]);
+  for (const e of edgeList) {
+    if (groups.has(e.from) && leaves.has(e.to)) {
+      roleOfLeaf.set(e.to, LEAF_ROLE[e.to] ?? GROUP_ROLE[e.from]);
+    }
+  }
+  for (const e of edgeList) if (leaves.has(e.to)) id(e.to, roleOfLeaf.get(e.to));
+  if (kept > 0) id("Kept", "kept");
 
   for (const e of edgeList) {
     links.push({ source: id(e.from), target: id(e.to), value: fromCents(e.cents) });

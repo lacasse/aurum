@@ -1290,13 +1290,23 @@ export function AllocationBar({
  * Sankey read without it is a tangle of equally-weighted ribbons, and where in
  * the run a band sits is the first thing anyone needs to know.
  */
+const FLOW_TONE: Record<string, AccentName> = {
+  source: "positive",
+  account: "brand",
+  necessity: "negative",
+  discretionary: "cost",
+  debt: "pension",
+  investing: "market",
+  kept: "bonds",
+};
+
 export function YearSankey({
   nodes,
   links,
   format,
-  height = 560,
+  height,
 }: {
-  nodes: { name: string }[];
+  nodes: { name: string; role?: string }[];
   links: { source: number; target: number; value: number }[];
   format: (n: number) => string;
   height?: number;
@@ -1324,25 +1334,54 @@ export function YearSankey({
   }
   const last = Math.max(...depth);
 
+  /*
+   * Colour says what a node is, and the data layer is what knows. Reading it
+   * off the column put every ribbon on the right in the same red, so a deposit
+   * into a pension and a month of groceries were the same thing to look at;
+   * reading it off the name meant the chart had to keep a list of them.
+   */
   const colourOf = (index: number) => {
+    const role = nodes[index]?.role;
+    if (role && FLOW_TONE[role]) return accent(FLOW_TONE[role]);
     if (depth[index] === 0) return accent("positive");
-    if (depth[index] < last) return accent("brand");
-    return nodes[index]?.name === "Kept" ? accent("market") : accent("negative");
+    return depth[index] < last ? accent("brand") : accent("negative");
   };
 
+  /*
+   * Tall enough for the column that has the most in it.
+   *
+   * A fixed height had every node in the busiest column share whatever was
+   * left after the padding between them, so the labels of the small ones
+   * closed up and the last one ran off the bottom of the plot. The chart grows
+   * with the year instead: someone with four categories gets a short chart and
+   * someone with twenty gets a legible one.
+   */
+  const perColumn = depth.reduce<Record<number, number>>((acc, d) => {
+    acc[d] = (acc[d] ?? 0) + 1;
+    return acc;
+  }, {});
+  const busiest = Math.max(...Object.values(perColumn));
+  const drawHeight = height ?? Math.min(900, Math.max(360, busiest * 42 + 64));
+
   return (
-    <div style={{ width: "100%", height }}>
+    <div style={{ width: "100%", height: drawHeight }}>
       <ResponsiveContainer>
         <Sankey
           data={{ nodes, links }}
-          nodePadding={30}
+          nodePadding={26}
           nodeWidth={12}
-          margin={{ top: 26, right: 132, bottom: 8, left: 108 }}
+          /*
+           * Room under the plot as well as over it. The label of the lowest
+           * node sits below its middle, and its amount below that again, so a
+           * bottom margin of a few pixels cut the figure off the last income
+           * stream on the chart.
+           */
+          margin={{ top: 30, right: 136, bottom: 26, left: 112 }}
           link={{ stroke: "var(--line)", strokeOpacity: 0.28, fill: "var(--ink-faint)", fillOpacity: 0.14 }}
           node={(props: unknown) => {
             const { x, y, width, height: h, index, payload } = props as {
               x: number; y: number; width: number; height: number; index: number;
-              payload: { name: string; value: number };
+              payload: { name: string; value: number; depth?: number };
             };
             const colour = colourOf(index);
             /*
@@ -1351,7 +1390,13 @@ export function YearSankey({
              * over it is unreadable at exactly the sizes where the reader most
              * needs to know what it is.
              */
-            const d = depth[index] ?? 0;
+            /*
+             * The layout's own column, not the one counted from the links.
+             * A node with nothing leaving it is pushed to the last column
+             * however short its path from a source was, so counting hops put
+             * what was kept in the middle and laid its label across its bar.
+             */
+            const d = payload.depth ?? depth[index] ?? 0;
             const middle = d > 0 && d < last;
             /*
              * The middle column is labelled above its bar rather than beside

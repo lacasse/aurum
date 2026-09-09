@@ -18,6 +18,7 @@ import {
 } from "./year";
 import type { ClassPoint, NetWorthPoint, PortfolioPoint } from "./analytics";
 import type { Transaction } from "./types";
+import { groupOf } from "./expenses";
 
 const nw = (key: string, net: number) =>
   ({ key, label: key, assets: 0, liabilities: 0, portfolio: 0, pension: 0, net }) as NetWorthPoint;
@@ -803,5 +804,138 @@ describe("the flow through the accounts", () => {
   test("a row naming no account still routes through the year", () => {
     const f = yearFlow([...rows, txn("2026-06-30", "expense", 4000, "Travel")], "2026", accounts);
     assert.equal(outOf(f, "2026"), 4000);
+  });
+});
+
+/*
+ * The split before the detail. How a year divided between spending and
+ * investing is one glance; which categories and which accounts is the next.
+ */
+describe("what the money left an account for", () => {
+  const accounts = [
+    { id: "a-chq", name: "Chequing", kind: "checking" as const },
+    { id: "a-inv", name: "Portfolio", kind: "investment" as const },
+  ];
+  const at = (
+    date: string,
+    type: "income" | "expense" | "transfer",
+    amount: number,
+    category: string,
+    from?: string,
+    to?: string,
+  ) =>
+    ({
+      ...txn(date, type === "transfer" ? "expense" : type, amount, category),
+      type,
+      sourceAccountId: from,
+      destinationAccountId: to,
+    }) as unknown as Transaction;
+
+  const rows = [
+    at("2026-01-31", "income", 60000, "Salary", undefined, "a-chq"),
+    at("2026-03-31", "expense", 20000, "Housing", "a-chq"),
+    at("2026-03-31", "expense", 5000, "Travel", "a-chq"),
+    at("2026-04-30", "transfer", 15000, "Transfer", "a-chq", "a-inv"),
+  ];
+  const f = yearFlow(rows, "2026", accounts);
+  const into = (name: string) =>
+    f.links.filter((l) => f.nodes[l.target].name === name).reduce((a, l) => a + l.value, 0);
+  const outOf = (name: string) =>
+    f.links.filter((l) => f.nodes[l.source].name === name).reduce((a, l) => a + l.value, 0);
+  const edge = (from: string, to: string) =>
+    f.links
+      .filter((l) => f.nodes[l.source].name === from && f.nodes[l.target].name === to)
+      .reduce((a, l) => a + l.value, 0);
+
+  test("spending ends at whether it could have been avoided", () => {
+    assert.equal(edge("Chequing", "Spending"), 25000);
+    assert.equal(edge("Spending", "Necessity"), 20000);
+    assert.equal(edge("Spending", "Discretionary"), 5000);
+    // The categories themselves are not drawn: two ends, not ten.
+    assert.equal(f.nodes.some((n) => n.name === "Housing"), false);
+    assert.equal(f.nodes.some((n) => n.name === "Travel"), false);
+  });
+
+  test("paying off debt is not counted as consumption", () => {
+    const d = yearFlow(
+      [
+        at("2026-01-31", "income", 30000, "Salary", undefined, "a-chq"),
+        at("2026-02-28", "expense", 7000, "Debt Repayment", "a-chq"),
+      ],
+      "2026",
+      accounts,
+    );
+    const e = (from: string, to: string) =>
+      d.links
+        .filter((l) => d.nodes[l.source].name === from && d.nodes[l.target].name === to)
+        .reduce((a, l) => a + l.value, 0);
+    assert.equal(e("Chequing", "Spending"), 7000);
+    assert.equal(e("Spending", "Not consumption"), 7000);
+    assert.equal(d.nodes.some((n) => n.name === "Debt Repayment"), false);
+  });
+
+  test("an override moves a category to the other branch", () => {
+    const o = yearFlow(rows, "2026", accounts, 8, (c) =>
+      c === "Travel" ? "necessity" : groupOf(c),
+    );
+    const e = (from: string, to: string) =>
+      o.links
+        .filter((l) => o.nodes[l.source].name === from && o.nodes[l.target].name === to)
+        .reduce((a, l) => a + l.value, 0);
+    assert.equal(e("Spending", "Necessity"), 25000);
+    assert.equal(o.nodes.some((n) => n.name === "Discretionary"), false);
+  });
+
+  test("every node says what it is, so colour is not read off the name", () => {
+    const role = (n: string) => f.nodes.find((x) => x.name === n)?.role;
+    assert.equal(role("Salary"), "source");
+    assert.equal(role("Chequing"), "account");
+    assert.equal(role("Investing"), "investing");
+    assert.equal(role("Kept"), "kept");
+    // Each end of the spending branch is its own colour.
+    assert.equal(role("Necessity"), "necessity");
+    assert.equal(role("Discretionary"), "discretionary");
+    // An investment leaf belongs to the branch that fed it.
+    assert.equal(role("Portfolio"), "investing");
+  });
+
+  test("investing is its own branch, not a spending category", () => {
+    assert.equal(edge("Chequing", "Investing"), 15000);
+    assert.equal(edge("Investing", "Portfolio"), 15000);
+    assert.equal(edge("Spending", "Portfolio"), 0);
+  });
+
+  test("a group passes on exactly what it was given", () => {
+    for (const g of ["Spending", "Investing"]) assert.equal(into(g), outOf(g));
+  });
+
+  test("the account still balances across the extra column", () => {
+    assert.equal(into("Chequing"), outOf("Chequing"));
+  });
+
+  test("kept stays one node with nothing under it", () => {
+    assert.equal(into("Kept"), 20000);
+    assert.equal(outOf("Kept"), 0);
+  });
+
+  test("an investment account is pooled as an investment, never as spending", () => {
+    const many = [
+      at("2026-01-31", "income", 900000, "Salary", undefined, "a-chq"),
+      ...Array.from({ length: 12 }, (_, i) =>
+        at(`2026-02-${String(i + 1).padStart(2, "0")}`, "transfer", 1000 * (12 - i), "Transfer", "a-chq", `a-${i}`),
+      ),
+    ];
+    const lots = [
+      ...accounts,
+      ...Array.from({ length: 12 }, (_, i) => ({
+        id: `a-${i}`,
+        name: `Fund ${i}`,
+        kind: "investment" as const,
+      })),
+    ];
+    const g = yearFlow(many, "2026", lots);
+    const pooled = g.nodes.find((n) => n.name === "Other investments");
+    assert.ok(pooled, "the tail past the limit is pooled as investments");
+    assert.equal(g.nodes.some((n) => n.name === "Other spending"), false);
   });
 });

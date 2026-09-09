@@ -219,7 +219,9 @@ export default function YearPage() {
   const typeLast = typeRow
     ? { ...incomeTypeAmounts(transactions, selected.year), shares: typeRow }
     : null;
-  const flow = yearFlow(transactions, selected.year, accounts);
+  const flow = yearFlow(transactions, selected.year, accounts, 8, (c) =>
+    groupOf(c, spendGroups),
+  );
   const unearned = unearnedShare(transactions, selected.year);
   const balanceBars = data.shapes.map((sh) => ({
     label: sh.year,
@@ -539,7 +541,7 @@ export default function YearPage() {
           <Card>
             <CardHeader
               title={`Every dollar of ${selected.year}`}
-              subtitle="Where the money came from, where it landed, and where it went"
+              subtitle="Where the money came from, where it landed, and what it left for"
             />
             <div className="px-3 pb-4">
               <YearSankey
@@ -549,13 +551,15 @@ export default function YearPage() {
               />
             </div>
             <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
-              The middle column is the account the money landed in, and each one
-              balances on its own. Deposits into an investment, crypto or pension
-              account are shown as a destination; transfers between two cash
-              accounts are not, because the same dollar would be counted twice
-              and both halves would grow with however often money was moved.
-              Anything that left an account income never reached that year comes
-              in as “From savings”.
+              Accounts in the second column, what the money left them for in the
+              third, and each account balances on its own. Spending ends at
+              necessity or discretion rather than at a column of categories —
+              the same split as the Expenses page, and reassignable there.
+              Deposits into an investment, crypto or pension account are shown as
+              a destination; transfers between two cash accounts are not, because
+              the same dollar would be counted twice and both halves would grow
+              with however often money was moved. Anything that left an account
+              income never reached that year comes in as “From savings”.
             </p>
           </Card>
         )}
