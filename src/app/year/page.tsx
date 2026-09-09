@@ -646,13 +646,14 @@ export default function YearPage() {
                 fadeAtZero
                 series={[
                   /*
-                   * Passive first, so it stacks along the bottom where the axis
-                   * is. It is the band whose movement matters, and one floating
-                   * in the middle is one whose changes have to be measured
-                   * rather than seen.
+                   * Active along the bottom, passive above it. The boundary
+                   * between the two is then a single line, and passive is the
+                   * gap between that line and the top of the chart — a distance
+                   * to the ceiling rather than a sliver on the floor, which is
+                   * the easier of the two to see change.
                    */
-                  { key: "Passive", name: "Passive", color: accentFor("brand") },
                   { key: "Active", name: "Active", color: accentFor("cost") },
+                  { key: "Passive", name: "Passive", color: accentFor("brand") },
                 ]}
                 height={280}
                 yDomain={[0, 100]}
