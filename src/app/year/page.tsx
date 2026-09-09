@@ -21,7 +21,13 @@ import {
   Segmented,
   cn,
 } from "@/components/ui";
-import { GroupedBars, RoomGauge, Waterfall } from "@/components/charts";
+import {
+  AllocationBar,
+  GroupedBars,
+  RoomGauge,
+  SignedHBars,
+  Waterfall,
+} from "@/components/charts";
 import { accent as accentFor } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
@@ -35,12 +41,16 @@ import {
   portfolioSeries,
 } from "@/lib/analytics";
 import {
+  cashflowInsights,
+  categoryShifts,
+  incomeAllocation,
   milestones,
   yearInsights,
   yearRows,
   yearShapes,
   yearWaterfall,
 } from "@/lib/year";
+import { groupOf, type SpendGroup } from "@/lib/expenses";
 import {
   REGISTERED_PLANS,
   contributionRoom,
@@ -73,6 +83,28 @@ export default function YearPage() {
   const [year, setYear] = useState<string | null>(null);
   const [limits, setLimits] = useState<ContributionLimits>({});
   const [roomOpen, setRoomOpen] = useState(false);
+  /*
+   * Which categories count as necessities, as the owner has set them.
+   *
+   * Read rather than assumed: the Expenses page lets the split be reassigned,
+   * and a year page working from the defaults would put the same spending in a
+   * different half from the page it came from. Two answers to one question is
+   * the fault, not the mild inaccuracy.
+   */
+  const [spendGroups, setSpendGroups] = useState<Record<string, SpendGroup>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/expense-settings", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((s: { groups?: Record<string, SpendGroup> }) => {
+        if (!cancelled) setSpendGroups(s.groups ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,7 +217,14 @@ export default function YearPage() {
 
   const room = contributionRoom(selected.year, transactions, accounts, limits);
   const shape = data.shapes.find((sh) => sh.year === selected.year);
-  const insights = yearInsights(data.shapes, selected.year);
+  const insights = [
+    ...yearInsights(data.shapes, selected.year),
+    ...cashflowInsights(transactions, selected.year, (c) => groupOf(c, spendGroups)),
+  ];
+  const allocation = incomeAllocation(transactions, selected.year, (c) =>
+    groupOf(c, spendGroups),
+  );
+  const shifts = categoryShifts(transactions, selected.year);
   const balanceBars = data.shapes.map((sh) => ({
     label: sh.year,
     Cash: sh.cash,
@@ -433,6 +472,80 @@ export default function YearPage() {
             </div>
           </Card>
         )}
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/*
+            * The savings rate is one number and hides the interesting part: a
+            * year that kept a fifth of its income says nothing about whether
+            * the other four fifths were rent or restaurants. Splitting the
+            * whole of income at once puts the cost of living, the choices and
+            * the debt beside what was kept.
+            */}
+          <Card>
+            <CardHeader
+              title={`Where ${selected.year}'s income went`}
+              subtitle="Every dollar that came in, and what became of it"
+            />
+            <div className="px-5 pb-5">
+              <AllocationBar
+                total={allocation.income}
+                format={(n) => fmtCAD(n)}
+                parts={[
+                  { label: "Necessities", value: allocation.necessities, colour: accentFor("cost") },
+                  { label: "Discretionary", value: allocation.discretionary, colour: accentFor("negative") },
+                  { label: "Debt repaid", value: allocation.debt, colour: accentFor("bonds") },
+                  { label: "Kept", value: Math.max(0, allocation.saved), colour: accentFor("positive") },
+                ]}
+              />
+              {allocation.saved < 0 && (
+                <p className="mt-3 text-[0.6875rem] leading-relaxed text-negative">
+                  {selected.year} spent {fmtCAD(Math.abs(allocation.saved))} more than
+                  it earned. The bar shows where the income went; the shortfall came
+                  from savings or borrowing.
+                </p>
+              )}
+            </div>
+          </Card>
+
+          {/*
+            * A total says this year cost more than the last one. It never says
+            * what did — and a category that moved is the one thing on this
+            * page that can be acted on, where a total is a fact about the past.
+            */}
+          <Card>
+            <CardHeader
+              title="What changed"
+              subtitle={
+                shifts.length > 0
+                  ? `Spending by category against ${Number(selected.year) - 1}`
+                  : "Nothing to compare against yet"
+              }
+            />
+            {shifts.length > 0 ? (
+              <div className="px-3 pb-4">
+                <SignedHBars
+                  data={shifts.map((r) => ({ label: r.category, value: r.change }))}
+                  labelKey="label"
+                  valueKey="value"
+                  fmt={(n) => fmtSignedCAD(n)}
+                  height={Math.max(160, shifts.length * 30)}
+                  positiveColor={accentFor("negative")}
+                  negativeColor={accentFor("positive")}
+                />
+                <p className="px-2 pt-1 text-[0.6875rem] text-ink-faint">
+                  Spending more is drawn as the unwelcome direction, so the
+                  colours mean the same thing here as everywhere else on the
+                  page.
+                </p>
+              </div>
+            ) : (
+              <p className="px-5 pb-5 text-xs text-ink-dim">
+                A comparison needs the year before it. This is the first year on
+                record.
+              </p>
+            )}
+          </Card>
+        </div>
 
         <Card>
           <CardHeader

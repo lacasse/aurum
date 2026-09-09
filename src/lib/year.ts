@@ -2,6 +2,7 @@ import { NON_SPENDABLE_INCOME, chainedReturns, isIncome } from "./analytics";
 import type { ClassPoint, NetWorthPoint, PortfolioPoint } from "./analytics";
 import { Transaction } from "./types";
 import { fromCents, roundMoney, toCents } from "./money";
+import { labelMonth } from "./format";
 
 /**
  * A year at a time.
@@ -451,7 +452,180 @@ export function yearInsights(
   return out;
 }
 
+/**
+ * Two more observations, from the cash flow rather than the balance sheet.
+ *
+ * Kept apart from `yearInsights` because they need the transactions and it
+ * does not — a page that has only the yearly totals still gets the first set.
+ */
+export function cashflowInsights(
+  transactions: Transaction[],
+  year: string,
+  groupOf: (category: string) => "necessity" | "discretionary" | "excluded",
+): YearInsight[] {
+  const out: YearInsight[] = [];
+  const here = incomeAllocation(transactions, year, groupOf);
+  if (here.income <= 0) return out;
+
+  /*
+   * What the year would have cost with every choice removed.
+   *
+   * The useful reading of a necessity total is not the figure but the ratio to
+   * income: it is the share of earnings already committed before any decision
+   * is made, and the part of a salary that cannot absorb a shock.
+   */
+  const committed = Math.round((here.necessities / here.income) * 100);
+  out.push({
+    key: "committed",
+    headline: `${committed}% of income was already committed`,
+    detail:
+      "Housing, food, transport and the rest of what arrives whether or not the year went well. The remainder is what any decision could move.",
+    tone: committed > 70 ? "negative" : committed > 50 ? "neutral" : "positive",
+  });
+
+  /*
+   * The single month that did the most work, and the one that undid it.
+   *
+   * A year is an average of twelve very different months, and the average is
+   * the one figure that describes none of them. Naming the extremes says more
+   * about what actually happened.
+   */
+  const byMonth = new Map<string, { income: number; spent: number }>();
+  for (const t of transactions) {
+    if (t.date.slice(0, 4) !== year) continue;
+    const key = t.date.slice(0, 7);
+    const slot = byMonth.get(key) ?? { income: 0, spent: 0 };
+    if (isIncome(t)) slot.income += toCents(t.amount);
+    else if (t.type === "expense") slot.spent += toCents(t.amount);
+    byMonth.set(key, slot);
+  }
+  const months = [...byMonth.entries()]
+    .map(([key, v]) => ({ key, kept: fromCents(v.income - v.spent) }))
+    .sort((a, b) => b.kept - a.kept);
+
+  if (months.length >= 3) {
+    const best = months[0];
+    const worst = months[months.length - 1];
+    out.push({
+      key: "months",
+      headline: `${labelMonth(best.key)} kept the most; ${labelMonth(worst.key)} the least`,
+      detail: `${fmtDelta(best.kept)} against ${fmtDelta(worst.kept)}. A year is an average of months that looked nothing like each other.`,
+      tone: "neutral",
+    });
+  }
+
+  return out;
+}
+
 function fmtDelta(n: number): string {
   const sign = n >= 0 ? "+" : "-";
   return `${sign}${Math.round(Math.abs(n)).toLocaleString()}`;
+}
+
+/* ── Where a year's income went ── */
+
+export interface IncomeAllocation {
+  income: number;
+  necessities: number;
+  discretionary: number;
+  /** Debt repayment: money crossing the balance sheet rather than being spent. */
+  debt: number;
+  /** What was left. Negative in a year that spent more than it earned. */
+  saved: number;
+}
+
+/**
+ * Every dollar that came in, and what became of it.
+ *
+ * The savings rate is one number and hides the interesting part — a year that
+ * kept a fifth of its income tells you nothing about whether the other four
+ * fifths were rent or restaurants. Splitting the whole of income at once puts
+ * the fixed cost of living, the discretionary part and the debt beside what
+ * was kept, on the same bar.
+ *
+ * Debt repayment is separated rather than counted as spending. The money
+ * leaves the account and lands on the other side of the balance sheet as debt
+ * that no longer exists; calling it consumption both overstates what living
+ * costs and understates what was saved.
+ */
+export function incomeAllocation(
+  transactions: Transaction[],
+  year: string,
+  groupOf: (category: string) => "necessity" | "discretionary" | "excluded",
+): IncomeAllocation {
+  let income = 0;
+  let necessities = 0;
+  let discretionary = 0;
+  let debt = 0;
+
+  for (const t of transactions) {
+    if (t.date.slice(0, 4) !== year) continue;
+    const cents = toCents(t.amount);
+    if (isIncome(t)) {
+      income += cents;
+      continue;
+    }
+    if (t.type !== "expense") continue;
+    const group = groupOf(t.category);
+    if (group === "necessity") necessities += cents;
+    else if (group === "discretionary") discretionary += cents;
+    else debt += cents;
+  }
+
+  return {
+    income: fromCents(income),
+    necessities: fromCents(necessities),
+    discretionary: fromCents(discretionary),
+    debt: fromCents(debt),
+    saved: fromCents(income - necessities - discretionary - debt),
+  };
+}
+
+/* ── What changed against last year ── */
+
+export interface CategoryShift {
+  category: string;
+  now: number;
+  before: number;
+  change: number;
+}
+
+/**
+ * The categories that moved, largest first.
+ *
+ * A year's total tells you it cost more than the last one; it never tells you
+ * what did. This is the subtraction that answers it, and it is the one figure
+ * on the page that can actually be acted on — a total is a fact about the past
+ * and a category that doubled is a decision.
+ *
+ * Only complete years are worth comparing. Six months against twelve reports
+ * every category as halved, which is arithmetic rather than news.
+ */
+export function categoryShifts(
+  transactions: Transaction[],
+  year: string,
+  limit = 8,
+): CategoryShift[] {
+  const before = String(Number(year) - 1);
+  const now = new Map<string, number>();
+  const then = new Map<string, number>();
+
+  for (const t of transactions) {
+    if (t.type !== "expense") continue;
+    const y = t.date.slice(0, 4);
+    const into = y === year ? now : y === before ? then : null;
+    if (!into) continue;
+    into.set(t.category, (into.get(t.category) ?? 0) + toCents(t.amount));
+  }
+
+  const categories = new Set([...now.keys(), ...then.keys()]);
+  return [...categories]
+    .map((category) => {
+      const a = fromCents(now.get(category) ?? 0);
+      const b = fromCents(then.get(category) ?? 0);
+      return { category, now: a, before: b, change: roundMoney(a - b) };
+    })
+    .filter((r) => Math.abs(r.change) >= 1)
+    .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
+    .slice(0, limit);
 }

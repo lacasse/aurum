@@ -1168,3 +1168,71 @@ export function Waterfall({
     </div>
   );
 }
+
+/* ---------------- Allocation bar ---------------- */
+
+/**
+ * One bar, split by share, for a quantity that adds to a whole.
+ *
+ * Hand-drawn rather than charted: a hundred-percent bar has no axes, no
+ * gridlines and one dimension, and routing it through a chart library buys a
+ * responsive container and a layout pass to draw four rectangles in a row.
+ *
+ * Segments too thin to see are still drawn, at a minimum width, because a
+ * category that took a little is a different statement from one that took
+ * nothing. Their labels drop out instead — a legend beneath carries every
+ * figure, so nothing is lost by refusing to cram text into three pixels.
+ */
+export function AllocationBar({
+  parts,
+  total,
+  format,
+}: {
+  parts: { label: string; value: number; colour: string }[];
+  total: number;
+  format: (n: number) => string;
+}) {
+  const shown = parts.filter((p) => p.value > 0);
+  const sum = shown.reduce((a, p) => a + p.value, 0) || 1;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex h-9 w-full overflow-hidden rounded-lg">
+        {shown.map((p) => {
+          const share = (p.value / sum) * 100;
+          return (
+            <div
+              key={p.label}
+              className="flex items-center justify-center"
+              style={{ width: `${share}%`, minWidth: 3, background: p.colour }}
+              title={`${p.label} · ${format(p.value)}`}
+            >
+              {share >= 12 && (
+                <span className="px-1 text-[0.6875rem] font-semibold text-black/75">
+                  {Math.round(share)}%
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        {parts.map((p) => (
+          <li key={p.label} className="flex items-center gap-2 text-xs">
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ background: p.colour }}
+            />
+            <span className="text-ink-dim">{p.label}</span>
+            <span className="ml-auto font-medium tabular-nums text-ink">
+              {format(p.value)}
+            </span>
+            <span className="w-9 shrink-0 text-right tabular-nums text-ink-faint">
+              {total > 0 ? `${Math.round((p.value / total) * 100)}%` : "—"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

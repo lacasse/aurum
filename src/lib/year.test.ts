@@ -1,6 +1,15 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { milestones, yearInsights, yearRows, yearShapes, yearWaterfall } from "./year";
+import {
+  cashflowInsights,
+  categoryShifts,
+  incomeAllocation,
+  milestones,
+  yearInsights,
+  yearRows,
+  yearShapes,
+  yearWaterfall,
+} from "./year";
 import type { ClassPoint, NetWorthPoint, PortfolioPoint } from "./analytics";
 import type { Transaction } from "./types";
 
@@ -372,5 +381,124 @@ describe("the waterfall at any size", () => {
     const opening = steps[0];
     assert.equal(opening.top, -48000);
     assert.notEqual(opening.top, 0);
+  });
+});
+
+/* ALL-FIXTURES-INVENTED */
+
+const groups = (c: string) =>
+  c === "Housing" || c === "Groceries"
+    ? ("necessity" as const)
+    : c === "Debt Repayment"
+      ? ("excluded" as const)
+      : ("discretionary" as const);
+
+describe("where a year's income went", () => {
+  const txns = [
+    txn("2026-01-31", "income", 50000, "Salary"),
+    txn("2026-02-28", "expense", 12000, "Housing"),
+    txn("2026-03-31", "expense", 4000, "Groceries"),
+    txn("2026-04-30", "expense", 6000, "Travel"),
+    txn("2026-05-31", "expense", 3000, "Debt Repayment"),
+    txn("2025-06-30", "expense", 9999, "Housing"),
+  ];
+
+  test("the parts add back to the income", () => {
+    const a = incomeAllocation(txns, "2026", groups);
+    assert.equal(a.income, 50000);
+    assert.equal(a.necessities + a.discretionary + a.debt + a.saved, a.income);
+  });
+
+  test("debt repayment is kept out of spending", () => {
+    const a = incomeAllocation(txns, "2026", groups);
+    assert.equal(a.debt, 3000);
+    assert.equal(a.discretionary, 6000);
+  });
+
+  test("another year's spending is not this year's", () => {
+    assert.equal(incomeAllocation(txns, "2026", groups).necessities, 16000);
+  });
+
+  test("spending past the income shows as a negative remainder", () => {
+    const over = [txn("2026-01-31", "income", 1000, "Salary"), txn("2026-02-01", "expense", 2500, "Travel")];
+    assert.equal(incomeAllocation(over, "2026", groups).saved, -1500);
+  });
+
+  test("a year with no income is empty rather than a divide by zero", () => {
+    const a = incomeAllocation([txn("2026-02-01", "expense", 100, "Travel")], "2026", groups);
+    assert.equal(a.income, 0);
+    assert.equal(a.saved, -100);
+  });
+});
+
+describe("what changed against last year", () => {
+  const txns = [
+    txn("2026-01-31", "expense", 5000, "Travel"),
+    txn("2025-01-31", "expense", 1000, "Travel"),
+    txn("2026-02-28", "expense", 1000, "Groceries"),
+    txn("2025-02-28", "expense", 4000, "Groceries"),
+    txn("2026-03-31", "expense", 200, "Health"),
+  ];
+
+  test("the largest movers come first, whichever way they moved", () => {
+    const rows = categoryShifts(txns, "2026");
+    assert.deepEqual(rows.map((r) => r.category), ["Travel", "Groceries", "Health"]);
+    assert.equal(rows[0].change, 4000);
+    assert.equal(rows[1].change, -3000);
+  });
+
+  test("a category that appeared this year counts as its whole self", () => {
+    const rows = categoryShifts(txns, "2026");
+    assert.equal(rows.find((r) => r.category === "Health")?.change, 200);
+  });
+
+  test("a category that did not move is left out", () => {
+    const steady = [
+      txn("2026-01-31", "expense", 500, "Groceries"),
+      txn("2025-01-31", "expense", 500, "Groceries"),
+    ];
+    assert.deepEqual(categoryShifts(steady, "2026"), []);
+  });
+
+  test("a first year reports its own spending as the whole change", () => {
+    const only = [txn("2026-01-31", "expense", 500, "Groceries")];
+    assert.equal(categoryShifts(only, "2026")[0].change, 500);
+  });
+
+  test("a year the record does not reach has nothing to report", () => {
+    const only = [txn("2026-01-31", "expense", 500, "Groceries")];
+    assert.deepEqual(categoryShifts(only, "2024"), []);
+  });
+});
+
+describe("what the cash flow says", () => {
+  const txns = [
+    txn("2026-01-31", "income", 10000, "Salary"),
+    txn("2026-01-31", "expense", 3000, "Housing"),
+    txn("2026-02-28", "income", 10000, "Salary"),
+    txn("2026-02-28", "expense", 9000, "Travel"),
+    txn("2026-03-31", "income", 10000, "Salary"),
+    txn("2026-03-31", "expense", 1000, "Travel"),
+  ];
+
+  test("it says how much of income was committed before any choice", () => {
+    const i = cashflowInsights(txns, "2026", groups).find((x) => x.key === "committed");
+    // 3,000 of necessities against 30,000 of income.
+    assert.match(i!.headline, /10%/);
+  });
+
+  test("it names the months that did the most and least work", () => {
+    const i = cashflowInsights(txns, "2026", groups).find((x) => x.key === "months");
+    assert.match(i!.headline, /Mar 2026 kept the most/);
+    assert.match(i!.headline, /Feb 2026 the least/);
+  });
+
+  test("too few months to have extremes says nothing about them", () => {
+    const short = [txn("2026-01-31", "income", 10000, "Salary")];
+    assert.equal(cashflowInsights(short, "2026", groups).some((x) => x.key === "months"), false);
+  });
+
+  test("a year with no income says nothing at all", () => {
+    assert.deepEqual(cashflowInsights([txn("2026-01-01", "expense", 10, "Travel")], "2026", groups), []);
   });
 });
