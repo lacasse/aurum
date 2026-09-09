@@ -898,7 +898,7 @@ const INVESTED_KINDS = new Set<AccountKind>(["investment", "crypto", "pension"])
 const INVESTMENTS = "Investments";
 
 /**
- * Everything that is not invested, as one bar. Cards included.
+ * Everything that reached a spendable account, as one bar. Cards included.
  *
  * Five chequing and savings accounts down the middle answered "which one" for
  * a reader who was not asking, so the column says the kind of place the money
@@ -919,7 +919,7 @@ const INVESTMENTS = "Investments";
  * paying next month, which is a question about a balance rather than about a
  * year's spending, and the balance sheet answers it.
  */
-const CASH = "Cash";
+const CASH = "Net liquid inflows";
 const CASH_KINDS = new Set<AccountKind>([
   "checking",
   "savings",
