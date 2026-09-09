@@ -1375,27 +1375,48 @@ export function YearSankey({
           nodePadding={26}
           nodeWidth={12}
           /*
-           * Every node at the depth its own links give it, rather than
-           * flushing the ends to the right edge.
-           *
-           * Flushed right, what was kept sat two columns from where it came
-           * from — and the ribbon carrying it ran straight through the
-           * Spending bar on the way, so it read as money coming out of
-           * spending. Nothing was wrong with the figure; a link that skips a
-           * column has to cross whatever is standing in it.
-           *
-           * At its own depth it lands beside Spending and Investments, which
-           * is what it is: the third thing the money did.
-           */
-          align="left"
-          /*
            * Room under the plot as well as over it. The label of the lowest
            * node sits below its middle, and its amount below that again, so a
            * bottom margin of a few pixels cut the figure off the last income
            * stream on the chart.
            */
           margin={{ top: 30, right: 136, bottom: 26, left: 112 }}
-          link={{ stroke: "var(--line)", strokeOpacity: 0.28, fill: "var(--ink-faint)", fillOpacity: 0.14 }}
+          /*
+           * Ribbons carry the colour of where they end.
+           *
+           * What was kept goes from the middle to the last column in one hop,
+           * skipping the column that says what the money was for — so it
+           * passes behind the Spending bar, entering one edge and leaving the
+           * other, which reads as money coming out of spending. Nothing is
+           * wrong with the figure and no placement fixes it: a link that skips
+           * a column crosses whatever stands in that column.
+           *
+           * Tinting the ribbon is what fixes it. A band that arrives at Kept
+           * is that colour for its whole length, so the eye follows it past
+           * the bar instead of losing it there, and it never takes the colour
+           * of something it merely passed.
+           */
+          link={(props: unknown) => {
+            const { sourceX, sourceY, sourceControlX, targetX, targetY, targetControlX, linkWidth, payload } =
+              props as {
+                sourceX: number; sourceY: number; sourceControlX: number;
+                targetX: number; targetY: number; targetControlX: number;
+                linkWidth: number;
+                payload?: { target?: { name?: string } };
+              };
+            const at = nodes.findIndex((n) => n.name === payload?.target?.name);
+            return (
+              <Layer>
+                <path
+                  d={`M${sourceX},${sourceY}C${sourceControlX},${sourceY} ${targetControlX},${targetY} ${targetX},${targetY}`}
+                  fill="none"
+                  stroke={at >= 0 ? colourOf(at) : "var(--ink-faint)"}
+                  strokeWidth={linkWidth}
+                  strokeOpacity={0.2}
+                />
+              </Layer>
+            );
+          }}
           node={(props: unknown) => {
             const { x, y, width, height: h, index, payload } = props as {
               x: number; y: number; width: number; height: number; index: number;
