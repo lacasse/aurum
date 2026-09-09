@@ -1293,8 +1293,41 @@ export function yearFlow(
     const [from, to] = k.split("\u0000");
     return { from, to, cents: v };
   });
-  for (const e of edgeList) if (hubs.includes(e.to) && !hubs.includes(e.from)) id(e.from, "source");
-  if (shortfall.size > 0) id("From savings", "source");
+  /*
+   * Sources by size, except that anything reaching past the first bar goes
+   * under it.
+   *
+   * Most income lands in the spendable bar, but a pension contribution and the
+   * proceeds of a sale go straight to the invested one — two columns along —
+   * so their ribbons cross the first bar on the way. Ranked purely by size a
+   * pension contribution sits near the top and its ribbon runs the width of
+   * the spendable bar to get past it. Ordered by where they reach first and
+   * only then by size, they sit below it and pass underneath.
+   */
+  const sourceTotals = new Map<string, number>();
+  const reachesFirstBar = new Set<string>();
+  const firstBars = new Set(hubs.filter((h) => !investedHubs.has(h)));
+  for (const e of edgeList) {
+    if (!hubs.includes(e.to) || hubs.includes(e.from)) continue;
+    sourceTotals.set(e.from, (sourceTotals.get(e.from) ?? 0) + e.cents);
+    if (firstBars.has(e.to)) reachesFirstBar.add(e.from);
+  }
+  if (shortfall.size > 0) {
+    sourceTotals.set(
+      "From savings",
+      [...shortfall.values()].reduce((a, b) => a + b, 0),
+    );
+    for (const hub of shortfall.keys()) {
+      if (firstBars.has(hub)) reachesFirstBar.add("From savings");
+    }
+  }
+  const orderedSources = [...sourceTotals.entries()].sort(
+    (a, b) =>
+      Number(reachesFirstBar.has(b[0])) - Number(reachesFirstBar.has(a[0])) ||
+      b[1] - a[1] ||
+      a[0].localeCompare(b[0]),
+  );
+  for (const [name] of orderedSources) id(name, "source");
   /*
    * Spending before the invested bar, to match the column after it, where the
    * categories come before the asset classes. Two columns in the same order
