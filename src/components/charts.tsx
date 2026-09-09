@@ -313,7 +313,29 @@ export function SeriesChart({
           axisLine={false}
           width={56}
           domain={yDomain}
-          ticks={yDomain ? [0, 25, 50, 75, 100] : undefined}
+          /*
+           * Without this the axis quietly widens to fit the data and the
+           * domain is decoration: a chart asking for nought to ten, drawn over
+           * a stack totalling a hundred, got an axis of a hundred and a single
+           * surviving tick.
+           */
+          allowDataOverflow={yDomain !== undefined}
+          /*
+           * Ticks across whatever the domain is, not the quarters of a hundred
+           * this was written for. Hardcoding them meant a chart given a domain
+           * of nought to ten was labelled nought to a hundred — the axis
+           * silently disagreeing with the data drawn against it, which is the
+           * worst way for a chart to be wrong.
+           */
+          ticks={
+            yDomain
+              ? Array.from(
+                  { length: 5 },
+                  (_, i) =>
+                    Math.round((yDomain[0] + ((yDomain[1] - yDomain[0]) * i) / 4) * 100) / 100,
+                )
+              : undefined
+          }
           tickFormatter={(v) => (yFmt ? yFmt(Number(v)) : String(v))}
         />
         <Tooltip

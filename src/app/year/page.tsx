@@ -46,6 +46,7 @@ import {
   contributionsVsValue,
   incomeAllocation,
   incomeTypeShares,
+  passiveAxisCeiling,
   yearFlow,
   unearnedShare,
   yearInsights,
@@ -215,6 +216,7 @@ export default function YearPage() {
       : null;
   const typeShares = incomeTypeShares(transactions);
   const flow = yearFlow(transactions, selected.year);
+  const passiveCeiling = passiveAxisCeiling(typeShares);
   const unearned = unearnedShare(transactions, selected.year);
   const balanceBars = data.shapes.map((sh) => ({
     label: sh.year,
@@ -354,115 +356,117 @@ export default function YearPage() {
           </div>
         )}
 
-        {/*
-          * Room is the one limit here the app cannot work out for itself. It
-          * depends on income, on room carried forward and on withdrawals made
-          * years ago, all of it stated on a notice of assessment — so the
-          * figure is entered, and what has been paid in against it is counted.
-          */}
-        <Card>
-          <CardHeader
-            title="Contribution room"
-            subtitle={`What you have paid into each registered plan in ${selected.year}`}
-            action={
-              <Button variant="ghost" size="sm" onClick={() => setRoomOpen(true)}>
-                <SlidersHorizontal size={14} /> Set room
-              </Button>
-            }
-          />
-          <div className="grid grid-cols-1 gap-6 px-4 pb-5 pt-1 sm:grid-cols-3">
-            {room.map((r) => (
-              <RoomGauge
-                key={r.plan}
-                label={r.plan}
-                used={r.used}
-                tone={PLAN_TONE[r.plan]}
-                over={r.over}
-                caption={
-                  r.limit === null
-                    ? `${fmtCAD(r.contributed)} paid in`
-                    : `${fmtCAD(r.contributed)} of ${fmtCAD(r.limit)}`
-                }
-                detail={
-                  r.limit === null
-                    ? r.held
-                      ? "Room not set for this year"
-                      : "No account of this type"
-                    : r.over
-                      ? `${fmtCAD(Math.abs(r.remaining!))} over the limit`
-                      : `${fmtCAD(r.remaining!)} left`
-                }
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/*
+            * The balance sheet across years: what the money is, not what it did.
+            *
+            * Stacked rather than lined up side by side, because the question is
+            * composition — a portfolio that stops being mostly cash is a
+            * different portfolio, and that shift is invisible in four separate
+            * lines.
+            */}
+          {balanceBars.length > 1 && (
+            <Card>
+              <CardHeader
+                title="Balance sheet composition"
+                subtitle="Where the money sits at the end of each year, and what is owed against it"
               />
-            ))}
-          </div>
-          {room.some((r) => r.over) && (
-            <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] text-negative">
-              An over-contribution is charged 1% a month on the excess until it is
-              withdrawn. Check the figure against your notice of assessment before
-              acting on it.
-            </p>
+              <div className="px-3 pb-4">
+                {/*
+                  * Bars, not an area. An area chart reads a trend between its
+                  * points, and there is nothing between two year ends — the
+                  * record has no June for a year it has already closed. Stacked
+                  * columns say what each year *was*, which is the question.
+                  */}
+                <GroupedBars
+                  data={balanceBars as unknown as Record<string, unknown>[]}
+                  xKey="label"
+                  stacked
+                  bars={[
+                    { key: "Cash", name: "Cash", color: accentFor("market") },
+                    { key: "Bonds", name: "Bonds", color: accentFor("bonds") },
+                    { key: "Stocks", name: "Stocks", color: accentFor("brand") },
+                    { key: "Crypto", name: "Crypto", color: accentFor("cost") },
+                    { key: "Pension", name: "Pension", color: accentFor("pension") },
+                  ]}
+                  yFmt={(n: number) => fmtCompact(n)}
+                  height={240}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-px border-t border-line bg-line sm:grid-cols-4">
+                {shape && [
+                  { label: "Assets", value: shape.assets },
+                  { label: "Owed", value: -shape.liabilities },
+                  { label: "Net worth", value: shape.netWorth },
+                  {
+                    label: "Cash share",
+                    value: null,
+                    text: shape.assets > 0 ? `${Math.round((shape.cash / shape.assets) * 100)}%` : "—",
+                  },
+                ].map((c) => (
+                  <div key={c.label} className="bg-surface px-4 py-2.5">
+                    <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+                      {c.label}
+                    </p>
+                    <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                      {c.text ?? fmtCAD(c.value ?? 0)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </Card>
           )}
-        </Card>
 
-        {/*
-          * The balance sheet across years: what the money is, not what it did.
-          *
-          * Stacked rather than lined up side by side, because the question is
-          * composition — a portfolio that stops being mostly cash is a
-          * different portfolio, and that shift is invisible in four separate
-          * lines.
-          */}
-        {balanceBars.length > 1 && (
+          {/*
+            * Room is the one limit here the app cannot work out for itself. It
+            * depends on income, on room carried forward and on withdrawals made
+            * years ago, all of it stated on a notice of assessment — so the
+            * figure is entered, and what has been paid in against it is counted.
+            */}
           <Card>
             <CardHeader
-              title="What it is made of"
-              subtitle="Where the money sits at the end of each year, and what is owed against it"
+              title="Contribution room"
+              subtitle={`What you have paid into each registered plan in ${selected.year}`}
+              action={
+                <Button variant="ghost" size="sm" onClick={() => setRoomOpen(true)}>
+                  <SlidersHorizontal size={14} /> Set room
+                </Button>
+              }
             />
-            <div className="px-3 pb-4">
-              {/*
-                * Bars, not an area. An area chart reads a trend between its
-                * points, and there is nothing between two year ends — the
-                * record has no June for a year it has already closed. Stacked
-                * columns say what each year *was*, which is the question.
-                */}
-              <GroupedBars
-                data={balanceBars as unknown as Record<string, unknown>[]}
-                xKey="label"
-                stacked
-                bars={[
-                  { key: "Cash", name: "Cash", color: accentFor("market") },
-                  { key: "Bonds", name: "Bonds", color: accentFor("bonds") },
-                  { key: "Stocks", name: "Stocks", color: accentFor("brand") },
-                  { key: "Crypto", name: "Crypto", color: accentFor("cost") },
-                  { key: "Pension", name: "Pension", color: accentFor("pension") },
-                ]}
-                yFmt={(n: number) => fmtCompact(n)}
-                height={240}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-px border-t border-line bg-line sm:grid-cols-4">
-              {shape && [
-                { label: "Assets", value: shape.assets },
-                { label: "Owed", value: -shape.liabilities },
-                { label: "Net worth", value: shape.netWorth },
-                {
-                  label: "Cash share",
-                  value: null,
-                  text: shape.assets > 0 ? `${Math.round((shape.cash / shape.assets) * 100)}%` : "—",
-                },
-              ].map((c) => (
-                <div key={c.label} className="bg-surface px-4 py-2.5">
-                  <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
-                    {c.label}
-                  </p>
-                  <p className="mt-0.5 text-sm font-semibold tabular-nums">
-                    {c.text ?? fmtCAD(c.value ?? 0)}
-                  </p>
-                </div>
+            <div className="grid grid-cols-1 gap-6 px-4 pb-5 pt-1 sm:grid-cols-3">
+              {room.map((r) => (
+                <RoomGauge
+                  key={r.plan}
+                  label={r.plan}
+                  used={r.used}
+                  tone={PLAN_TONE[r.plan]}
+                  over={r.over}
+                  caption={
+                    r.limit === null
+                      ? `${fmtCAD(r.contributed)} paid in`
+                      : `${fmtCAD(r.contributed)} of ${fmtCAD(r.limit)}`
+                  }
+                  detail={
+                    r.limit === null
+                      ? r.held
+                        ? "Room not set for this year"
+                        : "No account of this type"
+                      : r.over
+                        ? `${fmtCAD(Math.abs(r.remaining!))} over the limit`
+                        : `${fmtCAD(r.remaining!)} left`
+                  }
+                />
               ))}
             </div>
+            {room.some((r) => r.over) && (
+              <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] text-negative">
+                An over-contribution is charged 1% a month on the excess until it is
+                withdrawn. Check the figure against your notice of assessment before
+                acting on it.
+              </p>
+            )}
           </Card>
-        )}
+        </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/*
@@ -622,10 +626,16 @@ export default function YearPage() {
                 data={typeShares as unknown as Record<string, unknown>[]}
                 xKey="label"
                 stacked
-                yDomain={[0, 100]}
+                yDomain={[0, passiveCeiling]}
                 series={[
-                  { key: "Active", name: "Active", color: accentFor("cost") },
+                  /*
+                   * Passive first, so it stacks along the bottom where the
+                   * axis is. It is the band whose movement matters, and a band
+                   * floating in the middle of a chart is one whose changes you
+                   * have to measure rather than see.
+                   */
                   { key: "Passive", name: "Passive", color: accentFor("brand") },
+                  { key: "Active", name: "Active", color: accentFor("cost") },
                 ]}
                 yFmt={(n: number) => `${Math.round(n)}%`}
                 height={260}
@@ -635,6 +645,15 @@ export default function YearPage() {
               A pension contribution counts as active — it is deferred pay off
               the same hours as the salary it comes from. A pension paying out
               counts as passive.
+              {passiveCeiling < 100 && (
+                <>
+                  {" "}
+                  The axis stops at {passiveCeiling}% so the passive band is
+                  readable; active fills everything above it. The ceiling rises
+                  as passive income does, and becomes the full hundred once it
+                  passes about two thirds.
+                </>
+              )}
             </p>
           </Card>
         )}

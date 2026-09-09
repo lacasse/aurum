@@ -912,3 +912,30 @@ export function yearFlow(
 
   return { nodes, links };
 }
+
+/**
+ * How far up the axis to draw, so a small passive share is still readable.
+ *
+ * A passive share of a few percent against a full hundred is a sliver at the
+ * bottom of the chart, and its growth — the one thing worth watching — is
+ * invisible. Cutting the axis to sit just above the largest share it has ever
+ * reached gives that band most of the height.
+ *
+ * Derived from the data rather than fixed, so it keeps working as the share
+ * grows: the ceiling rises with it, and once passive income passes about two
+ * thirds the axis is the full hundred and the chart is an ordinary one. There
+ * is no point at which the reader has to know the scale changed, because it
+ * only ever changes in the direction of showing more.
+ *
+ * Rounded up to a multiple of five so the axis reads in round numbers, and
+ * never below ten, which stops a record with almost no passive income from
+ * magnifying noise into a mountain.
+ */
+export function passiveAxisCeiling(
+  rows: readonly Record<string, string | number>[],
+  key = "Passive",
+): number {
+  const highest = rows.reduce((max, r) => Math.max(max, Number(r[key]) || 0), 0);
+  const headroom = Math.ceil((highest * 1.6) / 5) * 5;
+  return Math.min(100, Math.max(10, headroom));
+}

@@ -8,6 +8,7 @@ import {
   incomeMix,
   incomeMixShares,
   incomeTypeShares,
+  passiveAxisCeiling,
   yearFlow,
   unearnedShare,
   milestones,
@@ -727,5 +728,47 @@ describe("the year as one flow", () => {
 
   test("a year with nothing in it draws nothing", () => {
     assert.deepEqual(yearFlow([], "2026"), { nodes: [], links: [] });
+  });
+});
+
+/*
+ * A passive share of a few percent against a full hundred is a sliver, and its
+ * growth is the one thing worth watching. The ceiling has to magnify it while
+ * it is small and get out of the way as it grows — without ever needing the
+ * reader to notice the scale moved.
+ */
+describe("how far up the axis to draw", () => {
+  const rows = (...passive: number[]) =>
+    passive.map((p, i) => ({ label: String(2020 + i), Passive: p, Active: 100 - p }));
+
+  test("a small share is magnified", () => {
+    assert.equal(passiveAxisCeiling(rows(3, 5, 8)), 15);
+  });
+
+  test("the ceiling rises with the share rather than being fixed", () => {
+    assert.ok(passiveAxisCeiling(rows(3, 5, 8)) < passiveAxisCeiling(rows(3, 5, 25)));
+  });
+
+  test("it never cuts off the largest share it has to draw", () => {
+    for (const highest of [1, 4, 9, 17, 33, 48, 61, 74, 96]) {
+      assert.ok(
+        passiveAxisCeiling(rows(highest)) >= highest,
+        `${highest} clipped at ${passiveAxisCeiling(rows(highest))}`,
+      );
+    }
+  });
+
+  test("past about two thirds it is an ordinary full-scale chart", () => {
+    assert.equal(passiveAxisCeiling(rows(70)), 100);
+    assert.equal(passiveAxisCeiling(rows(95)), 100);
+  });
+
+  test("almost no passive income does not magnify noise into a mountain", () => {
+    assert.equal(passiveAxisCeiling(rows(0.2, 0.4)), 10);
+    assert.equal(passiveAxisCeiling(rows(0)), 10);
+  });
+
+  test("no years at all still gives a usable axis", () => {
+    assert.equal(passiveAxisCeiling([]), 10);
   });
 });
