@@ -764,6 +764,25 @@ const DEPOSIT = "__deposit";
 const DIRECT = "__direct";
 /** Selling a position, which is money arriving rather than leaving. */
 const SOLD = "Sold investments";
+/**
+ * Money borrowed, which arrived without being earned.
+ *
+ * `isIncome` excludes a drawdown from every figure that answers "what came
+ * in", and it is right to: a loan is a liability appearing on the other side
+ * of the ledger at the same moment, and counting it as income makes a month of
+ * borrowing look like a month of earning.
+ *
+ * A flow chart is not an average, though. The money did arrive in an account
+ * and it did pay for things, so leaving it out does not make the chart
+ * cautious — it makes it wrong. What it paid for still had to be drawn, so the
+ * account came up short by exactly the amount borrowed and the difference was
+ * drawn as a balance carried in. The chart balanced perfectly while saying the
+ * year had dipped into savings, when it had borrowed and finished ahead.
+ *
+ * So it is drawn, in its own band, beside the sale proceeds: money in, plainly
+ * not income, and plainly not savings either.
+ */
+const BORROWED = "Borrowed";
 /** What an invested account took in and has no purchases to account for. */
 const UNITEMISED = "Not itemised";
 
@@ -908,6 +927,16 @@ export function yearFlow(
       note(incomeTotals, t.category, cents);
       note(hubTotals, hub, cents);
       rows.push({ from: t.category, to: hub, cents, stage: 1 });
+    } else if (t.type === "income") {
+      /*
+       * Income by type but not by nature: borrowing. See BORROWED. It reaches
+       * an account like anything else, so it is drawn arriving in one.
+       */
+      const hub = hubOf(t.destinationAccountId);
+      if (hub === INVESTMENTS) anyInvested = true;
+      note(incomeTotals, BORROWED, cents);
+      note(hubTotals, hub, cents);
+      rows.push({ from: BORROWED, to: hub, cents, stage: 1 });
     } else if (t.type === "expense") {
       const hub = hubOf(t.sourceAccountId);
       note(spendTotals, SPEND_GROUP_LABELS[spendGroup(t.category)], cents);
@@ -1030,7 +1059,9 @@ export function yearFlow(
    * A sale is money arriving, but it is not an income category and must not
    * take one of their places in the ranking.
    */
-  const categoryTotals = new Map([...incomeTotals].filter(([k]) => k !== SOLD));
+  const categoryTotals = new Map(
+    [...incomeTotals].filter(([k]) => k !== SOLD && k !== BORROWED),
+  );
   const sourceName = pool(categoryTotals, limit, OTHER_INCOME, MIN_SOURCE_SHARE);
   /*
    * Neither the spending nor the invested side needs pooling in practice --
@@ -1060,7 +1091,8 @@ export function yearFlow(
   for (const r of rows) {
     if (r.stage === 1) {
       const to = hubName(r.to);
-      link(r.from === SOLD ? SOLD : sourceName(r.from), to, r.cents);
+      const named = r.from === SOLD || r.from === BORROWED;
+      link(named ? r.from : sourceName(r.from), to, r.cents);
       note(inflow, to, r.cents);
       continue;
     }
@@ -1104,7 +1136,7 @@ export function yearFlow(
   }
 
   const hubs = [...new Set([...inflow.keys(), ...outflow.keys()])]
-    .filter((n) => n !== SOLD)
+    .filter((n) => n !== SOLD && n !== BORROWED)
     .sort(
       (a, b) =>
         (inflow.get(b) ?? 0) + (outflow.get(b) ?? 0) -

@@ -1416,9 +1416,23 @@ export function YearSankey({
    * ribbon, and the bars either side are pushed clear of it.
    */
   const before = columns(nodes, links);
+  /*
+   * A slot is only worth reserving for a ribbon anyone can see.
+   *
+   * A nine-cent flow into an account skips a column exactly as a salary does,
+   * and it was given the same treatment: a node of its own, and a column
+   * parted by its width to let it through. The width is nothing, so the reader
+   * gets no ribbon and the layout pays for one anyway. Below a five-hundredth
+   * of the chart the band is a hairline, and a hairline crossing a bar is not
+   * a thing anybody can see happen — so it passes behind, as it did before any
+   * of this, and the columns stay closed up.
+   */
+  const drawn = links.reduce((a, l) => a + l.value, 0);
+  const worthASlot = drawn * 0.002;
   const detour = new Map<number, number>();
   links.forEach((l, i) => {
     if (before[l.target] - before[l.source] <= 1) return;
+    if (l.value < worthASlot) return;
     const mid = before[l.source] + 1;
     let at = nodes.length;
     for (let k = 0; k < nodes.length; k++) {

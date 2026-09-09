@@ -1292,3 +1292,69 @@ describe("the flow, on shapes the sample data does not have", () => {
     assert.ok(before > salary, `Other income (${before}) must sit below Salary (${salary})`);
   });
 });
+
+describe("borrowed money is drawn, and not as savings", () => {
+  const accounts = [{ id: "a-chq", name: "Chequing", kind: "checking" as const }];
+  const at = (type: "income" | "expense", amount: number, category: string, from?: string, to?: string) =>
+    ({
+      id: category + amount, date: "2026-05-05", type, amount, category, payee: "p",
+      sourceAccountId: from, destinationAccountId: to,
+    }) as unknown as Transaction;
+
+  const rows = [
+    at("income", 60000, "Salary", undefined, "a-chq"),
+    at("income", 6500, "Loan Proceeds", undefined, "a-chq"),
+    at("expense", 66000, "Housing", "a-chq"),
+  ];
+  const f = yearFlow(rows, "2026", { accounts });
+  const edge = (from: string, to: string) =>
+    f.links
+      .filter((l) => f.nodes[l.source].name === from && f.nodes[l.target].name === to)
+      .reduce((a, l) => a + l.value, 0);
+  const names = f.nodes.map((n) => n.name);
+
+  test("a drawdown arrives in the account it landed in", () => {
+    assert.equal(edge("Borrowed", "Money in"), 6500);
+  });
+
+  test("it is not counted as a balance carried in", () => {
+    /*
+     * Left out, the account came up short by exactly what was borrowed, and
+     * the chart balanced itself by inventing savings the year never touched.
+     */
+    assert.ok(!names.includes("From savings"), "nothing has to be invented to balance");
+  });
+
+  test("what the year actually kept is what is drawn", () => {
+    assert.equal(edge("Money in", "Kept"), 500, "earned plus borrowed, less what went out");
+  });
+
+  test("borrowing does not take a place among the income categories", () => {
+    /*
+     * It is not one of them, and ranked among them it would push a real
+     * category into the pooled remainder.
+     */
+    const many = [
+      ...Array.from({ length: 3 }, (_, i) => at("income", 9000 - i, `Cat${i}`, undefined, "a-chq")),
+      at("income", 50000, "Loan Proceeds", undefined, "a-chq"),
+    ];
+    const g = yearFlow(many, "2026", { accounts, limit: 3 });
+    const sources = g.nodes.filter((n) => n.role === "source").map((n) => n.name);
+    assert.ok(sources.includes("Borrowed"));
+    assert.ok(!sources.includes("Other income"), "the three real categories all still have their own band");
+  });
+
+  test("still every dollar in equals every dollar out", () => {
+    const inn = new Map<number, number>(), out = new Map<number, number>();
+    for (const l of f.links) {
+      inn.set(l.target, (inn.get(l.target) ?? 0) + l.value);
+      out.set(l.source, (out.get(l.source) ?? 0) + l.value);
+    }
+    const sources = f.nodes.map((_, i) => i).filter((i) => !inn.has(i));
+    const sinks = f.nodes.map((_, i) => i).filter((i) => !out.has(i));
+    assert.equal(
+      sources.reduce((a, i) => a + (out.get(i) ?? 0), 0),
+      sinks.reduce((a, i) => a + (inn.get(i) ?? 0), 0),
+    );
+  });
+});
