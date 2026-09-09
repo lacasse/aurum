@@ -655,8 +655,8 @@ export default function YearPage() {
                    * to the ceiling rather than a sliver on the floor, which is
                    * the easier of the two to see change.
                    */
-                  { key: "Active", name: "Active", color: accentFor("cost") },
-                  { key: "Passive", name: "Passive", color: accentFor("brand") },
+                  { key: "Active", name: "Active", color: accentFor("brand") },
+                  { key: "Passive", name: "Passive", color: accentFor("cost") },
                 ]}
                 height={280}
                 yDomain={[0, 100]}
@@ -669,7 +669,7 @@ export default function YearPage() {
                   <div key={k} className="flex items-baseline gap-2">
                     <span
                       className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
-                      style={{ background: accentFor(k === "Passive" ? "brand" : "cost") }}
+                      style={{ background: accentFor(k === "Passive" ? "cost" : "brand") }}
                     />
                     <span className="text-[0.6875rem] text-ink-faint">{k}</span>
                     <span className="text-sm font-semibold tabular-nums">
