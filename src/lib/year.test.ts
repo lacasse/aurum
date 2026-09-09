@@ -8,6 +8,7 @@ import {
   incomeMix,
   incomeMixShares,
   incomeTypeShares,
+  categoryByYear,
   yearFlow,
   unearnedShare,
   milestones,
@@ -1276,5 +1277,74 @@ describe("the pooled remainder sits under the categories", () => {
       .reduce((a, l) => a + l.value, 0);
     assert.equal(pooled, 2400);
     assert.ok(pooled > 2000, "and it does outweigh Freelance");
+  });
+});
+
+describe("categoryByYear", () => {
+  const e = (date: string, amount: number, category: string) =>
+    txn(date, "expense", amount, category);
+  const rows = [
+    e("2023-01-01", 100, "Groceries"),
+    e("2024-01-01", 200, "Groceries"),
+    e("2025-01-01", 300, "Groceries"),
+    e("2026-01-01", 400, "Groceries"),
+    e("2027-01-01", 500, "Groceries"),
+    e("2027-02-01", 50, "Travel"),
+  ];
+
+  test("the most recent years only, oldest first", () => {
+    const r = categoryByYear(rows);
+    assert.deepEqual(r.years, ["2024", "2025", "2026", "2027"], "2023 falls off the end");
+    assert.deepEqual(r.years, [...r.years].sort(), "drawn in reading order");
+  });
+
+  test("how many years is a choice", () => {
+    assert.deepEqual(categoryByYear(rows, { years: 2 }).years, ["2026", "2027"]);
+  });
+
+  test("a category carries a total under each year drawn", () => {
+    const g = categoryByYear(rows).rows.find((x) => x.category === "Groceries")!;
+    assert.equal(g["2024"], 200);
+    assert.equal(g["2027"], 500);
+  });
+
+  test("a year the category did not appear in is nought, not missing", () => {
+    const g = categoryByYear(rows).rows.find((x) => x.category === "Travel")!;
+    assert.equal(g["2024"], 0, "drawn as no bar rather than skipped");
+    assert.equal(g["2027"], 50);
+  });
+
+  test("categories rank by what they cost across the years drawn", () => {
+    const r = categoryByYear(rows);
+    assert.deepEqual(r.rows.map((x) => x.category), ["Groceries", "Travel"]);
+  });
+
+  test("the tail is pooled, so the categories still add up to the spending", () => {
+    const many = [
+      ...Array.from({ length: 12 }, (_, i) => e("2026-01-01", 100 - i, `Cat${i}`)),
+    ];
+    const r = categoryByYear(many, { limit: 3 });
+    const names = r.rows.map((x) => x.category);
+    assert.equal(names.length, 4, "three categories and the remainder");
+    assert.equal(names[names.length - 1], "Other");
+    const drawn = r.rows.reduce((a, x) => a + Number(x["2026"]), 0);
+    const spent = many.reduce((a, t) => a + Number(t.amount), 0);
+    assert.equal(drawn, spent, "nothing is left off the chart");
+  });
+
+  test("pooling one category would rename it and save nothing", () => {
+    const four = Array.from({ length: 4 }, (_, i) => e("2026-01-01", 100 - i, `Cat${i}`));
+    const names = categoryByYear(four, { limit: 3 }).rows.map((x) => x.category);
+    assert.deepEqual(names, ["Cat0", "Cat1", "Cat2", "Cat3"], "no lone remainder");
+  });
+
+  test("income is not spending", () => {
+    const mixed = [e("2026-01-01", 100, "Groceries"), txn("2026-02-01", "income", 900, "Salary")];
+    const names = categoryByYear(mixed).rows.map((x) => x.category);
+    assert.deepEqual(names, ["Groceries"]);
+  });
+
+  test("a record with nothing spent draws nothing", () => {
+    assert.deepEqual(categoryByYear([]), { years: [], rows: [] });
   });
 });

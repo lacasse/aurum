@@ -636,6 +636,86 @@ export function categoryShifts(
     .slice(0, limit);
 }
 
+/* ── One category, across the years ── */
+
+export interface CategoryYears {
+  /** The years drawn, oldest first, which is the order the bars go in. */
+  years: string[];
+  /** One row per category: its name, and a total under each year's key. */
+  rows: Record<string, string | number>[];
+}
+
+/**
+ * What each category cost, year against year.
+ *
+ * `categoryShifts` answers the same question for two years and answers it
+ * better — a change is what you act on, and a difference is easier to read as
+ * a difference than as two columns to subtract by eye. What it cannot show is
+ * a direction: one bad year and one good year look identical to it, because
+ * both are a single step. Three or four years of a category side by side is
+ * the thing a single comparison keeps almost saying.
+ *
+ * The tail is pooled rather than dropped, for the same reason it is pooled in
+ * the flow chart: a chart of spending that quietly leaves some spending out
+ * invites the reader to add up what they can see, and get the wrong answer.
+ *
+ * Years are capped because the bars are drawn side by side rather than
+ * stacked, so every year added makes every bar thinner — past four the
+ * categories stop being legible, and the year-by-year table is the better
+ * tool for a long record anyway.
+ */
+export function categoryByYear(
+  transactions: Transaction[],
+  { years = 4, limit = 8 }: { years?: number; limit?: number } = {},
+): CategoryYears {
+  const totals = new Map<string, Map<string, number>>();
+  const seen = new Set<string>();
+  for (const t of transactions) {
+    if (t.type !== "expense") continue;
+    const cents = toCents(t.amount);
+    if (cents <= 0) continue;
+    const y = t.date.slice(0, 4);
+    seen.add(y);
+    const row = totals.get(t.category) ?? new Map<string, number>();
+    row.set(y, (row.get(y) ?? 0) + cents);
+    totals.set(t.category, row);
+  }
+
+  const drawn = [...seen].sort().slice(-years);
+  if (drawn.length === 0) return { years: [], rows: [] };
+  const inRange = (m: Map<string, number>) =>
+    drawn.reduce((a, y) => a + (m.get(y) ?? 0), 0);
+
+  const ranked = [...totals.entries()]
+    .map(([category, m]) => [category, m, inRange(m)] as const)
+    .filter(([, , total]) => total > 0)
+    .sort((a, b) => b[2] - a[2] || a[0].localeCompare(b[0]));
+
+  /*
+   * Pooling one category renames it and saves nothing, so below two the rule
+   * does nothing — the same guard the flow chart's sources use.
+   */
+  const keep = ranked.length - limit === 1 ? ranked.length : limit;
+  const shown = ranked.slice(0, keep);
+  const rest = ranked.slice(keep);
+
+  const rowOf = (name: string, m: Map<string, number>) => {
+    const row: Record<string, string | number> = { category: name };
+    for (const y of drawn) row[y] = fromCents(m.get(y) ?? 0);
+    return row;
+  };
+
+  const rows = shown.map(([category, m]) => rowOf(category, m));
+  if (rest.length > 0) {
+    const pooled = new Map<string, number>();
+    for (const [, m] of rest) {
+      for (const y of drawn) pooled.set(y, (pooled.get(y) ?? 0) + (m.get(y) ?? 0));
+    }
+    rows.push(rowOf("Other", pooled));
+  }
+  return { years: drawn, rows };
+}
+
 /* ── What you put in, against what it became ── */
 
 export interface ContributionPoint {

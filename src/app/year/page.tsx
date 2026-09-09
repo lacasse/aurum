@@ -20,11 +20,10 @@ import {
   cn,
 } from "@/components/ui";
 import {
-  AllocationBar,
   GroupedBars,
+  spectrumAt,
   RoomGauge,
   SeriesChart,
-  SignedHBars,
   Waterfall,
   YearSankey,
 } from "@/components/charts";
@@ -41,9 +40,8 @@ import {
   portfolioSeries,
 } from "@/lib/analytics";
 import {
-  categoryShifts,
+  categoryByYear,
   contributionsVsValue,
-  incomeAllocation,
   incomeTypeAmounts,
   incomeTypeShares,
   yearFlow,
@@ -200,10 +198,7 @@ export default function YearPage() {
 
   const room = contributionRoom(selected.year, transactions, accounts, limits);
   const shape = data.shapes.find((sh) => sh.year === selected.year);
-  const allocation = incomeAllocation(transactions, selected.year, (c) =>
-    groupOf(c, spendGroups),
-  );
-  const shifts = categoryShifts(transactions, selected.year);
+  const byYear = categoryByYear(transactions);
   const contributions = contributionsVsValue(data.rows);
   const latestGap =
     contributions.length > 0
@@ -328,79 +323,41 @@ export default function YearPage() {
           </Card>
         )}
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {/*
-            * The savings rate is one number and hides the interesting part: a
-            * year that kept a fifth of its income says nothing about whether
-            * the other four fifths were rent or restaurants. Splitting the
-            * whole of income at once puts the cost of living, the choices and
-            * the debt beside what was kept.
-            */}
+        {/*
+          * The same category across the years, rather than one year's total.
+          *
+          * A total says the year cost more. A single comparison says which
+          * category did it, but one bad year and one good year are the same
+          * single step to it — the direction only appears once there are three
+          * or four bars to read along.
+          */}
+        {byYear.years.length > 1 && (
           <Card>
             <CardHeader
-              title={`Where ${selected.year}'s income went`}
-              subtitle="Every dollar that came in, and what became of it"
+              title="Spending by category"
+              subtitle={`Each category's year, ${byYear.years[0]} to ${byYear.years[byYear.years.length - 1]}`}
             />
-            <div className="px-5 pb-5">
-              <AllocationBar
-                total={allocation.income}
-                format={(n) => fmtCAD(n)}
-                parts={[
-                  { label: "Necessities", value: allocation.necessities, colour: accentFor("cost") },
-                  { label: "Discretionary", value: allocation.discretionary, colour: accentFor("negative") },
-                  { label: "Debt repaid", value: allocation.debt, colour: accentFor("bonds") },
-                  { label: "Kept", value: Math.max(0, allocation.saved), colour: accentFor("positive") },
-                ]}
+            <div className="px-3 pb-4">
+              <GroupedBars
+                data={byYear.rows}
+                xKey="category"
+                bars={byYear.years.map((y, i) => ({
+                  key: y,
+                  name: y,
+                  /*
+                   * A ramp rather than a categorical set: years are ordered,
+                   * and colours that run in the same direction let the reader
+                   * see which way a category is going without reading the
+                   * legend for every group.
+                   */
+                  color: spectrumAt(i, byYear.years.length),
+                }))}
+                yFmt={(n: number) => fmtCompact(n)}
+                height={300}
               />
-              {allocation.saved < 0 && (
-                <p className="mt-3 text-[0.6875rem] leading-relaxed text-negative">
-                  {selected.year} spent {fmtCAD(Math.abs(allocation.saved))} more than
-                  it earned. The bar shows where the income went; the shortfall came
-                  from savings or borrowing.
-                </p>
-              )}
             </div>
           </Card>
-
-          {/*
-            * A total says this year cost more than the last one. It never says
-            * what did — and a category that moved is the one thing on this
-            * page that can be acted on, where a total is a fact about the past.
-            */}
-          <Card>
-            <CardHeader
-              title="What changed"
-              subtitle={
-                shifts.length > 0
-                  ? `Spending by category against ${Number(selected.year) - 1}`
-                  : "Nothing to compare against yet"
-              }
-            />
-            {shifts.length > 0 ? (
-              <div className="px-3 pb-4">
-                <SignedHBars
-                  data={shifts.map((r) => ({ label: r.category, value: r.change }))}
-                  labelKey="label"
-                  valueKey="value"
-                  fmt={(n) => fmtSignedCAD(n)}
-                  height={Math.max(160, shifts.length * 30)}
-                  positiveColor={accentFor("negative")}
-                  negativeColor={accentFor("positive")}
-                />
-                <p className="px-2 pt-1 text-[0.6875rem] text-ink-faint">
-                  Spending more is drawn as the unwelcome direction, so the
-                  colours mean the same thing here as everywhere else on the
-                  page.
-                </p>
-              </div>
-            ) : (
-              <p className="px-5 pb-5 text-xs text-ink-dim">
-                A comparison needs the year before it. This is the first year on
-                record.
-              </p>
-            )}
-          </Card>
-        </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card>
