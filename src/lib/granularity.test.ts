@@ -1,6 +1,11 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { conflictingGranularity, monthOf, type Transaction } from "./types";
+import {
+  conflictingGranularity,
+  granularityClashes,
+  monthOf,
+  type Transaction,
+} from "./types";
 
 /*
  * A month is kept one way or the other: as a set of month-end totals, or as the
@@ -86,6 +91,88 @@ describe("what the rule does not reach across", () => {
 
   test("nothing recorded means nothing conflicts", () => {
     assert.equal(conflictingGranularity([], txn({ granularity: "monthly" })), null);
+  });
+});
+
+describe("a whole import is checked before any of it is written", () => {
+  const summarised: Transaction[] = [
+    txn({ id: "s1", date: "2026-06-30", granularity: "monthly" }),
+    txn({ id: "s2", date: "2026-06-30", category: "Housing", granularity: "monthly" }),
+    txn({ id: "s3", date: "2026-06-30", type: "income", category: "Salary", granularity: "monthly" }),
+  ];
+  const row = (
+    date: string,
+    type: "expense" | "income",
+    category: string,
+  ) => ({ date, type, category, granularity: "individual" as const });
+
+  const incoming = [
+    row("2026-06-02", "expense", "Groceries"),
+    row("2026-06-14", "expense", "Groceries"),
+    row("2026-06-14", "income", "Salary"),
+    row("2026-07-03", "expense", "Groceries"),
+  ];
+
+  test("a covered month is reported once, with both counts", () => {
+    const found = granularityClashes(summarised, incoming);
+    assert.deepEqual(
+      found.map((c) => [c.month, c.type, c.count, c.incoming]),
+      [
+        ["2026-06", "expense", 2, 2],
+        ["2026-06", "income", 1, 1],
+      ],
+    );
+  });
+
+  test("a month nobody has summarised is not reported", () => {
+    const found = granularityClashes(summarised, incoming);
+    assert.ok(!found.some((c) => c.month === "2026-07"), "July is free");
+  });
+
+  test("expense and income are asked separately", () => {
+    // Only the income side is summarised, so importing spending is fine.
+    const found = granularityClashes(
+      [txn({ id: "s3", type: "income", granularity: "monthly" })],
+      [row("2026-06-02", "expense", "Groceries")],
+    );
+    assert.deepEqual(found, []);
+  });
+
+  test("what no row is filed under yet is named, per month and type", () => {
+    const [spending, pay] = granularityClashes(summarised, incoming);
+    // Housing is summarised and nothing in the file is filed under it.
+    assert.deepEqual(spending.unmatched, ["Housing"]);
+    // The file's own income category matches the summary's, so nothing is lost.
+    assert.deepEqual(pay.unmatched, []);
+  });
+
+  test("a deduction on no statement is what this is for", () => {
+    // The month holds pay and a pension contribution; a bank export shows the
+    // deposit and can never show the deduction.
+    const [pay] = granularityClashes(
+      [
+        txn({ id: "s1", type: "income", category: "Salary", granularity: "monthly" }),
+        txn({ id: "s2", type: "income", category: "RSP / Pension", granularity: "monthly" }),
+      ],
+      [row("2026-06-14", "income", "Salary")],
+    );
+    assert.deepEqual(pay.unmatched, ["RSP / Pension"]);
+  });
+
+  test("a category named twice in the file is not named twice as missing", () => {
+    const [spending] = granularityClashes(
+      [
+        txn({ id: "s1", category: "Groceries", granularity: "monthly" }),
+        txn({ id: "s2", category: "Housing", granularity: "monthly" }),
+        txn({ id: "s3", category: "Housing", granularity: "monthly" }),
+      ],
+      [row("2026-06-02", "expense", "Groceries")],
+    );
+    assert.deepEqual(spending.unmatched, ["Housing"], "listed once, though summarised twice");
+  });
+
+  test("an empty record blocks nothing", () => {
+    assert.deepEqual(granularityClashes([], incoming), []);
   });
 });
 

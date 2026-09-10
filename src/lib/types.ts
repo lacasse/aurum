@@ -182,6 +182,88 @@ export function conflictingGranularity(
   return { month, type: incoming.type, existing: opposite, count: clashes.length };
 }
 
+export interface GranularityClash {
+  month: string;
+  type: TxnType;
+  /** What already covers the month. */
+  existing: Granularity;
+  /** How many rows do the covering. */
+  count: number;
+  /** How many of the incoming rows fall in it. */
+  incoming: number;
+  /**
+   * Categories the month is summarised under that no incoming row is filed
+   * under yet.
+   *
+   * What a delete-and-reimport might drop. A monthly total is not a statement
+   * line: a payroll deduction, or income paid into an account this file does
+   * not cover, is inside the total and on no statement, so nothing in the
+   * import replaces it and nothing says so.
+   *
+   * "Yet" is the whole of it. This reads the file's *suggested* categories,
+   * which are a guess made before anybody reviewed them — on the first real
+   * run it named a category that was sitting in the file under a suggestion of
+   * "Other". So it is a list to check, never a list of what is missing, and
+   * the screen must not word it as a finding. It is recomputed as categories
+   * are corrected, so it converges on the truth on the same screen.
+   */
+  unmatched: string[];
+}
+
+/**
+ * The same question asked of a whole import at once, before any of it is
+ * written.
+ *
+ * The import used to ask nothing and find out from the database, one rejected
+ * row at a time: a file spanning a month already held as monthly totals landed
+ * in part, and what the user got for the rest was a constraint violation after
+ * they had already reviewed and committed. The rule was here the whole time
+ * and only the checklist called it.
+ */
+export function granularityClashes(
+  existing: Pick<Transaction, "date" | "type" | "granularity" | "category">[],
+  incoming: Pick<Transaction, "date" | "type" | "granularity" | "category">[],
+): GranularityClash[] {
+  // Answered once per month and type — the question is about the month, not
+  // about the row, and a year of statements would otherwise ask it thousands
+  // of times.
+  const found = new Map<string, GranularityClash | null>();
+  const brought = new Map<string, Set<string>>();
+  for (const row of incoming) {
+    const key = `${monthOf(row.date)}|${row.type}`;
+    if (!found.has(key)) {
+      const clash = conflictingGranularity(existing, row);
+      found.set(key, clash ? { ...clash, incoming: 0, unmatched: [] } : null);
+    }
+    const hit = found.get(key);
+    if (hit) {
+      hit.incoming += 1;
+      const seen = brought.get(key) ?? new Set<string>();
+      seen.add(row.category);
+      brought.set(key, seen);
+    }
+  }
+
+  for (const [key, clash] of found) {
+    if (!clash) continue;
+    const inFile = brought.get(key) ?? new Set<string>();
+    const summarised = new Set(
+      existing
+        .filter(
+          (t) =>
+            t.type === clash.type &&
+            (t.granularity ?? "individual") === clash.existing &&
+            monthOf(t.date) === clash.month,
+        )
+        .map((t) => t.category),
+    );
+    clash.unmatched = [...summarised].filter((c) => !inFile.has(c)).sort();
+  }
+  return [...found.values()]
+    .filter((c): c is GranularityClash => c !== null)
+    .sort((a, b) => a.month.localeCompare(b.month) || a.type.localeCompare(b.type));
+}
+
 export type AssetClass = "US Equity" | "Intl Equity" | "Bonds" | "Crypto";
 
 export type Currency = "CAD" | "USD";
