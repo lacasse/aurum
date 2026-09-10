@@ -842,7 +842,36 @@ const UNITEMISED = "Not itemised";
  * out. That is the change across the year rather than what sits in the account
  * at the end of it, which is this plus whatever the year opened with.
  */
-const LEFT_IN_CASH = "Left in cash";
+const OPENING = "Opening balance";
+const CLOSING = "Closing balance";
+/**
+ * What the record cannot explain about the year's cash.
+ *
+ * With the balances at both ends drawn, the bar has to reconcile against real
+ * accounts rather than against itself: opening, plus everything that came in,
+ * less everything that went out, ought to be closing. Where it is not, the
+ * difference is a movement the record does not hold — an uncategorised
+ * transfer, a month never imported, a balance corrected by hand.
+ *
+ * It used to be drawn as "From savings" on the way in and "Left in cash" on
+ * the way out, which named a cause for it. Neither was known to be true; the
+ * only honest thing to say about the gap is that it is one, and which way it
+ * points.
+ */
+const UNEXPLAINED = "Not accounted for";
+/**
+ * What the difference is called when there are no balances to check against.
+ *
+ * Without them the bar can only balance against itself, and the difference is
+ * simply the year's cash change — genuinely what was left over, or genuinely
+ * what had to come from somewhere else. It is only once real balances are
+ * drawn at both ends that an unexplained remainder can exist at all, so the
+ * chart says the weaker thing when it knows the weaker thing.
+ */
+const LEFT_OVER = "Left in cash";
+const FROM_BALANCE = "From savings";
+/** A balance is drawn straight off the bar, with no purpose in between. */
+const BALANCE = "__balance";
 
 const GROUP_ROLE: Record<string, FlowNode["role"]> = {
   [SPENDING]: "necessity",
@@ -852,6 +881,8 @@ const LEAF_ROLE: Record<string, FlowNode["role"]> = {
   [SPEND_GROUP_LABELS.necessity]: "necessity",
   [SPEND_GROUP_LABELS.discretionary]: "discretionary",
   [SPEND_GROUP_LABELS.excluded]: "debt",
+  /* Money still there at the end is not something the year spent. */
+  [CLOSING]: "kept",
 };
 
 /**
@@ -905,6 +936,16 @@ export interface YearFlowOptions {
   accounts?: Pick<Account, "id" | "name" | "kind">[];
   /** Positions, for the purchases and sales inside the invested accounts. */
   holdings?: Pick<Holding, "accountId" | "assetClass" | "flows">[];
+  /**
+   * The spendable balance at the start and end of the year.
+   *
+   * Given both, the bar reconciles against the accounts themselves rather than
+   * against its own arithmetic, and whatever the transactions do not explain
+   * is drawn as its own band instead of being folded silently into what was
+   * kept. Omit either and the chart falls back to balancing itself.
+   */
+  openingCash?: number;
+  closingCash?: number;
   /** How many leaves a branch draws before the tail is pooled. */
   limit?: number;
   /** Which side of the necessity line a category falls, overrides included. */
@@ -917,6 +958,8 @@ export function yearFlow(
   {
     accounts = [],
     holdings = [],
+    openingCash,
+    closingCash,
     limit = 8,
     spendGroup = (c) => groupOf(c),
   }: YearFlowOptions = {},
@@ -1044,6 +1087,26 @@ export function yearFlow(
   }
 
   /*
+   * The balances at either end, so the bar answers to the accounts.
+   *
+   * Drawn only where the bar exists — a year with no spendable account has no
+   * balance to open or close — and only when there is something to draw.
+   */
+  if (hubTotals.has(CASH)) {
+    const opening = toCents(openingCash ?? 0);
+    const closing = toCents(closingCash ?? 0);
+    if (opening > 0) {
+      note(incomeTotals, OPENING, opening);
+      note(hubTotals, CASH, opening);
+      rows.push({ from: OPENING, to: CASH, cents: opening, stage: 1 });
+    }
+    if (closing > 0) {
+      note(hubTotals, CASH, closing);
+      rows.push({ from: CASH, to: CLOSING, cents: closing, stage: 2, group: BALANCE });
+    }
+  }
+
+  /*
    * The purchases and sales inside the accounts, netted over the year.
    *
    * Gross, a year that rotated one class into another put both legs on the
@@ -1146,7 +1209,7 @@ export function yearFlow(
    */
   const categoryTotals = new Map(
     [...incomeTotals].filter(
-      ([k]) => k !== SOLD && k !== BORROWED && k !== RETURNED,
+      ([k]) => k !== SOLD && k !== BORROWED && k !== RETURNED && k !== OPENING,
     ),
   );
   const sourceName = pool(categoryTotals, limit, OTHER_INCOME, MIN_SOURCE_SHARE);
@@ -1178,7 +1241,8 @@ export function yearFlow(
   for (const r of rows) {
     if (r.stage === 1) {
       const to = hubName(r.to);
-      const named = r.from === SOLD || r.from === BORROWED || r.from === RETURNED;
+      const named =
+        r.from === SOLD || r.from === BORROWED || r.from === RETURNED || r.from === OPENING;
       link(named ? r.from : sourceName(r.from), to, r.cents);
       note(inflow, to, r.cents);
       continue;
@@ -1199,7 +1263,7 @@ export function yearFlow(
     }
     const group = r.group ?? SPENDING;
     const leaf = (leafName[group] ?? ((n: string) => n))(r.to);
-    if (group === ASSET || group === DIRECT) {
+    if (group === ASSET || group === DIRECT || group === BALANCE) {
       // Straight off the account it came out of. See ASSET and DIRECT.
       link(from, leaf, r.cents);
       leaves.add(leaf);
@@ -1223,7 +1287,7 @@ export function yearFlow(
   }
 
   const hubs = [...new Set([...inflow.keys(), ...outflow.keys()])]
-    .filter((n) => n !== SOLD && n !== BORROWED && n !== RETURNED)
+    .filter((n) => n !== SOLD && n !== BORROWED && n !== RETURNED && n !== OPENING)
     .sort(
       (a, b) =>
         (inflow.get(b) ?? 0) + (outflow.get(b) ?? 0) -
@@ -1238,6 +1302,13 @@ export function yearFlow(
   const investedHubs = new Set(
     anyInvested && hubs.includes(INVESTMENTS) ? [INVESTMENTS] : [],
   );
+
+  /*
+   * Whether the bar was given real balances to answer to. See UNEXPLAINED.
+   */
+  const reconciled = openingCash !== undefined && closingCash !== undefined;
+  const deficitName = reconciled ? UNEXPLAINED : FROM_BALANCE;
+  const surplusName = reconciled ? UNEXPLAINED : LEFT_OVER;
 
   const shortfall = new Map<string, number>();
   const spare = new Map<string, number>();
@@ -1312,11 +1383,11 @@ export function yearFlow(
   }
   if (shortfall.size > 0) {
     sourceTotals.set(
-      "From savings",
+      deficitName,
       [...shortfall.values()].reduce((a, b) => a + b, 0),
     );
     for (const hub of shortfall.keys()) {
-      if (firstBars.has(hub)) reachesFirstBar.add("From savings");
+      if (firstBars.has(hub)) reachesFirstBar.add(deficitName);
     }
   }
   /*
@@ -1353,7 +1424,7 @@ export function yearFlow(
   for (const hub of shortfall.keys()) {
     if (!firstBars.has(hub)) continue;
     const rank = firstBarOrder.indexOf(hub);
-    hubRank.set("From savings", Math.min(hubRank.get("From savings") ?? rank, rank));
+    hubRank.set(deficitName, Math.min(hubRank.get(deficitName) ?? rank, rank));
   }
   const rankOf = (name: string) => hubRank.get(name) ?? hubs.length;
   /*
@@ -1401,7 +1472,7 @@ export function yearFlow(
       id(e.to, roleOfLeaf.get(e.to) ?? LEAF_ROLE[e.to]);
     }
   }
-  if (kept > 0) id(LEFT_IN_CASH, "kept");
+  if (kept > 0) id(surplusName, reconciled ? "idle" : "kept");
   for (const e of edgeList) {
     if (assetLeaves.has(e.to)) {
       id(e.to, e.to === PENSION_ASSET ? "pension" : "investing");
@@ -1413,10 +1484,10 @@ export function yearFlow(
     links.push({ source: id(e.from), target: id(e.to), value: fromCents(e.cents) });
   }
   for (const [hub, gap] of shortfall) {
-    links.push({ source: id("From savings"), target: id(hub), value: fromCents(gap) });
+    links.push({ source: id(deficitName), target: id(hub), value: fromCents(gap) });
   }
   for (const [hub, left] of spare) {
-    const target = investedHubs.has(hub) ? UNITEMISED : LEFT_IN_CASH;
+    const target = investedHubs.has(hub) ? UNITEMISED : surplusName;
     links.push({ source: id(hub), target: id(target), value: fromCents(left) });
   }
 

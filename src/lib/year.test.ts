@@ -1424,3 +1424,68 @@ describe("borrowed money is drawn, and not as savings", () => {
     );
   });
 });
+
+describe("the spendable bar answers to the accounts", () => {
+  const accounts = [{ id: "a-chq", name: "Chequing", kind: "checking" as const }];
+  const at = (type: "income" | "expense", amount: number, category: string, from?: string, to?: string) =>
+    ({
+      id: category + amount + (from ?? "") + (to ?? ""), date: "2026-04-04",
+      type, amount, category, payee: "p", sourceAccountId: from, destinationAccountId: to,
+    }) as unknown as Transaction;
+  const rows = [
+    at("income", 60000, "Salary", undefined, "a-chq"),
+    at("expense", 50000, "Housing", "a-chq"),
+  ];
+  const edge = (f: ReturnType<typeof yearFlow>, from: string, to: string) =>
+    f.links
+      .filter((l) => f.nodes[l.source].name === from && f.nodes[l.target].name === to)
+      .reduce((a, l) => a + l.value, 0);
+  const named = (f: ReturnType<typeof yearFlow>, n: string) => f.nodes.some((x) => x.name === n);
+
+  test("both balances are drawn, and the year sits between them", () => {
+    const f = yearFlow(rows, "2026", { accounts, openingCash: 5000, closingCash: 15000 });
+    assert.equal(edge(f, "Opening balance", "Money in"), 5000);
+    assert.equal(edge(f, "Money in", "Closing balance"), 15000);
+  });
+
+  test("a record that explains the balance leaves nothing over", () => {
+    // The opening balance plus what came in, less what went out, is the close.
+    const f = yearFlow(rows, "2026", { accounts, openingCash: 5000, closingCash: 15000 });
+    assert.equal(named(f, "Not accounted for"), false);
+  });
+
+  test("a balance the record cannot reach is drawn as the gap it is", () => {
+    /*
+     * Closing lower than the movements explain: something left the account
+     * that the transactions do not hold, and the chart says only that.
+     */
+    const short = yearFlow(rows, "2026", { accounts, openingCash: 5000, closingCash: 9000 });
+    assert.equal(edge(short, "Money in", "Not accounted for"), 6000);
+    assert.equal(named(short, "Left in cash"), false, "not a claim about what was saved");
+  });
+
+  test("and the other way, when more arrived than the record shows", () => {
+    const over = yearFlow(rows, "2026", { accounts, openingCash: 5000, closingCash: 20000 });
+    assert.equal(edge(over, "Not accounted for", "Money in"), 5000);
+    assert.equal(named(over, "From savings"), false, "it is not known to have come from savings");
+  });
+
+  test("without balances it still says the weaker, true thing", () => {
+    /*
+     * Nothing to check against, so the difference is only the year's cash
+     * change — which is what was left over, and can be called that.
+     */
+    const bare = yearFlow(rows, "2026", { accounts });
+    assert.equal(edge(bare, "Money in", "Left in cash"), 10000);
+    assert.equal(named(bare, "Not accounted for"), false);
+  });
+
+  test("the bar balances whichever way the gap points", () => {
+    for (const closingCash of [9000, 15000, 20000]) {
+      const f = yearFlow(rows, "2026", { accounts, openingCash: 5000, closingCash });
+      const into = f.links.filter((l) => f.nodes[l.target].name === "Money in").reduce((a, l) => a + l.value, 0);
+      const outOf = f.links.filter((l) => f.nodes[l.source].name === "Money in").reduce((a, l) => a + l.value, 0);
+      assert.equal(into, outOf, `closing on ${closingCash}`);
+    }
+  });
+});

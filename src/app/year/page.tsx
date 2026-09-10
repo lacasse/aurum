@@ -33,6 +33,7 @@ import { accent as accentFor } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import {
+  accountValueAt,
   allTimeSeries,
   classShares,
   firstFlowMonth,
@@ -54,6 +55,7 @@ import {
   yearWaterfall,
 } from "@/lib/year";
 import { groupOf, type SpendGroup } from "@/lib/expenses";
+import { isLiability, type Account } from "@/lib/types";
 import {
   REGISTERED_PLANS,
   contributionRoom,
@@ -77,6 +79,14 @@ const PLAN_TONE = {
  * the question the spreadsheet's Year sheet was built to answer and the one
  * the dashboard, always looking at the last twelve months, cannot.
  */
+/** The kinds the flow chart's spendable bar is made of. See CASH in year.ts. */
+const CASH_ACCOUNT_KINDS = new Set<Account["kind"]>([
+  "checking",
+  "savings",
+  "cash",
+  "credit",
+]);
+
 export default function YearPage() {
   const ready = useReady();
   const accounts = useFinance((s) => s.accounts);
@@ -162,6 +172,8 @@ export default function YearPage() {
     return {
       rows,
       shapes: yearShapes(rows, classes),
+      /* The last month the record reaches, for closing a year still running. */
+      lastMonth: netWorth[netWorth.length - 1]?.key ?? null,
     };
   }, [accounts, holdings, transactions, snapshots, usdCadRate]);
 
@@ -217,9 +229,34 @@ export default function YearPage() {
   const typeLast = typeRow
     ? { ...incomeTypeAmounts(transactions, selected.year), shares: typeRow }
     : null;
+  /*
+   * What the spendable accounts held at either end of the year.
+   *
+   * The same accounts the flow chart's middle bar is made of, netted the way a
+   * balance sheet nets them: a card is money owed against the cash beside it,
+   * not money you have. Read through `accountValueAt` so a gap in an account's
+   * history is filled the way it is filled everywhere else.
+   */
+  const cashAt = (month: string) =>
+    accounts
+      .filter((a) => CASH_ACCOUNT_KINDS.has(a.kind))
+      .reduce(
+        (sum, a) => sum + (isLiability(a.kind) ? -1 : 1) * accountValueAt(a, month),
+        0,
+      );
+  /*
+   * A year still running closes on the last month on record, not on a December
+   * that has not happened.
+   */
+  const closingMonth =
+    data.lastMonth && data.lastMonth < `${selected.year}-12`
+      ? data.lastMonth
+      : `${selected.year}-12`;
   const flow = yearFlow(transactions, selected.year, {
     accounts,
     holdings,
+    openingCash: cashAt(`${Number(selected.year) - 1}-12`),
+    closingCash: cashAt(closingMonth),
     spendGroup: (c) => groupOf(c, spendGroups),
   });
   /*
