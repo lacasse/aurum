@@ -620,13 +620,14 @@ export default function ImportPage() {
                       {c.count === 1 ? "" : "s"}, so the {c.incoming} row
                       {c.incoming === 1 ? "" : "s"} here would count the same money
                       a second time.
-                      {c.missing.length > 0 && (
+                      {c.unmatched.length > 0 && (
                         <span className="mt-1 block text-ink-faint">
-                          Not in this file:{" "}
-                          <span className="text-ink-dim">{c.missing.join(", ")}</span>
+                          Worth checking:{" "}
+                          <span className="text-ink-dim">{c.unmatched.join(", ")}</span>
                           {" — "}
-                          delete the totals and {c.missing.length === 1 ? "it" : "they"}{" "}
-                          {c.missing.length === 1 ? "goes" : "go"} with them.
+                          the totals hold {c.unmatched.length === 1 ? "it" : "them"} and
+                          no row here is filed under{" "}
+                          {c.unmatched.length === 1 ? "it" : "them"} yet.
                         </span>
                       )}
                     </li>
@@ -634,11 +635,11 @@ export default function ImportPage() {
                 </ul>
                 <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
                   To itemise a month instead, delete its monthly totals first.
-                  What is named above is what this file does not replace — a
-                  payroll deduction, or income paid into an account you are not
-                  importing, sits inside the total and on no statement, so it
-                  will not come back. Re-enter it by hand, or leave the month
-                  summarised.
+                  Anything named above may be something this file cannot
+                  replace — a payroll deduction, or income paid into an account
+                  you are not importing, sits inside the total and on no
+                  statement, so it would not come back. The list narrows as you
+                  correct categories below.
                 </p>
                 <Button
                   variant="secondary"

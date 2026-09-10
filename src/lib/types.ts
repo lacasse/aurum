@@ -192,16 +192,22 @@ export interface GranularityClash {
   /** How many of the incoming rows fall in it. */
   incoming: number;
   /**
-   * Categories the month is summarised under that the file does not mention.
+   * Categories the month is summarised under that no incoming row is filed
+   * under yet.
    *
-   * The list of what a delete-and-reimport would drop. A monthly total is not
-   * a statement line: a payroll deduction, or income paid into an account this
-   * file does not cover, is inside the total and on no statement, so nothing
-   * in the import replaces it and nothing says so. Read against the file's
-   * suggested categories, which is the best the review has before a person
-   * corrects them — so it is a prompt to look, not a proof.
+   * What a delete-and-reimport might drop. A monthly total is not a statement
+   * line: a payroll deduction, or income paid into an account this file does
+   * not cover, is inside the total and on no statement, so nothing in the
+   * import replaces it and nothing says so.
+   *
+   * "Yet" is the whole of it. This reads the file's *suggested* categories,
+   * which are a guess made before anybody reviewed them — on the first real
+   * run it named a category that was sitting in the file under a suggestion of
+   * "Other". So it is a list to check, never a list of what is missing, and
+   * the screen must not word it as a finding. It is recomputed as categories
+   * are corrected, so it converges on the truth on the same screen.
    */
-  missing: string[];
+  unmatched: string[];
 }
 
 /**
@@ -227,7 +233,7 @@ export function granularityClashes(
     const key = `${monthOf(row.date)}|${row.type}`;
     if (!found.has(key)) {
       const clash = conflictingGranularity(existing, row);
-      found.set(key, clash ? { ...clash, incoming: 0, missing: [] } : null);
+      found.set(key, clash ? { ...clash, incoming: 0, unmatched: [] } : null);
     }
     const hit = found.get(key);
     if (hit) {
@@ -251,7 +257,7 @@ export function granularityClashes(
         )
         .map((t) => t.category),
     );
-    clash.missing = [...summarised].filter((c) => !inFile.has(c)).sort();
+    clash.unmatched = [...summarised].filter((c) => !inFile.has(c)).sort();
   }
   return [...found.values()]
     .filter((c): c is GranularityClash => c !== null)

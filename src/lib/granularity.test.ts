@@ -138,12 +138,12 @@ describe("a whole import is checked before any of it is written", () => {
     assert.deepEqual(found, []);
   });
 
-  test("what the file does not cover is named, per month and type", () => {
+  test("what no row is filed under yet is named, per month and type", () => {
     const [spending, pay] = granularityClashes(summarised, incoming);
     // Housing is summarised and nothing in the file is filed under it.
-    assert.deepEqual(spending.missing, ["Housing"]);
+    assert.deepEqual(spending.unmatched, ["Housing"]);
     // The file's own income category matches the summary's, so nothing is lost.
-    assert.deepEqual(pay.missing, []);
+    assert.deepEqual(pay.unmatched, []);
   });
 
   test("a deduction on no statement is what this is for", () => {
@@ -156,7 +156,7 @@ describe("a whole import is checked before any of it is written", () => {
       ],
       [row("2026-06-14", "income", "Salary")],
     );
-    assert.deepEqual(pay.missing, ["RSP / Pension"]);
+    assert.deepEqual(pay.unmatched, ["RSP / Pension"]);
   });
 
   test("a category named twice in the file is not named twice as missing", () => {
@@ -168,7 +168,7 @@ describe("a whole import is checked before any of it is written", () => {
       ],
       [row("2026-06-02", "expense", "Groceries")],
     );
-    assert.deepEqual(spending.missing, ["Housing"], "listed once, though summarised twice");
+    assert.deepEqual(spending.unmatched, ["Housing"], "listed once, though summarised twice");
   });
 
   test("an empty record blocks nothing", () => {
