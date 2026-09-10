@@ -219,6 +219,7 @@ export default function YearPage() {
     : null;
   const flow = yearFlow(transactions, selected.year, {
     accounts,
+    holdings,
     spendGroup: (c) => groupOf(c, spendGroups),
   });
   /*

@@ -5,7 +5,7 @@ import {
   isIncome,
 } from "./analytics";
 import type { ClassPoint, NetWorthPoint, PortfolioPoint } from "./analytics";
-import type { Account, AccountKind } from "./types";
+import type { Account, AccountKind, Holding } from "./types";
 import { Transaction } from "./types";
 import { fromCents, roundMoney, toCents } from "./money";
 import { PENSION_CATEGORY } from "./pension";
@@ -742,6 +742,17 @@ const CASH_KINDS = new Set<AccountKind>([
   "credit",
 ]);
 
+/**
+ * A pension contribution is not a purchase, and it is not idle cash either.
+ *
+ * The money arrives in a plan that has no trades to import — an entitlement
+ * accrues instead — so measured against buys it looked like a shortfall, and
+ * the year appeared to have funded its investing out of savings it never
+ * touched. Pension is already its own class on the balance sheet beside cash,
+ * bonds, stocks and crypto; this is the same class, seen as it is bought.
+ */
+const PENSION_ASSET = "Pension";
+
 /** Where the categories too thin to draw go. */
 const OTHER_INCOME = "Other income";
 
@@ -763,6 +774,17 @@ const OTHER_INCOME = "Other income";
 const MIN_SOURCE_SHARE = 0.01;
 
 const SPENDING = "Spending";
+/**
+ * A purchase, which needs no node of its own.
+ *
+ * Buys used to pass through a single "Bought" node on the way to the classes.
+ * It cost a column and it lost the thing worth seeing: every account's
+ * purchases merged there before fanning out again, so which account bought the
+ * bonds and which bought the equity was no longer on the chart. An investment
+ * account is already the answer to "what was this for"; what it bought hangs
+ * straight off it.
+ */
+const ASSET = "__asset";
 /** Money moved to another of your own accounts, which is not a purpose. */
 const DEPOSIT = "__deposit";
 /**
@@ -772,6 +794,8 @@ const DEPOSIT = "__deposit";
  * column the Spending bar stands in. See where it is set.
  */
 const DIRECT = "__direct";
+/** Selling a position, which is money arriving rather than leaving. */
+const SOLD = "Sold investments";
 /**
  * Money borrowed, which arrived without being earned.
  *
@@ -804,6 +828,8 @@ const BORROWED = "Borrowed";
  */
 const RETURNED = "Money back";
 /** What an invested account took in and has no purchases to account for. */
+const UNITEMISED = "Not itemised";
+
 /**
  * What arrived in a spendable account and was neither spent nor moved on.
  *
@@ -877,6 +903,8 @@ const LEAF_ROLE: Record<string, FlowNode["role"]> = {
  */
 export interface YearFlowOptions {
   accounts?: Pick<Account, "id" | "name" | "kind">[];
+  /** Positions, for the purchases and sales inside the invested accounts. */
+  holdings?: Pick<Holding, "accountId" | "assetClass" | "flows">[];
   /** How many leaves a branch draws before the tail is pooled. */
   limit?: number;
   /** Which side of the necessity line a category falls, overrides included. */
@@ -888,6 +916,7 @@ export function yearFlow(
   year: string,
   {
     accounts = [],
+    holdings = [],
     limit = 8,
     spendGroup = (c) => groupOf(c),
   }: YearFlowOptions = {},
@@ -909,9 +938,13 @@ export function yearFlow(
 
   const incomeTotals = new Map<string, number>();
   const spendTotals = new Map<string, number>();
+  const investTotals = new Map<string, number>();
   const hubTotals = new Map<string, number>();
   /** Whether the invested bar is on this year's chart at all. */
   let anyInvested = false;
+  /** Contributions to a pension plan, and any purchases already recorded in one. */
+  let pensionIn = 0;
+  let pensionBuys = 0;
   const rows: {
     from: string;
     to: string;
@@ -946,6 +979,9 @@ export function yearFlow(
       const contribution = t.category === PENSION_CATEGORY;
       const hub = contribution ? INVESTMENTS : hubOf(t.destinationAccountId);
       if (hub === INVESTMENTS) anyInvested = true;
+      if (contribution || byId.get(t.destinationAccountId ?? "")?.kind === "pension") {
+        pensionIn += cents;
+      }
       note(incomeTotals, t.category, cents);
       note(hubTotals, hub, cents);
       rows.push({ from: t.category, to: hub, cents, stage: 1 });
@@ -995,6 +1031,7 @@ export function yearFlow(
       // Moving between two invested accounts is not a flow through the year.
       if (hub === INVESTMENTS) continue;
       anyInvested = true;
+      if (dest.kind === "pension") pensionIn += cents;
       note(hubTotals, hub, cents);
       note(hubTotals, INVESTMENTS, cents);
       /*
@@ -1007,22 +1044,71 @@ export function yearFlow(
   }
 
   /*
-   * The chart stops at the account door.
+   * The purchases and sales inside the accounts, netted over the year.
    *
-   * What a portfolio buys and sells inside itself is not a year's cash flow,
-   * and drawing it swamped the chart that is. A year that rotated one class
-   * into another put both legs on the page — a sale on the left funding a
-   * purchase on the right — so a portfolio that moved a fifth of itself drew
-   * ten times the money that actually crossed its boundary, and the salary
-   * and the spending were squeezed into the margin. Netting the classes was
-   * the other way out, and a round trip still leaves the class it went
-   * through on the chart.
+   * Gross, a year that rotated one class into another put both legs on the
+   * page — a sale on the left funding a purchase on the right — so a portfolio
+   * that moved a fifth of itself drew several times the money that actually
+   * crossed its boundary, and the salary and the spending were squeezed into
+   * the margin by trading that left the portfolio the same size.
    *
-   * So the invested bar is where the money stops. Everything before it is
-   * where it came from and what else it did, which is what a reader comes to
-   * a cash flow for; which securities it became is a question about a
-   * portfolio, and the pages about the portfolio answer it.
+   * Netted, a class bought and sold back within the year cancels and is not
+   * drawn at all, which is the honest answer: nothing about the year's money
+   * changed. What survives is what the year actually put into each class, and
+   * a class sold down comes out negative — money the portfolio released, which
+   * is a source, drawn on the left with the sale proceeds it is.
+   *
+   * Dividends are deliberately absent. A dividend is income under its own
+   * category already, and the trade importer records the same payment against
+   * the holding, so counting both would inflate the year by every one twice.
    */
+  const netByClass = new Map<string, number>();
+  for (const h of holdings) {
+    const inPension = byId.get(h.accountId)?.kind === "pension";
+    for (const f of h.flows ?? []) {
+      if (f.date.slice(0, 4) !== year) continue;
+      const cents = toCents(f.amount);
+      if (cents <= 0) continue;
+      const signed = f.kind === "buy" ? cents : f.kind === "sell" ? -cents : 0;
+      if (signed === 0) continue;
+      anyInvested = true;
+      netByClass.set(h.assetClass, (netByClass.get(h.assetClass) ?? 0) + signed);
+      if (inPension) pensionBuys += signed;
+    }
+  }
+  /* What the portfolio released, whichever classes released it. */
+  let soldDown = 0;
+  for (const [assetClass, net] of netByClass) {
+    if (net > 0) {
+      note(hubTotals, INVESTMENTS, net);
+      note(investTotals, assetClass, net);
+      rows.push({ from: INVESTMENTS, to: assetClass, cents: net, stage: 2, group: ASSET });
+    } else if (net < 0) {
+      soldDown -= net;
+    }
+  }
+  if (soldDown > 0) {
+    note(incomeTotals, SOLD, soldDown);
+    note(hubTotals, INVESTMENTS, soldDown);
+    rows.push({ from: SOLD, to: INVESTMENTS, cents: soldDown, stage: 1 });
+  }
+
+  /*
+   * What went into the plan and did not turn into a recorded purchase is the
+   * entitlement itself. Subtracting the purchases keeps a plan that *does*
+   * report its holdings from being counted twice.
+   */
+  const pensionAsset = Math.max(0, pensionIn - Math.max(0, pensionBuys));
+  if (pensionAsset > 0) {
+    note(investTotals, PENSION_ASSET, pensionAsset);
+    rows.push({
+      from: INVESTMENTS,
+      to: PENSION_ASSET,
+      cents: pensionAsset,
+      stage: 2,
+      group: ASSET,
+    });
+  }
 
   if (rows.length === 0) return { nodes: [], links: [] };
 
@@ -1060,7 +1146,7 @@ export function yearFlow(
    */
   const categoryTotals = new Map(
     [...incomeTotals].filter(
-      ([k]) => k !== BORROWED && k !== RETURNED,
+      ([k]) => k !== SOLD && k !== BORROWED && k !== RETURNED,
     ),
   );
   const sourceName = pool(categoryTotals, limit, OTHER_INCOME, MIN_SOURCE_SHARE);
@@ -1069,7 +1155,9 @@ export function yearFlow(
    * three necessity groups and four asset classes -- but the tail is capped
    * anyway so a future class or group cannot quietly widen the chart.
    */
-  const leafName: Record<string, (name: string) => string> = {};
+  const leafName: Record<string, (name: string) => string> = {
+    [ASSET]: pool(investTotals, limit, "Other assets"),
+  };
   // The year node is the spine for account-less rows and never pools away.
   const hubName = (() => {
     const named = new Map([...hubTotals].filter(([k]) => k !== TRUNK));
@@ -1082,6 +1170,7 @@ export function yearFlow(
   const outflow = new Map<string, number>();
   const groups = new Set<string>();
   const leaves = new Set<string>();
+  const assetLeaves = new Set<string>();
   const link = (from: string, to: string, cents: number) => {
     if (from === to) return;
     edges.set(`${from}\u0000${to}`, (edges.get(`${from}\u0000${to}`) ?? 0) + cents);
@@ -1089,7 +1178,7 @@ export function yearFlow(
   for (const r of rows) {
     if (r.stage === 1) {
       const to = hubName(r.to);
-      const named = r.from === BORROWED || r.from === RETURNED;
+      const named = r.from === SOLD || r.from === BORROWED || r.from === RETURNED;
       link(named ? r.from : sourceName(r.from), to, r.cents);
       note(inflow, to, r.cents);
       continue;
@@ -1110,10 +1199,13 @@ export function yearFlow(
     }
     const group = r.group ?? SPENDING;
     const leaf = (leafName[group] ?? ((n: string) => n))(r.to);
-    if (group === DIRECT) {
-      // Straight off the account it came out of. See DIRECT.
+    if (group === ASSET || group === DIRECT) {
+      // Straight off the account it came out of. See ASSET and DIRECT.
       link(from, leaf, r.cents);
       leaves.add(leaf);
+      // A fee is still a fee: it keeps the colour and the place its category
+      // has among the other spending, rather than joining the asset classes.
+      if (group === ASSET) assetLeaves.add(leaf);
       note(outflow, from, r.cents);
       continue;
     }
@@ -1131,7 +1223,7 @@ export function yearFlow(
   }
 
   const hubs = [...new Set([...inflow.keys(), ...outflow.keys()])]
-    .filter((n) => n !== BORROWED && n !== RETURNED)
+    .filter((n) => n !== SOLD && n !== BORROWED && n !== RETURNED)
     .sort(
       (a, b) =>
         (inflow.get(b) ?? 0) + (outflow.get(b) ?? 0) -
@@ -1157,11 +1249,9 @@ export function yearFlow(
   const kept = [...spare]
     .filter(([h]) => !investedHubs.has(h))
     .reduce((a, [, v]) => a + v, 0);
-  /*
-   * An invested bar takes money in and does not pay it out again, which is the
-   * point: it is a destination now, not a stop on the way. Nothing is left
-   * over to name, so nothing is drawn.
-   */
+  const unitemised = [...spare]
+    .filter(([h]) => investedHubs.has(h))
+    .reduce((a, [, v]) => a + v, 0);
 
   /*
    * An account with money left over goes to the foot of its column.
@@ -1297,19 +1387,27 @@ export function yearFlow(
       roleOfLeaf.set(e.to, LEAF_ROLE[e.to] ?? GROUP_ROLE[e.from]);
     }
   }
-  for (const e of edgeList) {
-    if (leaves.has(e.to)) id(e.to, roleOfLeaf.get(e.to) ?? LEAF_ROLE[e.to]);
-  }
   /*
-   * What stayed in cash comes after the things spending became, because it is
-   * the one band reaching the last column without passing through the one
-   * before it — so it crosses that column on the way, and wherever it crosses
-   * it runs behind whatever stands there. Below the spending it passes under
-   * the bar rather than through it, which is the difference between a ribbon
-   * that skirts the Spending bar and one that reads as coming out of it.
+   * What was kept goes between the two sets of ends, not after them.
+   *
+   * It is the one band that reaches the last column without passing through
+   * the one before it, so it crosses that column on the way — and wherever it
+   * crosses, it runs behind whatever is standing there. Sat below the assets
+   * it crossed the spending bar and read as something spending gave off.
+   * Between the two, it crosses the gap between them instead.
    */
+  for (const e of edgeList) {
+    if (leaves.has(e.to) && !assetLeaves.has(e.to)) {
+      id(e.to, roleOfLeaf.get(e.to) ?? LEAF_ROLE[e.to]);
+    }
+  }
   if (kept > 0) id(LEFT_IN_CASH, "kept");
-
+  for (const e of edgeList) {
+    if (assetLeaves.has(e.to)) {
+      id(e.to, e.to === PENSION_ASSET ? "pension" : "investing");
+    }
+  }
+  if (unitemised > 0) id(UNITEMISED, "idle");
 
   for (const e of edgeList) {
     links.push({ source: id(e.from), target: id(e.to), value: fromCents(e.cents) });
@@ -1318,8 +1416,8 @@ export function yearFlow(
     links.push({ source: id("From savings"), target: id(hub), value: fromCents(gap) });
   }
   for (const [hub, left] of spare) {
-    if (investedHubs.has(hub)) continue;
-    links.push({ source: id(hub), target: id(LEFT_IN_CASH), value: fromCents(left) });
+    const target = investedHubs.has(hub) ? UNITEMISED : LEFT_IN_CASH;
+    links.push({ source: id(hub), target: id(target), value: fromCents(left) });
   }
 
   return { nodes, links };
