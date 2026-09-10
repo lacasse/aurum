@@ -28,6 +28,7 @@ import {
 import { cn } from "./ui";
 import { accent, spectrumAt, type AccentName } from "@/lib/palette";
 import type { NetWorthClass } from "@/lib/analytics";
+import { seatColumns } from "@/lib/flow-layout";
 
 export { spectrumAt } from "@/lib/palette";
 
@@ -1485,6 +1486,29 @@ export function YearSankey({
       { source: sp, target: to, value: l.value },
     ];
   });
+
+  /*
+   * Order each column so the ribbons between them cross as little as possible.
+   * The arithmetic is in `seatColumns`, which is where the reasoning lives and
+   * where it is tested; this only applies the answer.
+   */
+  const seated = seatColumns({ nodes: drawNodes, links: drawLinks });
+  if (seated.length === drawNodes.length) {
+    const moved = new Map(seated.map((old, next) => [old, next]));
+    const ordered = seated.map((i) => drawNodes[i]);
+    const relinked = drawLinks.map((l) => ({
+      source: moved.get(l.source) ?? l.source,
+      target: moved.get(l.target) ?? l.target,
+      value: l.value,
+    }));
+    const shifted = new Set([...ghosts].map((i) => moved.get(i) ?? i));
+    drawNodes.length = 0;
+    drawNodes.push(...ordered);
+    drawLinks.length = 0;
+    drawLinks.push(...relinked);
+    ghosts.clear();
+    for (const i of shifted) ghosts.add(i);
+  }
 
   const depth = columns(drawNodes, drawLinks);
   const last = Math.max(...depth);

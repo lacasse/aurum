@@ -49,7 +49,6 @@ import {
   incomeTypeAmounts,
   incomeTypeShares,
   yearFlow,
-  unearnedShare,
   yearRows,
   yearShapes,
   yearWaterfall,
