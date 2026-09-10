@@ -192,15 +192,15 @@ export default function YearPage() {
   const selected = data.rows.find((r) => r.year === year) ?? data.rows[0];
   const before = data.rows[data.rows.indexOf(selected) + 1];
   /*
-   * A part-year's percentages are measured on its full-year pace, so the label
-   * has to say so — "vs 2025" beside a figure that compares a projection to a
-   * finished year would be a different claim than the one being made.
+   * A part-year's percentages are measured against the same window of the year
+   * before, so the label has to say so — "vs 2025" beside a figure that
+   * compares nine months to twelve is a different claim than the one made.
    */
   const paceLabel = !before
     ? "first year on record"
     : selected.complete
       ? `vs ${before.year}`
-      : `full-year pace vs ${before.year}`;
+      : `vs ${before.year} to the same date`;
 
   // Named so the footnote can say what the compounding is measured from: on a
   // record that opens at a peak, growth since then is a different claim.
@@ -319,8 +319,9 @@ export default function YearPage() {
         {!selected.complete && (
           <p className="px-1 text-[0.6875rem] text-ink-faint">
             {selected.year} is still running — the figures are the year so far,
-            while the comparisons carry them forward at the pace kept through{" "}
-            {Math.round(selected.elapsed * 100)}% of the year.
+            {" "}
+            {Math.round(selected.elapsed * 100)}% of the way through, and the
+            comparisons cover the same stretch of {before?.year ?? "the year before"}.
           </p>
         )}
 

@@ -71,21 +71,22 @@ describe("yearRows", () => {
     assert.equal(y2024.expenseGrowth, null);
   });
 
-  test("a finished year is projected to exactly itself", () => {
+  test("a finished year is compared whole, with no window against it", () => {
     const [y2025] = rows;
     assert.equal(y2025.elapsed, 1);
-    assert.equal(y2025.projectedIncome, y2025.income);
-    assert.equal(y2025.projectedExpenses, y2025.expenses);
+    assert.equal(y2025.priorToDateIncome, null);
+    assert.equal(y2025.priorToDateExpenses, null);
   });
 
-  test("a part-year is compared on its full-year pace, not its running total", () => {
-    // Half a year in, having matched last year's whole take: a doubling, not a
-    // year that has stood still.
+  test("a running year is compared against the same window of the year before", () => {
+    // By the second of July each year has taken one salary; the year before
+    // took a second one in the autumn, which is not this comparison's business.
     const partial = yearRows(
       [
         txn("2024-03-01", "income", 40000, "Salary"),
+        txn("2024-10-01", "income", 40000, "Salary"),
         txn("2024-05-01", "expense", 20000),
-        txn("2025-03-01", "income", 40000, "Salary"),
+        txn("2025-03-01", "income", 50000, "Salary"),
         txn("2025-05-01", "expense", 10000),
       ],
       netWorth,
@@ -94,23 +95,24 @@ describe("yearRows", () => {
       "2025-07-02",
     );
     const [y2025] = partial;
-    assert.ok(Math.abs(y2025.elapsed - 0.5) < 0.005, "half the year gone");
-    assert.equal(y2025.income, 40000, "the figure shown is still the year so far");
-    assert.ok(Math.abs(y2025.projectedIncome - 80000) < 500);
-    assert.ok(Math.abs(y2025.incomeGrowth! - 100) < 2, "on course to double");
-    assert.ok(Math.abs(y2025.expenseGrowth! - 0) < 2, "spending on the same pace");
+    assert.equal(y2025.income, 50000, "the figure shown is still the year so far");
+    assert.equal(y2025.priorToDateIncome, 40000, "the autumn salary is out of the window");
+    assert.equal(y2025.incomeGrowth, 25);
+    assert.equal(y2025.priorToDateExpenses, 20000);
+    assert.equal(y2025.expenseGrowth, -50);
   });
 
-  test("the first day of a year counts as a day, not as nothing", () => {
-    const [y] = yearRows(
-      [txn("2025-01-01", "income", 100, "Salary")],
-      netWorth,
-      portfolio,
-      {},
-      "2025-01-01",
-    );
-    assert.ok(y.elapsed > 0 && y.elapsed < 0.01);
-    assert.ok(Number.isFinite(y.projectedIncome));
+  test("the window moves with the date, not with the month", () => {
+    const txns = [
+      txn("2024-05-20", "expense", 10000),
+      txn("2025-05-01", "expense", 3000),
+    ];
+    const early = yearRows(txns, netWorth, portfolio, {}, "2025-05-10")[0];
+    const later = yearRows(txns, netWorth, portfolio, {}, "2025-05-31")[0];
+    assert.equal(early.priorToDateExpenses, 0, "the 20th has not come round yet");
+    assert.equal(early.expenseGrowth, null, "nothing to compare against");
+    assert.equal(later.priorToDateExpenses, 10000);
+    assert.equal(later.expenseGrowth, -70);
   });
 
   test("the portfolio's cost and profit come from the year's last month", () => {
@@ -217,8 +219,8 @@ const row = (year: string, over: Record<string, unknown> = {}) =>
     income: 100000,
     expenses: 60000,
     elapsed: 1,
-    projectedIncome: 100000,
-    projectedExpenses: 60000,
+    priorToDateIncome: null,
+    priorToDateExpenses: null,
     incomeGrowth: null,
     expenseGrowth: null,
     netCashflow: 40000,

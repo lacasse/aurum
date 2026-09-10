@@ -40,15 +40,17 @@ export interface YearRow {
    */
   elapsed: number;
   /**
-   * The year's totals carried forward at the pace they have kept so far.
-   * Equal to the totals themselves once the year is over.
+   * What the year before had taken in and spent by this same day of the year.
+   * Null for a finished year, which is compared whole, and for the first year
+   * on record.
    */
-  projectedIncome: number;
-  projectedExpenses: number;
+  priorToDateIncome: number | null;
+  priorToDateExpenses: number | null;
   /**
-   * Change against the year before, as a percentage — measured on the
-   * projections, so a year three months old is not reported as a collapse in
-   * earnings against twelve months of the year before it.
+   * Change against the year before, as a percentage. Like for like: a running
+   * year is measured against the same window of the year before it, so a year
+   * three months old is not reported as a collapse in earnings against twelve
+   * months of its predecessor.
    */
   incomeGrowth: number | null;
   expenseGrowth: number | null;
@@ -107,21 +109,33 @@ export function yearRows(
   const portByMonth = new Map(portfolio.map((p) => [p.key, p]));
   const currentYear = today.slice(0, 4);
 
+  /*
+   * Each year is summed twice: once whole, and once up to today's day of the
+   * year. The second is what a year still running is compared against, so the
+   * comparison covers the same stretch of calendar on both sides.
+   */
+  const dayOfYear = today.slice(5);
   const cents = new Map<
     string,
     { income: number; expenses: number; spendable: number }
   >();
+  const toDate = new Map<string, { income: number; expenses: number }>();
   for (const t of transactions) {
     const key = t.date.slice(0, 4);
     const slot = cents.get(key) ?? { income: 0, expenses: 0, spendable: 0 };
     const amount = toCents(t.amount);
+    const within = t.date.slice(5) <= dayOfYear;
+    const early = toDate.get(key) ?? { income: 0, expenses: 0 };
     if (isIncome(t)) {
       slot.income += amount;
       if (!NON_SPENDABLE_INCOME.has(t.category)) slot.spendable += amount;
+      if (within) early.income += amount;
     } else if (t.type === "expense") {
       slot.expenses += amount;
+      if (within) early.expenses += amount;
     }
     cents.set(key, slot);
+    toDate.set(key, early);
   }
 
   /*
@@ -145,17 +159,21 @@ export function yearRows(
     const port = end ? portByMonth.get(end) : undefined;
 
     const previous = rows[rows.length - 1];
-    const previousExpenses = previous?.expenses ?? 0;
-    const previousIncome = previous?.income ?? 0;
 
     /*
-     * A part-year is compared on its pace, not on its running total. Against a
-     * full year the total is guaranteed to be smaller, so the honest question
-     * is what the year is on course to reach.
+     * A running year is held against the same window of the year before it,
+     * not against the whole of it. Compared whole, a year is guaranteed to
+     * look smaller than its predecessor until the day it ends.
      */
-    const elapsed = y === currentYear ? yearElapsed(y, today) : 1;
-    const projectedIncome = roundMoney(income / elapsed);
-    const projectedExpenses = roundMoney(expenses / elapsed);
+    const running = y === currentYear;
+    const elapsed = running ? yearElapsed(y, today) : 1;
+    const earlier = previous ? toDate.get(previous.year) : undefined;
+    const priorToDateIncome =
+      running && previous ? fromCents(earlier?.income ?? 0) : null;
+    const priorToDateExpenses =
+      running && previous ? fromCents(earlier?.expenses ?? 0) : null;
+    const previousIncome = priorToDateIncome ?? previous?.income ?? 0;
+    const previousExpenses = priorToDateExpenses ?? previous?.expenses ?? 0;
 
     let flows = 0;
     for (const [month, amount] of Object.entries(flowsByMonth)) {
@@ -186,15 +204,15 @@ export function yearRows(
       income,
       expenses,
       elapsed,
-      projectedIncome,
-      projectedExpenses,
+      priorToDateIncome,
+      priorToDateExpenses,
       incomeGrowth:
         i > 0 && previousIncome > 0
-          ? ((projectedIncome - previousIncome) / previousIncome) * 100
+          ? ((income - previousIncome) / previousIncome) * 100
           : null,
       expenseGrowth:
         i > 0 && previousExpenses > 0
-          ? ((projectedExpenses - previousExpenses) / previousExpenses) * 100
+          ? ((expenses - previousExpenses) / previousExpenses) * 100
           : null,
       netCashflow: fromCents(money.income - money.expenses),
       uncommittedLiquid: fromCents(money.spendable - money.expenses),
