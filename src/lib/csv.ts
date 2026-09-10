@@ -255,11 +255,17 @@ const EXPENSE_RULES: [string, string[]][] = [
 ];
 
 const INCOME_RULES: [string, string[]][] = [
-  ["Salary", ["payroll", "direct dep", "salary", "paycheck", "pay cheque", "paycheque", "wages", "gusto", "adp ", "workday", "employer", "net pay", "pay - ", "dep pay"]],
+  ["Salary", ["payroll", "direct dep", "salary", "paycheck", "pay cheque", "paycheque", "wages", "gusto", "adp ", "workday", "net pay", "pay - ", "dep pay"]],
   ["Freelance", ["freelance", "consulting", "invoice", "contract pay", "upwork", "fiverr", "stripe payout", "self-employ"]],
   ["Dividends", ["dividend", "distribution"]],
   ["Interest", ["interest", "int paid", "int credit"]],
-  ["RSP / Pension", ["pension", "rrsp contribution", "rsp contribution", "employer match", "superannuation"]],
+  ["RSP / Pension", ["rrsp contribution", "rsp contribution", "employer match", "employer contribution", "pension contribution", "superannuation contribution"]],
+  /*
+   * Listed before the contribution rule would have matched a bare "pension":
+   * a statement line saying only that, on money arriving, is far more likely
+   * to be the plan paying than the plan being paid.
+   */
+  ["Pension Income", ["pension payment", "pension income", "annuity", "superannuation payment", "pension deposit", "pension"]],
   ["Loan Proceeds", ["loan advance", "loan proceeds", "line of credit advance", "mortgage advance", "loan disburs"]],
   ["Refund", ["refund", "reimburs", "cash back", "statement credit", "returned item", "return ", "rebate"]],
   ["Gifts", ["gift", "e-transfer from", "etransfer from"]],

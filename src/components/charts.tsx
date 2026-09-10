@@ -7,6 +7,7 @@ import {
   CartesianGrid,
   Cell,
   ComposedChart,
+  Layer,
   Legend,
   Line,
   Pie,
@@ -15,17 +16,52 @@ import {
   PolarGrid,
   PolarRadiusAxis,
   Radar,
+  Rectangle,
   RadarChart,
   ReferenceLine,
   ResponsiveContainer,
+  Sankey,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import { cn } from "./ui";
 import { accent, spectrumAt, type AccentName } from "@/lib/palette";
+import type { NetWorthClass } from "@/lib/analytics";
+import { seatColumns } from "@/lib/flow-layout";
 
 export { spectrumAt } from "@/lib/palette";
+
+/**
+ * One colour per class of thing owned, and the order they stack in.
+ *
+ * Shared because the same composition is drawn on two pages now — month by
+ * month on the dashboard and year by year on the Year page — and a band that
+ * is amber in one and blue in the other is two charts the reader has to learn
+ * separately rather than one they can read twice.
+ *
+ * The order is a decision about a picture, not about the domain, which is why
+ * it lives here and not beside `NET_WORTH_CLASSES`. Whatever sits last is the
+ * top of the stack, and the top of a stack that always totals a hundred
+ * percent runs along the frame, where its boundary line cannot be seen. That
+ * costs crypto nothing — it is unmistakable from its fill — and it cost the
+ * pension its line entirely while it sat up there.
+ */
+export const CLASS_COLORS: Record<NetWorthClass, string> = {
+  Cash: "#34d399",
+  Bonds: "#60a5fa",
+  Pension: "#f472b6",
+  Stocks: "#f59e0b",
+  Crypto: "#8b5cf6",
+};
+
+export const BAND_ORDER: NetWorthClass[] = [
+  "Cash",
+  "Bonds",
+  "Pension",
+  "Stocks",
+  "Crypto",
+];
 
 /**
  * One colour per category, assigned in the order given.
@@ -258,6 +294,26 @@ export function SeriesChart({
 }) {
   const gid = useId().replace(/[:]/g, "");
   const stackId = stacked ? "1" : undefined;
+  /*
+   * A ramp per series, but only where it has something to say.
+   *
+   * The fade is drawn as a gradient in objectBoundingBox units, and SVG does
+   * not render one of those on a path whose bounding box has no height. The
+   * top band of a share chart is exactly that path: a series that is every
+   * year the whole of the stack draws a dead-flat line along the ceiling, so
+   * its stroke was dropped entirely and the band the reader was being asked to
+   * follow was the one line on the chart that did not exist. The gradient in
+   * that case was a no-op anyway — every stop opaque, because the series is
+   * never absent — so it was destroying the line in exchange for nothing.
+   *
+   * Null means paint the colour straight on, which is both correct and what a
+   * series that never disappears wants.
+   */
+  const fades = series.map((s) => {
+    if (!fadeAtZero) return null;
+    const ramp = presenceRamp(data, s.key);
+    return ramp.some((o) => o < 1) ? ramp : null;
+  });
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
@@ -274,8 +330,8 @@ export function SeriesChart({
             * has nothing, so the stroke dissolves across the months either
             * side instead of stopping dead at one of them.
             */}
-          {fadeAtZero &&
-            series.map((s, i) => (
+          {series.map((s, i) =>
+            fades[i] === null ? null : (
               <linearGradient
                 key={`fade-${s.key}`}
                 id={`fade-${gid}-${i}`}
@@ -284,7 +340,7 @@ export function SeriesChart({
                 x2="1"
                 y2="0"
               >
-                {presenceRamp(data, s.key).map((op, j, all) => (
+                {fades[i]!.map((op, j, all) => (
                   <stop
                     key={j}
                     offset={`${all.length > 1 ? (j / (all.length - 1)) * 100 : 0}%`}
@@ -293,7 +349,8 @@ export function SeriesChart({
                   />
                 ))}
               </linearGradient>
-            ))}
+            ),
+          )}
         </defs>
         <CartesianGrid {...GRID_PROPS} />
         <XAxis
@@ -310,7 +367,29 @@ export function SeriesChart({
           axisLine={false}
           width={56}
           domain={yDomain}
-          ticks={yDomain ? [0, 25, 50, 75, 100] : undefined}
+          /*
+           * Without this the axis quietly widens to fit the data and the
+           * domain is decoration: a chart asking for nought to ten, drawn over
+           * a stack totalling a hundred, got an axis of a hundred and a single
+           * surviving tick.
+           */
+          allowDataOverflow={yDomain !== undefined}
+          /*
+           * Ticks across whatever the domain is, not the quarters of a hundred
+           * this was written for. Hardcoding them meant a chart given a domain
+           * of nought to ten was labelled nought to a hundred — the axis
+           * silently disagreeing with the data drawn against it, which is the
+           * worst way for a chart to be wrong.
+           */
+          ticks={
+            yDomain
+              ? Array.from(
+                  { length: 5 },
+                  (_, i) =>
+                    Math.round((yDomain[0] + ((yDomain[1] - yDomain[0]) * i) / 4) * 100) / 100,
+                )
+              : undefined
+          }
           tickFormatter={(v) => (yFmt ? yFmt(Number(v)) : String(v))}
         />
         <Tooltip
@@ -336,7 +415,7 @@ export function SeriesChart({
               type="monotone"
               dataKey={s.key}
               name={s.name}
-              stroke={fadeAtZero ? `url(#fade-${gid}-${i})` : s.color}
+              stroke={fades[i] ? `url(#fade-${gid}-${i})` : s.color}
               strokeWidth={2}
               fill={strokeOnly ? "none" : `url(#${gid}-${i})`}
               stackId={stackId}
@@ -362,7 +441,8 @@ export function GroupedBars({
   data: Record<string, unknown>[];
   xKey: string;
   bars: SeriesDef[];
-  height?: number;
+  /** A percentage fills whatever box the card gives it. See SeriesChart. */
+  height?: number | `${number}%`;
   yFmt?: (n: number) => string;
   stacked?: boolean;
 }) {
@@ -959,6 +1039,656 @@ export function RoomGauge({
           </p>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/* ---------------- Waterfall ---------------- */
+
+/**
+ * A year's move from one net worth to the next, as floating columns.
+ *
+ * Two totals at the ends standing on the axis, and between them the steps that
+ * got from one to the other, each starting where the last finished. It is the
+ * one arrangement that shows cash flow and balance sheet as the same statement
+ * rather than two: the columns are the year's income and spending, and the
+ * pillars they sit between are the balance sheet on 1 January and 31 December.
+ *
+ * Recharts draws this with two stacked bars — an invisible one lifting the
+ * visible one off the axis — because a bar chart cannot otherwise start
+ * anywhere but zero.
+ */
+/** One definition, so the connector maths below cannot drift from the plot. */
+const WATERFALL_MARGIN = { top: 28, right: 4, left: 4, bottom: 0 };
+
+export function Waterfall({
+  steps,
+  format,
+  height = 300,
+}: {
+  steps: { label: string; delta: number; base: number; top: number; kind: "total" | "up" | "down" }[];
+  format: (n: number) => string;
+  /** A percentage fills whatever box the card gives it. See SeriesChart. */
+  height?: number | `${number}%`;
+}) {
+  /*
+   * The axis starts below the lowest level the year reaches, not at zero.
+   *
+   * A year moves net worth by a fraction of what it already is, so against a
+   * zero baseline the two end pillars tower over the steps between them and
+   * the steps — the entire subject of the chart — are squeezed into a band too
+   * thin to compare.
+   *
+   * Everything here is proportional to the year's own movement, so the chart
+   * looks the same whether the balance is four figures or eight. Two cases it
+   * has to survive: a balance below zero, where the floor goes below zero with
+   * it, and a year that did not move, where there is no span to scale against
+   * and the window comes from the size of the balance instead.
+   */
+  const edges = steps.flatMap((s) => (s.kind === "total" ? [s.top] : [s.base, s.top]));
+  const low = Math.min(...edges);
+  const high = Math.max(...edges);
+  const moved = high - low;
+  const span = moved > 0 ? moved : Math.max(Math.abs(high) * 0.02, 1);
+  const raw = low - span * 0.45;
+  /*
+   * A record that sits near zero keeps a true zero baseline. Cutting the axis
+   * under a small balance would blow ordinary movement up into a cliff, which
+   * is the distortion this is meant to avoid rather than cause.
+   */
+  const floor = low >= 0 && raw < 0 ? 0 : raw;
+  const truncated = floor !== 0;
+
+  const rows = steps.map((s) => ({
+    label: s.label,
+    /*
+     * A range, not a stack.
+     *
+     * The first version lifted each column with a transparent bar beneath it,
+     * which cannot express a column below the axis: the visible part came out
+     * as a negative height and was clamped to nothing, so anyone whose net
+     * worth was under water — a student loan against a small balance, which is
+     * where a lot of records start — got an empty chart.
+     */
+    range:
+      s.kind === "total"
+        ? ([Math.min(floor, s.top), Math.max(floor, s.top)] as [number, number])
+        : ([Math.min(s.base, s.top), Math.max(s.base, s.top)] as [number, number]),
+    kind: s.kind,
+    delta: s.delta,
+    top: s.top,
+    /** What the label above the column says: a total states itself, a step its change. */
+    shown: s.kind === "total" ? s.top : s.delta,
+  }));
+
+  /*
+   * The two totals are told apart from each other, not just from the steps
+   * between them. They are the same kind of quantity a year apart, and giving
+   * them one colour makes the chart read as three categories when it is really
+   * two endpoints and a path between them.
+   */
+  const colourFor = (kind: string, i: number) =>
+    kind === "total"
+      ? i === 0
+        ? accent("market")
+        : accent("brand")
+      : kind === "up"
+        ? accent("positive")
+        : accent("negative");
+
+  /*
+   * A percentage height has to be passed down, not just set.
+   *
+   * The note under the chart means there is a wrapper between the card and the
+   * plot, and a wrapper of its own height is nothing for a percentage to
+   * resolve against — the plot collapsed to nought and the card drew a caption
+   * over empty space. Told to fill, the wrapper becomes the column that fills
+   * and the plot takes what the note leaves.
+   */
+  const fills = typeof height === "string";
+  return (
+    <div className={cn("w-full", fills && "flex h-full flex-col")}>
+      <div
+        className={fills ? "min-h-0 flex-1" : undefined}
+        style={fills ? { width: "100%" } : { width: "100%", height }}
+      >
+      <ResponsiveContainer>
+        <ComposedChart
+          data={rows}
+          margin={WATERFALL_MARGIN}
+          /*
+           * All but touching.
+           *
+           * A waterfall is one shape: each step begins at the height the last
+           * one reached, and a real gap hides that hand-off — the eye has to
+           * carry the level across empty space and take it on trust. A hairline
+           * keeps the path readable while stopping the columns from fusing into
+           * one block, which is what butting them fully together did.
+           */
+          barCategoryGap={3}
+        >
+          {/*
+            * No y-axis and no grid. Every column already carries its own figure
+            * above it, so an axis repeats in a coarser form what the labels say
+            * exactly — and the space it takes is the space the columns need to
+            * be worth reading.
+            */}
+          <XAxis
+            dataKey="label"
+            tick={{ fill: "var(--ink-dim)", fontSize: 11 }}
+            axisLine={{ stroke: "var(--line)" }}
+            tickLine={false}
+            interval={0}
+          />
+          <YAxis hide domain={[floor, "dataMax"]} allowDataOverflow />
+          <Tooltip
+            cursor={{ fill: "var(--line)", opacity: 0.2 }}
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const r = payload[0]?.payload as (typeof rows)[number] | undefined;
+              if (!r) return null;
+              return (
+                <div className="rounded-xl border border-line bg-surface px-3 py-2 shadow-xl">
+                  <p className="mb-1 text-[0.6875rem] font-medium text-ink-faint">{r.label}</p>
+                  <p className="text-xs font-medium tabular-nums text-ink">{format(r.shown)}</p>
+                  {r.kind !== "total" && (
+                    <p className="mt-0.5 text-[0.6875rem] tabular-nums text-ink-faint">
+                      Running {format(r.top)}
+                    </p>
+                  )}
+                </div>
+              );
+            }}
+          />
+          <Bar
+            dataKey="range"
+            radius={[2, 2, 0, 0]}
+            /*
+             * The same width every other bar on a page gets. Left to fill its
+             * slot, a five-step waterfall in a narrow card drew columns twice
+             * the width of the bars beside it, which read as a different kind
+             * of chart rather than a smaller one.
+             */
+            maxBarSize={32}
+            /*
+             * A step small beside the totals still has to be visible. Without a
+             * floor a rounding-error year is drawn as nothing at all, which
+             * reads as "this did not happen" rather than "this was small".
+             */
+            minPointSize={3}
+            isAnimationActive={false}
+            /*
+             * A line from where one step ends to where the next begins.
+             *
+             * Narrowing the columns took away what carried the hand-off: they
+             * were all but touching, so the eye followed the level across. With
+             * air between them the staircase reads as five separate columns,
+             * and the connector puts the path back — it is the level itself,
+             * drawn, which is what a waterfall is claiming.
+             *
+             * An up step hands over at its top edge and a down step at its
+             * bottom, since that is where the running balance stands when the
+             * step is done.
+             */
+            shape={(props: unknown) => {
+              const { x, y, width, height, index, fill, parentViewBox } = props as {
+                x: number; y: number; width: number; height: number;
+                index: number; fill: string;
+                parentViewBox?: { width: number };
+              };
+              const r = rows[index];
+              const handOff = r?.kind === "down" ? y + height : y;
+              /*
+               * Where the next column starts. Every step gets the same slice of
+               * the plot and sits in the middle of it, so one pitch to the right
+               * of this column's left edge is the next column's left edge.
+               */
+              const plot = parentViewBox
+                ? parentViewBox.width - WATERFALL_MARGIN.left - WATERFALL_MARGIN.right
+                : null;
+              const next = plot !== null ? x + plot / rows.length : null;
+              return (
+                <Layer>
+                  <Rectangle
+                    x={x}
+                    y={y}
+                    width={width}
+                    height={height}
+                    radius={[2, 2, 0, 0]}
+                    fill={fill}
+                  />
+                  {next !== null && index < rows.length - 1 && (
+                    <line
+                      x1={x + width}
+                      y1={handOff}
+                      x2={next}
+                      y2={handOff}
+                      stroke="var(--ink-faint)"
+                      strokeWidth={1}
+                      strokeDasharray="2 2"
+                    />
+                  )}
+                </Layer>
+              );
+            }}
+            label={{
+              position: "top",
+              offset: 8,
+              content: (props: unknown) => {
+                const { x, y, width, index } = props as {
+                  x: number;
+                  y: number;
+                  width: number;
+                  index: number;
+                };
+                const r = rows[index];
+                if (!r) return null;
+                const negative = r.shown < 0;
+                return (
+                  <text
+                    x={x + width / 2}
+                    y={y - 8}
+                    textAnchor="middle"
+                    fontSize={11}
+                    fontWeight={500}
+                    fill={negative ? accent("negative") : "var(--ink)"}
+                  >
+                    {format(r.shown)}
+                  </text>
+                );
+              },
+            }}
+          >
+            {rows.map((r, i) => (
+              <Cell key={i} fill={colourFor(r.kind, i)} />
+            ))}
+          </Bar>
+        </ComposedChart>
+      </ResponsiveContainer>
+      </div>
+      {truncated && (
+        /*
+         * Said plainly rather than drawn as a break in the axis. A zigzag is a
+         * convention people either know or misread, and the sentence costs one
+         * line.
+         */
+        <p className="px-1 text-[0.625rem] text-ink-faint">
+          The scale starts at {format(floor)}, not zero, so the year&rsquo;s
+          movements are readable against a much larger balance.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Sankey ---------------- */
+
+/**
+ * A year's whole cash flow: where every dollar came from, which account it
+ * landed in, and where it went from there.
+ *
+ * The one chart on the page that shows every part at full detail at once.
+ * Everything else answers a question about the year; this is the year.
+ *
+ * Node colour carries the role — arriving, held, leaving, kept — because a
+ * Sankey read without it is a tangle of equally-weighted ribbons, and where in
+ * the run a band sits is the first thing anyone needs to know.
+ */
+const FLOW_TONE: Record<string, AccentName> = {
+  source: "positive",
+  account: "brand",
+  necessity: "negative",
+  discretionary: "cost",
+  investing: "market",
+  pension: "pension",
+  kept: "bonds",
+  /* Debt repayment buys nothing, so it takes neither spending colour. */
+  debt: "passive",
+  /* Still sitting in the account it arrived in, so: the account's own colour. */
+  idle: "brand",
+};
+
+export function YearSankey({
+  nodes,
+  links,
+  format,
+  height,
+}: {
+  nodes: { name: string; role?: string }[];
+  links: { source: number; target: number; value: number }[];
+  format: (n: number) => string;
+  height?: number;
+}) {
+  if (nodes.length === 0 || links.length === 0) return null;
+
+  /*
+   * Depth decides both the colour and which side the label sits on, because
+   * the chart now has a middle rather than a trunk. Colouring by "is anything
+   * pointing at this" worked while there was exactly one column between the
+   * two ends; with accounts in the middle, an account that received income and
+   * an account that paid a bill are the same kind of thing and have to read
+   * that way.
+   */
+  const columns = (
+    ns: { name: string }[],
+    ls: { source: number; target: number }[],
+  ) => {
+    const d = ns.map(() => 0);
+    for (let pass = 0; pass < ns.length; pass++) {
+      let moved = false;
+      for (const l of ls) {
+        if (d[l.target] < d[l.source] + 1) {
+          d[l.target] = d[l.source] + 1;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+    /*
+     * The column the layout will actually use. Recharts pushes a node with
+     * nothing leaving it to the far edge however short its path from a source
+     * was, so counting hops alone puts what was kept in the middle — which is
+     * neither where it is drawn nor where the ribbon reaching it has to pass.
+     */
+    const end = Math.max(...d);
+    const leaves = new Set(ls.map((l) => l.source));
+    ns.forEach((_, i) => {
+      if (!leaves.has(i)) d[i] = end;
+    });
+    return d;
+  };
+
+  /*
+   * A ribbon that skips a column gets a slot reserved in it.
+   *
+   * What was kept goes from the middle to the last column in one hop, so it
+   * has to cross whatever stands in between. Ordering cannot help: a lone bar
+   * in that column is centred on its neighbour by the layout's relaxation,
+   * which leaves no gap to pass through, and where two bars did happen to
+   * leave one it was luck rather than design — a year with no invested
+   * accounts has a single Spending bar and the ribbon went straight through
+   * it, reading as money that spending gave off.
+   *
+   * So the ribbon is routed through a node of its own in that column instead
+   * of over it. The node is drawn as nothing — no bar, no label — and carries
+   * the name and colour of where the ribbon ends, so the two halves read as
+   * one band and the tooltip still names the real destination. What it does
+   * is take up room: the column now has to part by exactly the width of the
+   * ribbon, and the bars either side are pushed clear of it.
+   */
+  const before = columns(nodes, links);
+  /*
+   * A slot is only worth reserving for a ribbon anyone can see.
+   *
+   * A nine-cent flow into an account skips a column exactly as a salary does,
+   * and it was given the same treatment: a node of its own, and a column
+   * parted by its width to let it through. The width is nothing, so the reader
+   * gets no ribbon and the layout pays for one anyway. Below a five-hundredth
+   * of the chart the band is a hairline, and a hairline crossing a bar is not
+   * a thing anybody can see happen — so it passes behind, as it did before any
+   * of this, and the columns stay closed up.
+   */
+  const drawn = links.reduce((a, l) => a + l.value, 0);
+  const worthASlot = drawn * 0.002;
+  const detour = new Map<number, number>();
+  links.forEach((l, i) => {
+    if (before[l.target] - before[l.source] <= 1) return;
+    if (l.value < worthASlot) return;
+    const mid = before[l.source] + 1;
+    let at = nodes.length;
+    for (let k = 0; k < nodes.length; k++) {
+      if (before[k] !== mid) continue;
+      const outs = links.filter((x) => x.source === k).map((x) => x.target);
+      // Ahead of the first bar in that column whose own ends come after this one.
+      if (outs.length === 0 || Math.min(...outs) > l.target) {
+        at = k;
+        break;
+      }
+      at = k + 1;
+    }
+    detour.set(i, at);
+  });
+
+  const moved = new Map<number, number>();
+  const spacerOf = new Map<number, number>();
+  const drawNodes: { name: string; role?: string }[] = [];
+  const place = (pos: number) => {
+    /*
+     * Where several ribbons reserve a slot in the same column, the slots go in
+     * the order of the ribbons that need them. Taking them in the order the
+     * links happen to be listed put a pension contribution's slot above a
+     * drawn balance's while its source sat below, so the two crossed on the
+     * way in for no reason other than the order they were written down.
+     */
+    const here = [...detour]
+      .filter(([, at]) => at === pos)
+      .sort(([a], [b]) => links[a].source - links[b].source || links[a].target - links[b].target);
+    for (const [li] of here) {
+      spacerOf.set(li, drawNodes.length);
+      const end = nodes[links[li].target];
+      drawNodes.push({ name: end.name, role: end.role });
+    }
+  };
+  nodes.forEach((node, k) => {
+    place(k);
+    moved.set(k, drawNodes.length);
+    drawNodes.push(node);
+  });
+  place(nodes.length);
+  const ghosts = new Set(spacerOf.values());
+  const drawLinks = links.flatMap((l, i) => {
+    const sp = spacerOf.get(i);
+    const from = moved.get(l.source) ?? l.source;
+    const to = moved.get(l.target) ?? l.target;
+    if (sp === undefined) return [{ source: from, target: to, value: l.value }];
+    return [
+      { source: from, target: sp, value: l.value },
+      { source: sp, target: to, value: l.value },
+    ];
+  });
+
+  /*
+   * Order each column so the ribbons between them cross as little as possible.
+   * The arithmetic is in `seatColumns`, which is where the reasoning lives and
+   * where it is tested; this only applies the answer.
+   */
+  const seated = seatColumns({ nodes: drawNodes, links: drawLinks });
+  if (seated.length === drawNodes.length) {
+    const moved = new Map(seated.map((old, next) => [old, next]));
+    const ordered = seated.map((i) => drawNodes[i]);
+    const relinked = drawLinks.map((l) => ({
+      source: moved.get(l.source) ?? l.source,
+      target: moved.get(l.target) ?? l.target,
+      value: l.value,
+    }));
+    const shifted = new Set([...ghosts].map((i) => moved.get(i) ?? i));
+    drawNodes.length = 0;
+    drawNodes.push(...ordered);
+    drawLinks.length = 0;
+    drawLinks.push(...relinked);
+    ghosts.clear();
+    for (const i of shifted) ghosts.add(i);
+  }
+
+  const depth = columns(drawNodes, drawLinks);
+  const last = Math.max(...depth);
+
+  /*
+   * Colour says what a node is, and the data layer is what knows. Reading it
+   * off the column put every ribbon on the right in the same red, so a deposit
+   * into a pension and a month of groceries were the same thing to look at;
+   * reading it off the name meant the chart had to keep a list of them.
+   */
+  const colourOf = (index: number) => {
+    const role = drawNodes[index]?.role;
+    if (role && FLOW_TONE[role]) return accent(FLOW_TONE[role]);
+    if (depth[index] === 0) return accent("positive");
+    return depth[index] < last ? accent("brand") : accent("negative");
+  };
+
+  /*
+   * Tall enough for the column that has the most in it.
+   *
+   * A fixed height had every node in the busiest column share whatever was
+   * left after the padding between them, so the labels of the small ones
+   * closed up and the last one ran off the bottom of the plot. The chart grows
+   * with the year instead: someone with four categories gets a short chart and
+   * someone with twenty gets a legible one.
+   */
+  const perColumn = depth.reduce<Record<number, number>>((acc, d, i) => {
+    if (!ghosts.has(i)) acc[d] = (acc[d] ?? 0) + 1;
+    return acc;
+  }, {});
+  const busiest = Math.max(...Object.values(perColumn));
+  const drawHeight = height ?? Math.min(900, Math.max(360, busiest * 42 + 64));
+
+  return (
+    <div style={{ width: "100%", height: drawHeight }}>
+      <ResponsiveContainer>
+        <Sankey
+          data={{ nodes: drawNodes, links: drawLinks }}
+          nodePadding={26}
+          nodeWidth={12}
+          /*
+           * Keep each column in the order the data gives it. The relaxation
+           * still decides how far apart the nodes sit; this only stops it
+           * reordering them, which is what pulled what was kept up among the
+           * spending categories — it has one source and no destination, so
+           * nothing below held it down.
+           */
+          sort={false}
+          /*
+           * Room under the plot as well as over it. The label of the lowest
+           * node sits below its middle, and its amount below that again, so a
+           * bottom margin of a few pixels cut the figure off the last income
+           * stream on the chart.
+           */
+          margin={{ top: 30, right: 136, bottom: 26, left: 112 }}
+          /*
+           * Ribbons carry the colour of where they end.
+           *
+           * A band that arrives at Kept is that colour for its whole length,
+           * so the eye follows it across the chart, and it never takes the
+           * colour of something it merely passed. The band that skips a column
+           * is routed through a reserved slot rather than over the bar there —
+           * see the detour above — so the two carry the same colour and read
+           * as one.
+           */
+          link={(props: unknown) => {
+            const { sourceX, sourceY, sourceControlX, targetX, targetY, targetControlX, linkWidth, payload } =
+              props as {
+                sourceX: number; sourceY: number; sourceControlX: number;
+                targetX: number; targetY: number; targetControlX: number;
+                linkWidth: number;
+                payload?: { target?: { name?: string } };
+              };
+            const at = drawNodes.findIndex((n) => n.name === payload?.target?.name);
+            return (
+              <Layer>
+                <path
+                  d={`M${sourceX},${sourceY}C${sourceControlX},${sourceY} ${targetControlX},${targetY} ${targetX},${targetY}`}
+                  fill="none"
+                  stroke={at >= 0 ? colourOf(at) : "var(--ink-faint)"}
+                  strokeWidth={linkWidth}
+                  strokeOpacity={0.2}
+                />
+              </Layer>
+            );
+          }}
+          node={(props: unknown) => {
+            const { x, y, width, height: h, index, payload } = props as {
+              x: number; y: number; width: number; height: number; index: number;
+              payload: { name: string; value: number; depth?: number };
+            };
+            /*
+             * The reserved slot is drawn as the ribbon passing through it, not
+             * as a bar. Its box is exactly as wide as every other node and as
+             * tall as the band that runs through it, so filling it with the
+             * ribbon's own colour and opacity closes the gap the node would
+             * otherwise leave — the two halves either side read as one band.
+             */
+            if (ghosts.has(index))
+              return (
+                <Layer key={index}>
+                  <Rectangle
+                    x={x}
+                    y={y}
+                    width={width}
+                    height={h}
+                    fill={colourOf(index)}
+                    fillOpacity={0.2}
+                  />
+                </Layer>
+              );
+            const colour = colourOf(index);
+            /*
+             * Labels outside the column rather than on it. A node can be a few
+             * pixels tall — a category that took very little — and text laid
+             * over it is unreadable at exactly the sizes where the reader most
+             * needs to know what it is.
+             */
+            /*
+             * The layout's own column, not the one counted from the links.
+             * A node with nothing leaving it is pushed to the last column
+             * however short its path from a source was, so counting hops put
+             * what was kept in the middle and laid its label across its bar.
+             */
+            const d = payload.depth ?? depth[index] ?? 0;
+            const middle = d > 0 && d < last;
+            /*
+             * The middle column is labelled above its bar rather than beside
+             * it. Either side of an account is a ribbon, so a label placed
+             * there lands on top of the very flow it names.
+             */
+            const tx = middle ? x + width / 2 : d === 0 ? x - 8 : x + width + 8;
+            const anchor = middle ? "middle" : d === 0 ? "end" : "start";
+            const ty = middle ? y - 16 : y + h / 2;
+            return (
+              <Layer key={index}>
+                <Rectangle x={x} y={y} width={width} height={h} fill={colour} radius={2} />
+                <text
+                  x={tx}
+                  y={ty}
+                  textAnchor={anchor}
+                  dominantBaseline="middle"
+                  fontSize={11}
+                  fill="var(--ink-dim)"
+                >
+                  {payload.name}
+                </text>
+                <text
+                  x={tx}
+                  y={ty + 12}
+                  textAnchor={anchor}
+                  dominantBaseline="middle"
+                  fontSize={10}
+                  fill="var(--ink-faint)"
+                >
+                  {format(payload.value)}
+                </text>
+              </Layer>
+            );
+          }}
+        >
+          <Tooltip
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const p = payload[0]?.payload as { name?: string; value?: number } | undefined;
+              if (!p) return null;
+              return (
+                <div className="rounded-xl border border-line bg-surface px-3 py-2 shadow-xl">
+                  {p.name ? (
+                    <p className="mb-0.5 text-[0.6875rem] font-medium text-ink-faint">{p.name}</p>
+                  ) : null}
+                  <p className="text-xs font-medium tabular-nums text-ink">
+                    {format(Number(p.value ?? 0))}
+                  </p>
+                </div>
+              );
+            }}
+          />
+        </Sankey>
+      </ResponsiveContainer>
     </div>
   );
 }

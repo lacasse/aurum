@@ -417,6 +417,12 @@ export const INCOME_CATEGORIES = [
   "Additional Income",
   "Freelance",
   "RSP / Pension",
+  /*
+   * The plan paying out, as against "RSP / Pension" which is paying in. Two
+   * opposite flows, and one category for both would count a payment as a
+   * deposit — see PENSION_INCOME_CATEGORY.
+   */
+  "Pension Income",
   "Dividends",
   "Interest",
   "Refund",
