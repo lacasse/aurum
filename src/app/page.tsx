@@ -18,7 +18,13 @@ import {
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
 import { Button, Card, CardHeader, Progress, Segmented } from "@/components/ui";
-import { DonutChart, SeriesChart, categoryColors } from "@/components/charts";
+import {
+  BAND_ORDER,
+  CLASS_COLORS,
+  DonutChart,
+  SeriesChart,
+  categoryColors,
+} from "@/components/charts";
 import { MonthlyChecklistButton, MonthlyChecklistModal } from "@/components/monthly-checklist";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
@@ -37,7 +43,7 @@ import {
   netWorthByClass,
   netWorthOver,
   NET_WORTH_CLASSES,
-  type NetWorthClass,
+  classShares,
   portfolioSeries,
 } from "@/lib/analytics";
 import {
@@ -65,28 +71,6 @@ import { roundMoney } from "@/lib/money";
  * Which pairs touch depends on BAND_ORDER, so changing that order means
  * re-running the check rather than assuming it still holds.
  */
-const CLASS_COLORS: Record<NetWorthClass, string> = {
-  Cash: "#34d399",
-  Bonds: "#60a5fa",
-  Pension: "#f472b6",
-  Stocks: "#f59e0b",
-  Crypto: "#8b5cf6",
-};
-
-/**
- * The order the bands are stacked and listed in, bottom upwards.
- *
- * Kept here rather than in `NET_WORTH_CLASSES`, which is the domain's list of
- * what a band can be; this is a decision about a picture, and the two should
- * not have to move together.
- *
- * Whatever sits last is the top of the stack, and the top of a stack that
- * always totals a hundred percent is the ceiling of the plot — so that band's
- * boundary line runs along the frame and cannot be seen. It costs nothing for
- * crypto, which is half the chart and unmistakable from its fill alone. It
- * cost the pension its line entirely while it sat up there.
- */
-const BAND_ORDER: NetWorthClass[] = ["Cash", "Bonds", "Pension", "Stocks", "Crypto"];
 
 /** How much of the net worth history to draw: months, or the whole record. */
 type Range = "12" | "60" | "all";
@@ -297,18 +281,7 @@ export default function DashboardPage() {
     () => BAND_ORDER.filter((c) => bands.some((p) => p[c] > 0)),
     [bands],
   );
-  const mix = useMemo(
-    () =>
-      bands.map((p) => {
-        const owned = NET_WORTH_CLASSES.reduce((sum, c) => sum + Math.max(0, p[c]), 0);
-        const row: Record<string, string | number> = { key: p.key, label: p.label };
-        for (const c of BAND_ORDER) {
-          row[c] = owned > 0 ? (Math.max(0, p[c]) / owned) * 100 : 0;
-        }
-        return row;
-      }),
-    [bands],
-  );
+  const mix = useMemo(() => classShares(bands), [bands]);
 
   if (!ready) return <PageSkeleton />;
 

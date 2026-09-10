@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowDownRight,
   ArrowUpRight,
-  Flag,
   PiggyBank,
   SlidersHorizontal,
   Wallet,
@@ -12,7 +11,6 @@ import {
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
 import {
-  Badge,
   Button,
   Card,
   CardHeader,
@@ -21,25 +19,49 @@ import {
   Segmented,
   cn,
 } from "@/components/ui";
-import { GroupedBars, RoomGauge } from "@/components/charts";
+import {
+  BAND_ORDER,
+  CLASS_COLORS,
+  GroupedBars,
+  spectrumAt,
+  RoomGauge,
+  SeriesChart,
+  Waterfall,
+  YearSankey,
+} from "@/components/charts";
+import { accent as accentFor } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
 import {
+  accountValueAt,
   allTimeSeries,
+  classShares,
   firstFlowMonth,
   monthsSince,
   netExternalFlows,
+  netWorthByClass,
   netWorthOver,
   portfolioSeries,
 } from "@/lib/analytics";
-import { milestones, yearRows } from "@/lib/year";
+import {
+  categoryByYear,
+  contributionsVsValue,
+  incomeTypeAmounts,
+  incomeTypeShares,
+  yearFlow,
+  yearRows,
+  yearShapes,
+  yearWaterfall,
+} from "@/lib/year";
+import { groupOf, type SpendGroup } from "@/lib/expenses";
+import { isLiability, type Account } from "@/lib/types";
 import {
   REGISTERED_PLANS,
   contributionRoom,
   type ContributionLimits,
   type RegisteredPlan,
 } from "@/lib/contributions";
-import { fmtCAD, fmtCompact, fmtPct, fmtSignedCAD, labelMonth } from "@/lib/format";
+import { fmtCAD, fmtCompact, fmtPct, fmtSignedCAD } from "@/lib/format";
 
 /** A colour per plan, so the same gauge is the same colour every time. */
 const PLAN_TONE = {
@@ -56,6 +78,14 @@ const PLAN_TONE = {
  * the question the spreadsheet's Year sheet was built to answer and the one
  * the dashboard, always looking at the last twelve months, cannot.
  */
+/** The kinds the flow chart's spendable bar is made of. See CASH in year.ts. */
+const CASH_ACCOUNT_KINDS = new Set<Account["kind"]>([
+  "checking",
+  "savings",
+  "cash",
+  "credit",
+]);
+
 export default function YearPage() {
   const ready = useReady();
   const accounts = useFinance((s) => s.accounts);
@@ -65,6 +95,28 @@ export default function YearPage() {
   const [year, setYear] = useState<string | null>(null);
   const [limits, setLimits] = useState<ContributionLimits>({});
   const [roomOpen, setRoomOpen] = useState(false);
+  /*
+   * Which categories count as necessities, as the owner has set them.
+   *
+   * Read rather than assumed: the Expenses page lets the split be reassigned,
+   * and a year page working from the defaults would put the same spending in a
+   * different half from the page it came from. Two answers to one question is
+   * the fault, not the mild inaccuracy.
+   */
+  const [spendGroups, setSpendGroups] = useState<Record<string, SpendGroup>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/expense-settings", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((s: { groups?: Record<string, SpendGroup> }) => {
+        if (!cancelled) setSpendGroups(s.groups ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,7 +160,20 @@ export default function YearPage() {
       : portfolioSeries(holdings, 18);
     const netWorth = netWorthOver(accounts, portfolio, usdCadRate);
     const rows = yearRows(transactions, netWorth, portfolio, netExternalFlows(holdings));
-    return { rows, marks: milestones(netWorth) };
+    /*
+     * The balance sheet, month by month, so each year can be closed on the last
+     * month the record actually reaches rather than on a December that may not
+     * have happened yet.
+     */
+    const classes = start
+      ? netWorthByClass(accounts, holdings, {}, monthsSince(start), snapshots, usdCadRate)
+      : [];
+    return {
+      rows,
+      shapes: yearShapes(rows, classes),
+      /* The last month the record reaches, for closing a year still running. */
+      lastMonth: netWorth[netWorth.length - 1]?.key ?? null,
+    };
   }, [accounts, holdings, transactions, snapshots, usdCadRate]);
 
   if (!ready) return <PageSkeleton />;
@@ -126,44 +191,117 @@ export default function YearPage() {
 
   const selected = data.rows.find((r) => r.year === year) ?? data.rows[0];
   const before = data.rows[data.rows.indexOf(selected) + 1];
-  const pct = (now: number, then: number | undefined) =>
-    then !== undefined && then !== 0 ? ((now - then) / Math.abs(then)) * 100 : undefined;
+  /*
+   * A part-year's percentages are measured against the same window of the year
+   * before, so the label has to say so — "vs 2025" beside a figure that
+   * compares nine months to twelve is a different claim than the one made.
+   */
+  const paceLabel = !before
+    ? "first year on record"
+    : selected.complete
+      ? `vs ${before.year}`
+      : `vs ${before.year} to the same date`;
 
   // Named so the footnote can say what the compounding is measured from: on a
   // record that opens at a peak, growth since then is a different claim.
   const cagrBase = [...data.rows].reverse().find((r) => r.netWorth > 0)?.year ?? null;
 
-  /*
-   * One row per month rather than per step: a month that passed several is a
-   * single event, and the badge says how many.
-   */
-  const grouped = [...data.marks]
-    .reduce<{ month: string; from: number; to: number; count: number; months: number | null }[]>(
-      (acc, m) => {
-        const last = acc[acc.length - 1];
-        if (last && last.month === m.month) {
-          last.to = m.amount;
-          last.count++;
-          return acc;
-        }
-        acc.push({
-          month: m.month,
-          from: m.amount,
-          to: m.amount,
-          count: 1,
-          months: m.monthsFromPrevious,
-        });
-        return acc;
-      },
-      [],
-    )
-    .reverse();
 
   const bars = [...data.rows]
     .reverse()
-    .map((r) => ({ label: r.year, income: r.income, expenses: r.expenses }));
+    .map((r) => ({
+      label: r.year,
+      income: r.income,
+      expenses: r.expenses,
+      // The difference, not the rate: it belongs on the same axis as the two
+      // figures it comes from.
+      saved: r.income - r.expenses,
+    }));
 
   const room = contributionRoom(selected.year, transactions, accounts, limits);
+  const shape = data.shapes.find((sh) => sh.year === selected.year);
+  const byYear = categoryByYear(transactions);
+  const contributions = contributionsVsValue(data.rows);
+  const latestGap =
+    contributions.length > 0
+      ? contributions[contributions.length - 1].value -
+        contributions[contributions.length - 1].contributed
+      : null;
+  const typeShares = incomeTypeShares(transactions);
+  /*
+   * The figures beside the chart, for the year being read — a band too thin to
+   * see is answered by the number under it rather than by drawing it bigger.
+   */
+  const typeRow = typeShares.find((r) => r.label === selected.year);
+  const typeLast = typeRow
+    ? { ...incomeTypeAmounts(transactions, selected.year), shares: typeRow }
+    : null;
+  /*
+   * What the spendable accounts held at either end of the year.
+   *
+   * The same accounts the flow chart's middle bar is made of, netted the way a
+   * balance sheet nets them: a card is money owed against the cash beside it,
+   * not money you have. Read through `accountValueAt` so a gap in an account's
+   * history is filled the way it is filled everywhere else.
+   */
+  const cashAt = (month: string) =>
+    accounts
+      .filter((a) => CASH_ACCOUNT_KINDS.has(a.kind))
+      .reduce(
+        (sum, a) => sum + (isLiability(a.kind) ? -1 : 1) * accountValueAt(a, month),
+        0,
+      );
+  /*
+   * A year still running closes on the last month on record, not on a December
+   * that has not happened.
+   */
+  const closingMonth =
+    data.lastMonth && data.lastMonth < `${selected.year}-12`
+      ? data.lastMonth
+      : `${selected.year}-12`;
+  const flow = yearFlow(transactions, selected.year, {
+    accounts,
+    holdings,
+    openingCash: cashAt(`${Number(selected.year) - 1}-12`),
+    closingCash: cashAt(closingMonth),
+    spendGroup: (c) => groupOf(c, spendGroups),
+  });
+  /*
+   * The passive share, which is what the chart is titled after. "Did not come
+   * from working" was the figure before, and it counted a gift as though an
+   * asset had produced it.
+   */
+  const passiveShare = typeRow ? Number(typeRow.Passive) : null;
+  const allBalanceBars = data.shapes.map((sh) => ({
+    label: sh.year,
+    Cash: sh.cash,
+    Bonds: sh.bonds,
+    Stocks: sh.stocks,
+    Crypto: sh.crypto,
+    Pension: sh.pension,
+  }));
+  /*
+   * The record starts where there was something to own.
+   *
+   * Transactions can begin years before the first holding or balance, and a
+   * year with nothing in it normalises to nothing — a flat empty band, then a
+   * cliff into the first real mix. That opening is not a composition that
+   * changed; it is a composition that did not exist yet, and drawing it as
+   * zero percent of everything invites the reader to see a collapse where the
+   * record simply had not started. Trailing years are kept: a year that ends
+   * owning nothing is a fact about that year.
+   */
+  const owned = (b: (typeof allBalanceBars)[number]) =>
+    b.Cash + b.Bonds + b.Stocks + b.Crypto + b.Pension > 0;
+  const opening = allBalanceBars.findIndex(owned);
+  const balanceBars = opening < 0 ? [] : allBalanceBars.slice(opening);
+  /*
+   * Only the bands the record actually holds somewhere in it. A colour in the
+   * chart with no key beside it is a colour you cannot name, and a class never
+   * owned is not a nought worth drawing.
+   */
+  const mixBands = BAND_ORDER.filter((c) => balanceBars.some((p) => p[c] > 0));
+  const balanceMix = classShares(balanceBars);
 
   return (
     <Shell
@@ -180,8 +318,10 @@ export default function YearPage() {
       <div className="space-y-4">
         {!selected.complete && (
           <p className="px-1 text-[0.6875rem] text-ink-faint">
-            {selected.year} is still running — its totals are the year so far, and
-            the comparison is against a full year.
+            {selected.year} is still running — the figures are the year so far,
+            {" "}
+            {Math.round(selected.elapsed * 100)}% of the way through, and the
+            comparisons cover the same stretch of {before?.year ?? "the year before"}.
           </p>
         )}
 
@@ -189,15 +329,15 @@ export default function YearPage() {
           <StatCard
             label={`Income · ${selected.year}`}
             value={fmtCAD(selected.income)}
-            delta={pct(selected.income, before?.income)}
-            deltaLabel={before ? `vs ${before.year}` : "first year on record"}
+            delta={selected.incomeGrowth ?? undefined}
+            deltaLabel={paceLabel}
             icon={<ArrowDownRight size={16} className="text-positive" />}
           />
           <StatCard
             label="Expenses"
             value={fmtCAD(selected.expenses)}
             delta={selected.expenseGrowth ?? undefined}
-            deltaLabel={before ? `vs ${before.year}` : "first year on record"}
+            deltaLabel={paceLabel}
             tone={
               selected.expenseGrowth === null
                 ? "neutral"
@@ -230,77 +370,418 @@ export default function YearPage() {
         </div>
 
         {/*
-          * Room is the one limit here the app cannot work out for itself. It
-          * depends on income, on room carried forward and on withdrawals made
-          * years ago, all of it stated on a notice of assessment — so the
-          * figure is entered, and what has been paid in against it is counted.
+          * Three questions, in the order they are asked: what the year did
+          * with its money, what that left behind, and how it compares with
+          * the years before it. The page used to alternate between a single
+          * year and the whole record every other card, so reading either one
+          * meant skipping the cards between.
           */}
-        <Card>
-          <CardHeader
-            title="Contribution room"
-            subtitle={`What you have paid into each registered plan in ${selected.year}`}
-            action={
-              <Button variant="ghost" size="sm" onClick={() => setRoomOpen(true)}>
-                <SlidersHorizontal size={14} /> Set room
-              </Button>
-            }
-          />
-          <div className="grid grid-cols-1 gap-6 px-4 pb-5 pt-1 sm:grid-cols-3">
-            {room.map((r) => (
-              <RoomGauge
-                key={r.plan}
-                label={r.plan}
-                used={r.used}
-                tone={PLAN_TONE[r.plan]}
-                over={r.over}
-                caption={
-                  r.limit === null
-                    ? `${fmtCAD(r.contributed)} paid in`
-                    : `${fmtCAD(r.contributed)} of ${fmtCAD(r.limit)}`
-                }
-                detail={
-                  r.limit === null
-                    ? r.held
-                      ? "Room not set for this year"
-                      : "No account of this type"
-                    : r.over
-                      ? `${fmtCAD(Math.abs(r.remaining!))} over the limit`
-                      : `${fmtCAD(r.remaining!)} left`
+        <SectionHeading title="Cash flow" hint="What came in, and where it went" />
+        {/*
+          * The year itself, rather than a question about it. Income on the
+          * left, the accounts it landed in down the middle, and everything it
+          * left for on the right — with each account forced to reconcile, so
+          * the chart cannot show more leaving one than reached it.
+          */}
+        {flow.nodes.length > 0 && (
+          <Card>
+            <CardHeader
+              title="Sources and uses of funds"
+              subtitle={`Every dollar that entered or left an account in ${selected.year}`}
+            />
+            <div className="px-3 pb-4">
+              <YearSankey
+                nodes={flow.nodes}
+                links={flow.links}
+                format={(n) => fmtCompact(n)}
+              />
+            </div>
+          </Card>
+        )}
+
+        {/*
+          * The same category across the years, rather than one year's total.
+          *
+          * A total says the year cost more. A single comparison says which
+          * category did it, but one bad year and one good year are the same
+          * single step to it — the direction only appears once there are three
+          * or four bars to read along.
+          */}
+        {byYear.years.length > 1 && (
+          <Card>
+            <CardHeader
+              title="Expenses by category"
+              subtitle={`Year over year, ${byYear.years[0]} to ${byYear.years[byYear.years.length - 1]}`}
+            />
+            <div className="px-3 pb-4">
+              <GroupedBars
+                data={byYear.rows}
+                xKey="category"
+                bars={byYear.years.map((y, i) => ({
+                  key: y,
+                  name: y,
+                  /*
+                   * A ramp rather than a categorical set: years are ordered,
+                   * and colours that run in the same direction let the reader
+                   * see which way a category is going without reading the
+                   * legend for every group.
+                   */
+                  color: spectrumAt(i, byYear.years.length),
+                }))}
+                yFmt={(n: number) => fmtCompact(n)}
+                height={300}
+              />
+            </div>
+          </Card>
+        )}
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card className="flex h-full flex-col">
+            <CardHeader
+              title="Income, expenses and net savings"
+              subtitle="Every year on record, side by side"
+            />
+            <div className="min-h-[260px] flex-1 px-3 pb-4">
+              {/*
+                * Saved is the difference, in dollars, so it shares the axis. A
+                * rate would not: a percentage against a scale of dollars is a
+                * flat line on the floor, and it would need an axis of its own to
+                * say anything.
+                */}
+              <GroupedBars
+                data={bars as unknown as Record<string, unknown>[]}
+                xKey="label"
+                bars={[
+                  { key: "income", name: "Income", color: accentFor("positive") },
+                  { key: "expenses", name: "Expenses", color: accentFor("negative") },
+                  { key: "saved", name: "Saved", color: accentFor("brand") },
+                ]}
+                height="100%"
+                yFmt={fmtCompact}
+              />
+            </div>
+          </Card>
+
+          {/*
+            * Two categories, not five. The full breakdown answers what the money
+            * was; this answers the only question about it that changes a life —
+            * active income stops when you do, passive income does not, and the
+            * share of one against the other is the distance between having a job
+            * and not needing one.
+            */}
+          {typeShares.length > 1 && (
+            <Card className="flex h-full flex-col">
+              <CardHeader
+                title="Active and passive income mix"
+                subtitle={
+                  passiveShare === null
+                    ? "What paid for the year, by where it came from"
+                    : `${passiveShare.toFixed(1)}% of ${selected.year} came from what you own`
                 }
               />
-            ))}
-          </div>
-          {room.some((r) => r.over) && (
-            <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] text-negative">
-              An over-contribution is charged 1% a month on the excess until it is
-              withdrawn. Check the figure against your notice of assessment before
-              acting on it.
-            </p>
+              {/*
+                * The same treatment as net worth composition on the dashboard,
+                * and for the same reason. Drawing a small band larger than it is
+                * was tried there and rejected: it buys the thin band a visible
+                * line at the cost of every other band being wrong, which is a bad
+                * trade in a chart whose whole subject is proportion. The figures
+                * underneath are what answer for a band too thin to read.
+                */}
+              <div className="min-h-[280px] flex-1 px-3 pb-2">
+                <SeriesChart
+                  data={typeShares as unknown as Record<string, unknown>[]}
+                  xKey="label"
+                  stacked
+                  fadeAtZero
+                  series={[
+                    /*
+                     * Active along the bottom and passive at the top, so the
+                     * band that matters is measured against the ceiling rather
+                     * than drawn as a sliver on the floor — a distance to the
+                     * top is the easier of the two to watch move. Whatever was
+                     * neither sits between them, out of the way of both.
+                     */
+                    { key: "Active", name: "Active", color: accentFor("brand") },
+                    { key: "Other", name: "Neither", color: accentFor("passive") },
+                    { key: "Passive", name: "Passive", color: accentFor("cost") },
+                  ]}
+                  height="100%"
+                  yDomain={[0, 100]}
+                  yFmt={(n: number) => `${Math.round(n)}%`}
+                />
+              </div>
+              {typeLast && (
+                <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
+                  {([
+                    ["Passive", "Passive", "cost"],
+                    ["Other", "Neither", "passive"],
+                    ["Active", "Active", "brand"],
+                  ] as const).map(([k, label, tone]) => (
+                    <div key={k} className="flex items-baseline gap-2">
+                      <span
+                        className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
+                        style={{ background: accentFor(tone) }}
+                      />
+                      <span className="text-[0.6875rem] text-ink-faint">{label}</span>
+                      <span className="text-sm font-semibold tabular-nums">
+                        {fmtCompact(typeLast[k])}
+                      </span>
+                      <span className="text-[0.6875rem] tabular-nums text-ink-faint">
+                        {Math.round(Number(typeLast.shares[k]))}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
+                Passive is what you own paying you: interest, cashback and
+                dividends. A pension contribution counts as active, being
+                deferred pay off the same hours as the salary it comes from. A
+                gift is neither, and a refund or a drawdown is not income at
+                all, so neither appears here.
+              </p>
+            </Card>
           )}
-        </Card>
+        </div>
 
-        <Card>
-          <CardHeader
-            title="Income against spending"
-            subtitle="Every year on record, side by side"
-          />
-          <div className="px-3 pb-4">
-            <GroupedBars
-              data={bars as unknown as Record<string, unknown>[]}
-              xKey="label"
-              bars={[
-                { key: "income", name: "Income", color: "#34d399" },
-                { key: "expenses", name: "Expenses", color: "#fb7185" },
-              ]}
-              height={260}
-              yFmt={fmtCompact}
+        <SectionHeading title="Net worth" hint="What the year built, and what it is made of" />
+        {/*
+          * A third of the row for the roll-forward, two thirds for the mix.
+          *
+          * Five columns given half a page were slabs — a waterfall is five
+          * numbers and the shape they make, and at that width the shape was
+          * lost behind the bars drawing it. The composition beside it is a
+          * line over years and reads better the wider it gets, so the space
+          * one chart does not want is the space the other one does.
+          *
+          * Only where a third is wide enough to label, though. Below that the
+          * five names run into each other and the figures over the bars
+          * collide, so the row falls back to halves before it falls back to
+          * one on top of the other.
+          */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          {shape && (
+            <Card className="flex h-full flex-col">
+              <CardHeader
+                title="Net worth roll-forward"
+                subtitle={`From opening to closing net worth in ${selected.year}`}
+              />
+              <div className="min-h-[300px] flex-1 px-3 pb-4">
+                <Waterfall
+                  steps={yearWaterfall(shape)}
+                  format={(n) => fmtCompact(n)}
+                  height="100%"
+                />
+              </div>
+            </Card>
+          )}
+
+          {/*
+            * The balance sheet across years: what the money is, not what it did.
+            *
+            * The same chart as net worth composition on the dashboard, over
+            * years rather than months, because it is the same question asked
+            * of a longer window — and one chart read twice is cheaper than two
+            * charts learned separately. Same bands, same colours, same order,
+            * from the same three shared definitions.
+            */}
+          {balanceBars.length > 1 && (
+            <Card className="flex h-full flex-col xl:col-span-2">
+              <CardHeader
+                title="Asset allocation at year end"
+                subtitle="Share of everything you own, at the close of each year"
+              />
+              {/*
+                * Shares, not dollars. In dollars this was the net worth line
+                * again with lines inside it: the total grew several times over,
+                * so every band swept upward together and the mix — the only
+                * thing this chart is for — was a few pixels along the bottom.
+                *
+                * Drawn as an area between year ends, which is a real cost and
+                * a deliberate one. There is no June in a year already closed,
+                * so the slope between two points is not a record of anything;
+                * it says only that the mix went from one to the other. Bars
+                * were honest about that and made the drift between them
+                * something to work out rather than see, and the drift is the
+                * subject. The axis labels are year ends, so what is measured
+                * stays legible.
+                *
+                * A band worth very little is still only a few pixels tall, and
+                * the figures underneath are what answer for it.
+                */}
+              <div className="min-h-[280px] flex-1 px-3 pb-2">
+                <SeriesChart
+                  data={balanceMix as unknown as Record<string, unknown>[]}
+                  xKey="label"
+                  stacked
+                  fadeAtZero
+                  series={mixBands.map((name) => ({
+                    key: name,
+                    name,
+                    color: CLASS_COLORS[name],
+                  }))}
+                  height="100%"
+                  yDomain={[0, 100]}
+                  yFmt={(n: number) => `${Math.round(n)}%`}
+                />
+              </div>
+              {shape && (
+                <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
+                  {/*
+                    * The bands the chart drew, not the ones held now — a colour
+                    * in the chart with no key beside it is a colour you cannot
+                    * name. One held in an earlier year and since sold reads as
+                    * zero, which is the answer rather than an omission.
+                    *
+                    * The figures are the selected year's, and they are what
+                    * answer for a band too thin to see: the chart gives up the
+                    * dollars to show the mix, and this is where they come back.
+                    */}
+                  {mixBands.map((c) => {
+                    const held = {
+                      Cash: shape.cash,
+                      Bonds: shape.bonds,
+                      Stocks: shape.stocks,
+                      Crypto: shape.crypto,
+                      Pension: shape.pension,
+                    }[c];
+                    return (
+                      <div key={c} className="flex items-baseline gap-2">
+                        <span
+                          className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
+                          style={{ background: CLASS_COLORS[c] }}
+                        />
+                        <span className="text-[0.6875rem] text-ink-faint">{c}</span>
+                        <span className="text-sm font-semibold tabular-nums">
+                          {fmtCompact(held)}
+                        </span>
+                        <span className="text-[0.6875rem] tabular-nums text-ink-faint">
+                          {shape.assets > 0
+                            ? `${Math.round((Math.max(0, held) / shape.assets) * 100)}%`
+                            : "—"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-px border-t border-line bg-line sm:grid-cols-4">
+                {shape && [
+                  { label: "Assets", value: shape.assets },
+                  { label: "Owed", value: -shape.liabilities },
+                  { label: "Net worth", value: shape.netWorth },
+                  {
+                    label: "Cash share",
+                    value: null,
+                    text: shape.assets > 0 ? `${Math.round((shape.cash / shape.assets) * 100)}%` : "—",
+                  },
+                ].map((c) => (
+                  <div key={c.label} className="bg-surface px-4 py-2.5">
+                    <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+                      {c.label}
+                    </p>
+                    <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                      {c.text ?? fmtCAD(c.value ?? 0)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/*
+            * Compounding, as a picture rather than a percentage. The lines start
+            * together and separate; the gap is every dollar the portfolio earned
+            * rather than received.
+            */}
+          {contributions.length > 1 && (
+            <Card className="flex h-full flex-col">
+              <CardHeader
+                title="Net contributions against market value"
+                subtitle="Everything paid into the portfolio, beside what it is worth"
+              />
+              <div className="min-h-[240px] flex-1 px-3 pb-4">
+                <SeriesChart
+                  data={contributions as unknown as Record<string, unknown>[]}
+                  xKey="label"
+                  series={[
+                    { key: "contributed", name: "Paid in", color: accentFor("cost"), kind: "line" },
+                    { key: "value", name: "Worth", color: accentFor("brand") },
+                  ]}
+                  yFmt={(n: number) => fmtCompact(n)}
+                  height="100%"
+                />
+              </div>
+              {latestGap !== null && (
+                <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
+                  The gap is {fmtCAD(Math.abs(latestGap))} the portfolio{" "}
+                  {latestGap >= 0 ? "has earned" : "is behind"} on what was paid
+                  into it, and still holds. Money leaving pulls both lines down
+                  by the same amount — a sale, or a dividend paid across to the
+                  account&rsquo;s cash — so the gap holds steady rather than
+                  closing, and what was taken out is simply no longer in it.
+                </p>
+              )}
+            </Card>
+          )}
+
+          {/*
+            * Room is the one limit here the app cannot work out for itself. It
+            * depends on income, on room carried forward and on withdrawals made
+            * years ago, all of it stated on a notice of assessment — so the
+            * figure is entered, and what has been paid in against it is counted.
+            */}
+          <Card className="flex h-full flex-col">
+            <CardHeader
+              title="Registered plan contribution room"
+              subtitle={`What you have paid into each plan in ${selected.year}`}
+              action={
+                <Button variant="ghost" size="sm" onClick={() => setRoomOpen(true)}>
+                  <SlidersHorizontal size={14} /> Set room
+                </Button>
+              }
             />
-          </div>
-        </Card>
+            <div className="grid min-h-0 flex-1 grid-cols-1 content-center gap-6 px-4 pb-5 pt-1 sm:grid-cols-3">
+              {room.map((r) => (
+                <RoomGauge
+                  key={r.plan}
+                  label={r.plan}
+                  used={r.used}
+                  tone={PLAN_TONE[r.plan]}
+                  over={r.over}
+                  caption={
+                    r.limit === null
+                      ? `${fmtCAD(r.contributed)} paid in`
+                      : `${fmtCAD(r.contributed)} of ${fmtCAD(r.limit)}`
+                  }
+                  detail={
+                    r.limit === null
+                      ? r.held
+                        ? "Room not set for this year"
+                        : "No account of this type"
+                      : r.over
+                        ? `${fmtCAD(Math.abs(r.remaining!))} over the limit`
+                        : `${fmtCAD(r.remaining!)} left`
+                  }
+                />
+              ))}
+            </div>
+            {room.some((r) => r.over) && (
+              <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] text-negative">
+                An over-contribution is charged 1% a month on the excess until it is
+                withdrawn. Check the figure against your notice of assessment before
+                acting on it.
+              </p>
+            )}
+          </Card>
+        </div>
 
+        <SectionHeading title="The record" hint="Every year on record, side by side" />
         <Card>
           <CardHeader
-            title="Year by year"
+            title="Annual summary"
             subtitle="What came in, what it grew to, and what the portfolio did with it"
           />
           <div className="overflow-x-auto px-2 pb-3">
@@ -446,47 +927,27 @@ export default function YearPage() {
             onClose={() => setRoomOpen(false)}
           />
         </Modal>
-
-        {data.marks.length > 0 && (
-          <Card>
-            <CardHeader
-              title="Milestones"
-              subtitle="The month each step was first passed, and how long it took"
-            />
-            {/*
-              * Several steps crossed in one month are one event, not several.
-              * The record opens partway up — the first month with a portfolio
-              * figure in it passes fourteen at once — and fourteen rows saying
-              * "same month" describe the gap in the data rather than a year of
-              * progress.
-              */}
-            <ul className="grid gap-1 px-3 pb-4 sm:grid-cols-2 lg:grid-cols-3">
-              {grouped.map((g) => (
-                <li
-                  key={g.month}
-                  className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-elevated"
-                >
-                  <Flag size={14} className="shrink-0 text-brand" />
-                  <span className="font-medium tabular-nums">
-                    {g.from === g.to
-                      ? fmtCompact(g.to)
-                      : `${fmtCompact(g.from)}–${fmtCompact(g.to)}`}
-                  </span>
-                  <span className="text-sm text-ink-dim">{labelMonth(g.month)}</span>
-                  <Badge className="ml-auto">
-                    {g.months === null
-                      ? `${g.count} at once`
-                      : g.count > 1
-                        ? `${g.count} in ${g.months} mo`
-                        : `${g.months} mo`}
-                  </Badge>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        )}
       </div>
     </Shell>
+  );
+}
+
+/**
+ * A break between groups of cards.
+ *
+ * Deliberately a label rather than a heavier divider: the cards already have
+ * their own edges, and a second box around a group of boxes reads as another
+ * card. A rule and a word are enough to say "these answer the same question",
+ * which is the whole job.
+ */
+function SectionHeading({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-line px-1 pt-4">
+      <h2 className="text-[0.6875rem] font-medium uppercase tracking-wider text-ink-dim">
+        {title}
+      </h2>
+      <p className="text-[0.6875rem] text-ink-faint">{hint}</p>
+    </div>
   );
 }
 

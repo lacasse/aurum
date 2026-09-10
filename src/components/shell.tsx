@@ -45,7 +45,7 @@ const NAV = [
   { href: "/investments", label: "Investments", icon: TrendingUp },
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/accounts", label: "Accounts", icon: Landmark },
-  { href: "/year", label: "Year", icon: CalendarRange, unreleased: true },
+  { href: "/year", label: "Year", icon: CalendarRange },
   { href: "/tax", label: "Tax", icon: Receipt, unreleased: true },
   { href: "/import", label: "Import", icon: Upload },
   { href: "/guide", label: "Guide", icon: BookOpen, unreleased: true },
