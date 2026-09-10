@@ -816,7 +816,12 @@ const SOLD = "Sold investments";
  */
 const BORROWED = "Borrowed";
 /**
- * Money of yours coming back — a refund, a reimbursement, a returned item.
+ * Refunds: a reimbursement, a returned item, a statement credit.
+ *
+ * Named for what it holds rather than for the shape of it. `NOT_INCOME` has
+ * exactly two members and one of them is borrowing, so everything reaching
+ * this band is a refund — cashback is not among them, because the record keeps
+ * cashback under Interest, where it lands.
  *
  * Not income, for the reason `NOT_INCOME` gives: the spending that sent it out
  * was already counted, so counting the return as earnings books one movement
@@ -826,7 +831,7 @@ const BORROWED = "Borrowed";
  * Told apart from borrowing because they are opposites. One is somebody else's
  * money arriving with a debt attached; the other is your own coming home.
  */
-const RETURNED = "Money back";
+const RETURNED = "Refunds";
 /** What an invested account took in and has no purchases to account for. */
 const UNITEMISED = "Not itemised";
 
@@ -1214,6 +1219,46 @@ export function yearFlow(
   );
   const sourceName = pool(categoryTotals, limit, OTHER_INCOME, MIN_SOURCE_SHARE);
   /*
+   * The same floor, applied to the bands that are not income categories.
+   *
+   * A sale, a drawdown and a refund each skipped the ranking, because none of
+   * them is an income category and none should take a place among them. But
+   * skipping the ranking meant skipping the floor as well, so a refund of a few
+   * dollars was drawn as a band of its own with a ribbon too thin to see, in a
+   * column where every real source had been pooled at a hundredth of the year.
+   * Not being ranked with the categories is not a reason to be drawn when they
+   * would not be.
+   *
+   * Measured against the income, not against every arrival, so the floor does
+   * not move when a year happens to sell a large holding — the question is
+   * whether a band is worth a row of the chart, and the year's income is the
+   * scale a reader has in mind for that.
+   *
+   * The opening balance is never pooled. It is where the chart starts, not a
+   * source among sources, and a year that opens on very little still opens on
+   * it.
+   */
+  const incomeTotal = [...categoryTotals.values()].reduce((a, b) => a + b, 0);
+  const floor = incomeTotal * MIN_SOURCE_SHARE;
+  const thin = new Set(
+    [...incomeTotals]
+      .filter(([k, v]) => k !== OPENING && v > 0 && v < floor)
+      .map(([k]) => k),
+  );
+  /*
+   * Pooling one band renames it and saves nothing — the same guard the
+   * categories already had, applied across every kind of band rather than
+   * within one of them.
+   */
+  const pooling = thin.size > 1;
+  const bandName = (name: string) => {
+    if (name === OPENING) return name;
+    if (pooling && thin.has(name)) return OTHER_INCOME;
+    return name === SOLD || name === BORROWED || name === RETURNED
+      ? name
+      : sourceName(name);
+  };
+  /*
    * Neither the spending nor the invested side needs pooling in practice --
    * three necessity groups and four asset classes -- but the tail is capped
    * anyway so a future class or group cannot quietly widen the chart.
@@ -1241,9 +1286,7 @@ export function yearFlow(
   for (const r of rows) {
     if (r.stage === 1) {
       const to = hubName(r.to);
-      const named =
-        r.from === SOLD || r.from === BORROWED || r.from === RETURNED || r.from === OPENING;
-      link(named ? r.from : sourceName(r.from), to, r.cents);
+      link(bandName(r.from), to, r.cents);
       note(inflow, to, r.cents);
       continue;
     }

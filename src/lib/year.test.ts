@@ -1489,3 +1489,86 @@ describe("the spendable bar answers to the accounts", () => {
     }
   });
 });
+
+describe("a band too thin to see is pooled, whatever kind of band it is", () => {
+  const accounts = [{ id: "a-chq", name: "Chequing", kind: "checking" as const }];
+  const at = (amount: number, category: string) =>
+    ({
+      id: category + amount, date: "2026-03-03", type: "income", amount, category,
+      payee: "p", destinationAccountId: "a-chq",
+    }) as unknown as Transaction;
+  const spend = {
+    id: "out", date: "2026-07-07", type: "expense", amount: 10000, category: "Housing",
+    payee: "p", sourceAccountId: "a-chq",
+  } as unknown as Transaction;
+  const sources = (f: ReturnType<typeof yearFlow>) =>
+    f.nodes.filter((n) => n.role === "source").map((n) => n.name);
+  const into = (f: ReturnType<typeof yearFlow>, name: string) =>
+    f.links.filter((l) => f.nodes[l.target].name === name).reduce((a, l) => a + l.value, 0);
+
+  /* Two thin income categories, so the pooled band exists either way. */
+  const base = [at(100000, "Salary"), at(300, "Interest"), at(200, "Gifts"), spend];
+
+  test("a refund below the floor joins them rather than standing alone", () => {
+    /*
+     * It is not an income category and is not ranked with them, which is why it
+     * skipped the floor as well — and was drawn as a band of its own carrying a
+     * ribbon too thin to see.
+     */
+    const f = yearFlow([...base, at(36, "Refund")], "2026", { accounts });
+    assert.equal(sources(f).includes("Refunds"), false);
+    assert.equal(into(f, "Money in") > 0, true);
+    assert.equal(
+      f.links
+        .filter((l) => f.nodes[l.source].name === "Other income")
+        .reduce((a, l) => a + l.value, 0),
+      536,
+      "the interest, the gift and the refund together",
+    );
+  });
+
+  test("a drawdown below the floor is pooled too", () => {
+    const f = yearFlow([...base, at(40, "Loan Proceeds")], "2026", { accounts });
+    assert.equal(sources(f).includes("Borrowed"), false);
+  });
+
+  test("but one that carries real weight keeps its own band", () => {
+    const f = yearFlow([...base, at(9000, "Loan Proceeds")], "2026", { accounts });
+    assert.ok(sources(f).includes("Borrowed"), "well above a hundredth of the income");
+  });
+
+  test("the floor is measured against the income, not against every arrival", () => {
+    /*
+     * Otherwise a year that sold a large holding raises the bar for everything
+     * else, and categories that were worth drawing last year vanish this one
+     * without the income having changed.
+     */
+    const holdings = [
+      {
+        accountId: "a-inv", assetClass: "US Equity",
+        flows: [{ date: "2026-02-02", kind: "sell", amount: 900000, shares: -1 }],
+      },
+    ] as unknown as NonNullable<Parameters<typeof yearFlow>[2]>["holdings"];
+    const withSale = yearFlow(base, "2026", {
+      accounts: [...accounts, { id: "a-inv", name: "Brokerage", kind: "investment" as const }],
+      holdings,
+    });
+    const plain = yearFlow(base, "2026", { accounts });
+    assert.deepEqual(
+      sources(withSale).filter((n) => n !== "Sold investments"),
+      sources(plain),
+      "the same bands are drawn either way",
+    );
+  });
+
+  test("the opening balance is never pooled away", () => {
+    // Where the chart starts, however little the year opened on.
+    const f = yearFlow(base, "2026", { accounts, openingCash: 20, closingCash: 90320 });
+    assert.ok(sources(f).includes("Opening balance"));
+  });
+
+  test("one thin band on its own still says what it is", () => {
+    const f = yearFlow([at(100000, "Salary"), at(36, "Refund"), spend], "2026", { accounts });
+    assert.ok(sources(f).includes("Refunds"), "renaming it would save nothing");
+  });
+});
