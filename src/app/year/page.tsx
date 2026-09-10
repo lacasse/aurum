@@ -191,8 +191,16 @@ export default function YearPage() {
 
   const selected = data.rows.find((r) => r.year === year) ?? data.rows[0];
   const before = data.rows[data.rows.indexOf(selected) + 1];
-  const pct = (now: number, then: number | undefined) =>
-    then !== undefined && then !== 0 ? ((now - then) / Math.abs(then)) * 100 : undefined;
+  /*
+   * A part-year's percentages are measured on its full-year pace, so the label
+   * has to say so — "vs 2025" beside a figure that compares a projection to a
+   * finished year would be a different claim than the one being made.
+   */
+  const paceLabel = !before
+    ? "first year on record"
+    : selected.complete
+      ? `vs ${before.year}`
+      : `full-year pace vs ${before.year}`;
 
   // Named so the footnote can say what the compounding is measured from: on a
   // record that opens at a peak, growth since then is a different claim.
@@ -310,8 +318,9 @@ export default function YearPage() {
       <div className="space-y-4">
         {!selected.complete && (
           <p className="px-1 text-[0.6875rem] text-ink-faint">
-            {selected.year} is still running — its totals are the year so far, and
-            the comparison is against a full year.
+            {selected.year} is still running — the figures are the year so far,
+            while the comparisons carry them forward at the pace kept through{" "}
+            {Math.round(selected.elapsed * 100)}% of the year.
           </p>
         )}
 
@@ -319,15 +328,15 @@ export default function YearPage() {
           <StatCard
             label={`Income · ${selected.year}`}
             value={fmtCAD(selected.income)}
-            delta={pct(selected.income, before?.income)}
-            deltaLabel={before ? `vs ${before.year}` : "first year on record"}
+            delta={selected.incomeGrowth ?? undefined}
+            deltaLabel={paceLabel}
             icon={<ArrowDownRight size={16} className="text-positive" />}
           />
           <StatCard
             label="Expenses"
             value={fmtCAD(selected.expenses)}
             delta={selected.expenseGrowth ?? undefined}
-            deltaLabel={before ? `vs ${before.year}` : "first year on record"}
+            deltaLabel={paceLabel}
             tone={
               selected.expenseGrowth === null
                 ? "neutral"

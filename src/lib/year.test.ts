@@ -71,6 +71,48 @@ describe("yearRows", () => {
     assert.equal(y2024.expenseGrowth, null);
   });
 
+  test("a finished year is projected to exactly itself", () => {
+    const [y2025] = rows;
+    assert.equal(y2025.elapsed, 1);
+    assert.equal(y2025.projectedIncome, y2025.income);
+    assert.equal(y2025.projectedExpenses, y2025.expenses);
+  });
+
+  test("a part-year is compared on its full-year pace, not its running total", () => {
+    // Half a year in, having matched last year's whole take: a doubling, not a
+    // year that has stood still.
+    const partial = yearRows(
+      [
+        txn("2024-03-01", "income", 40000, "Salary"),
+        txn("2024-05-01", "expense", 20000),
+        txn("2025-03-01", "income", 40000, "Salary"),
+        txn("2025-05-01", "expense", 10000),
+      ],
+      netWorth,
+      portfolio,
+      {},
+      "2025-07-02",
+    );
+    const [y2025] = partial;
+    assert.ok(Math.abs(y2025.elapsed - 0.5) < 0.005, "half the year gone");
+    assert.equal(y2025.income, 40000, "the figure shown is still the year so far");
+    assert.ok(Math.abs(y2025.projectedIncome - 80000) < 500);
+    assert.ok(Math.abs(y2025.incomeGrowth! - 100) < 2, "on course to double");
+    assert.ok(Math.abs(y2025.expenseGrowth! - 0) < 2, "spending on the same pace");
+  });
+
+  test("the first day of a year counts as a day, not as nothing", () => {
+    const [y] = yearRows(
+      [txn("2025-01-01", "income", 100, "Salary")],
+      netWorth,
+      portfolio,
+      {},
+      "2025-01-01",
+    );
+    assert.ok(y.elapsed > 0 && y.elapsed < 0.01);
+    assert.ok(Number.isFinite(y.projectedIncome));
+  });
+
   test("the portfolio's cost and profit come from the year's last month", () => {
     const [y2025] = rows;
     assert.equal(y2025.portfolio, 26000);
@@ -174,6 +216,10 @@ const row = (year: string, over: Record<string, unknown> = {}) =>
     complete: true,
     income: 100000,
     expenses: 60000,
+    elapsed: 1,
+    projectedIncome: 100000,
+    projectedExpenses: 60000,
+    incomeGrowth: null,
     expenseGrowth: null,
     netCashflow: 40000,
     uncommittedLiquid: 40000,

@@ -34,7 +34,23 @@ export interface YearRow {
   complete: boolean;
   income: number;
   expenses: number;
-  /** Change in spending against the year before, as a percentage. */
+  /**
+   * How much of the year the totals above cover, as a fraction. One for a
+   * finished year.
+   */
+  elapsed: number;
+  /**
+   * The year's totals carried forward at the pace they have kept so far.
+   * Equal to the totals themselves once the year is over.
+   */
+  projectedIncome: number;
+  projectedExpenses: number;
+  /**
+   * Change against the year before, as a percentage — measured on the
+   * projections, so a year three months old is not reported as a collapse in
+   * earnings against twelve months of the year before it.
+   */
+  incomeGrowth: number | null;
   expenseGrowth: number | null;
   /** Everything in, less everything out. */
   netCashflow: number;
@@ -54,6 +70,22 @@ export interface YearRow {
   portfolioReturn: number | null;
   /** Compound annual growth in net worth since the record began. */
   cagr: number | null;
+}
+
+const DAY = 86_400_000;
+
+/**
+ * How much of a year has passed on a given date, counting the day itself.
+ *
+ * By the day rather than by the month, because a comparison drawn on the
+ * fifteenth should not credit the year with the whole of that month.
+ */
+function yearElapsed(year: string, today: string): number {
+  const start = Date.UTC(Number(year), 0, 1);
+  const end = Date.UTC(Number(year) + 1, 0, 1);
+  const [ty, tm, td] = today.split("-").map(Number);
+  const now = Date.UTC(ty, tm - 1, td);
+  return Math.min(1, Math.max(DAY, now - start + DAY) / (end - start));
 }
 
 /** The last month of a year that the series actually covers. */
@@ -114,6 +146,16 @@ export function yearRows(
 
     const previous = rows[rows.length - 1];
     const previousExpenses = previous?.expenses ?? 0;
+    const previousIncome = previous?.income ?? 0;
+
+    /*
+     * A part-year is compared on its pace, not on its running total. Against a
+     * full year the total is guaranteed to be smaller, so the honest question
+     * is what the year is on course to reach.
+     */
+    const elapsed = y === currentYear ? yearElapsed(y, today) : 1;
+    const projectedIncome = roundMoney(income / elapsed);
+    const projectedExpenses = roundMoney(expenses / elapsed);
 
     let flows = 0;
     for (const [month, amount] of Object.entries(flowsByMonth)) {
@@ -143,9 +185,16 @@ export function yearRows(
       complete: y < currentYear,
       income,
       expenses,
+      elapsed,
+      projectedIncome,
+      projectedExpenses,
+      incomeGrowth:
+        i > 0 && previousIncome > 0
+          ? ((projectedIncome - previousIncome) / previousIncome) * 100
+          : null,
       expenseGrowth:
         i > 0 && previousExpenses > 0
-          ? ((expenses - previousExpenses) / previousExpenses) * 100
+          ? ((projectedExpenses - previousExpenses) / previousExpenses) * 100
           : null,
       netCashflow: fromCents(money.income - money.expenses),
       uncommittedLiquid: fromCents(money.spendable - money.expenses),
