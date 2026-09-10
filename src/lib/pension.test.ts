@@ -2,6 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   PENSION_CATEGORY,
+  PENSION_INCOME_CATEGORY,
   contributionsByMonth,
   estimateValue,
   lastRecordedMonth,
@@ -148,5 +149,37 @@ describe("summarize", () => {
     const s = summarize(account, [], "2026-08");
     assert.equal(s.monthly, 0);
     assert.equal(s.contributed, 0);
+  });
+});
+
+/*
+ * Paying in and being paid are opposite flows through the same plan, and the
+ * whole reason they are separate categories is that one of them must never be
+ * read as the other.
+ */
+describe("a pension paying out is not a pension being paid into", () => {
+  const txn = (date: string, amount: number, category: string): Transaction =>
+    ({ id: date + category, date, type: "income", amount, category, payee: "Plan" }) as Transaction;
+
+  test("an annuity payment is not counted as a contribution", () => {
+    const months = contributionsByMonth([
+      txn("2026-01-31", 500, PENSION_CATEGORY),
+      txn("2026-01-31", 3200, PENSION_INCOME_CATEGORY),
+    ]);
+    // Only the contribution. Counting the payment here would grow the plan
+    // every month it paid out.
+    assert.equal(months["2026-01"], 500);
+  });
+
+  test("a plan that only pays out records no contributions at all", () => {
+    const months = contributionsByMonth([
+      txn("2026-01-31", 3200, PENSION_INCOME_CATEGORY),
+      txn("2026-02-28", 3200, PENSION_INCOME_CATEGORY),
+    ]);
+    assert.deepEqual(months, {});
+  });
+
+  test("the two categories are actually different", () => {
+    assert.notEqual(PENSION_CATEGORY, PENSION_INCOME_CATEGORY);
   });
 });

@@ -453,3 +453,45 @@ describe("debit and credit columns", () => {
     assert.equal(rows[0].payee, "Unknown merchant");
   });
 });
+
+/*
+ * A statement line saying only "pension", on money arriving, is far more
+ * likely to be the plan paying than the plan being paid — and the two must not
+ * share a category, because the contribution category is what estimates the
+ * plan's value.
+ */
+describe("paying into a pension against being paid by one", () => {
+  const forIncome = (payee: string) =>
+    suggestCategory(payee, "", "", undefined, "income", {}, [
+      "Salary",
+      "Other",
+      "RSP / Pension",
+      "Pension Income",
+    ]).category;
+
+  test("a contribution is filed as one", () => {
+    assert.equal(forIncome("Pension contribution"), "RSP / Pension");
+    assert.equal(forIncome("Employer match"), "RSP / Pension");
+    assert.equal(forIncome("Employer contribution"), "RSP / Pension");
+  });
+
+  test("a payment from the plan is filed as income", () => {
+    assert.equal(forIncome("Pension payment"), "Pension Income");
+    assert.equal(forIncome("Annuity deposit"), "Pension Income");
+  });
+
+  /*
+   * "employer" alone used to be a salary word, so an employer match — which is
+   * a pension contribution — was filed as pay. Salary is recognised by plenty
+   * of less ambiguous words.
+   */
+  test("an employer match is a contribution, not wages", () => {
+    assert.equal(forIncome("Payroll deposit"), "Salary");
+    assert.equal(forIncome("Net pay"), "Salary");
+    assert.notEqual(forIncome("Employer match"), "Salary");
+  });
+
+  test("a bare mention on arriving money reads as the plan paying", () => {
+    assert.equal(forIncome("Pension"), "Pension Income");
+  });
+});

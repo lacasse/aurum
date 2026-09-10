@@ -32,6 +32,14 @@ set -eu
 
 MONEY='\$ ?[0-9]{1,3}(,[0-9]{3})+(\.[0-9]+)?'
 
+# The same, without interval expressions. `--staged` pipes through awk, whose
+# POSIX regex has no {n,m}, and the variable it read did not exist at all: with
+# `set -u` the awk never ran, the hit file was never written, and the hook
+# reported "No real financial figures found" for every staged commit. A guard
+# that fails open is worse than no guard, which is the whole reason this file
+# is shell and not node -- and it happened here anyway.
+MONEY_AWK='\$?[ ]?[0-9][0-9]?[0-9]?(,[0-9][0-9][0-9])+(\.[0-9]+)?'
+
 # A private list of terms that must never appear: tickers actually held,
 # the broker, the pension plan, account identifiers off a statement, the
 # machine's hostname. Deliberately NOT in the repository -- a deny-list of
