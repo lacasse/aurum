@@ -48,8 +48,9 @@ import {
   isInvestmentAccount,
   isLiability,
   sidesFor,
+  granularityClashes,
 } from "@/lib/types";
-import { fmtCAD } from "@/lib/format";
+import { fmtCAD, labelMonth } from "@/lib/format";
 import { DEBT_CATEGORY } from "@/lib/expenses";
 
 type Step = "upload" | "review" | "done";
@@ -177,6 +178,28 @@ export default function ImportPage() {
   const unassignedDebt = includedCash.filter(
     (r) => r.type === "expense" && r.category === DEBT_CATEGORY && !r.debtAccountId,
   );
+  /*
+   * Months already held as one total per category cannot also hold the rows
+   * that made them up, or the same money is counted twice — the database
+   * refuses it outright. Asked here, before anything is written, so the answer
+   * is a sentence naming the month rather than a constraint violation halfway
+   * through the save.
+   */
+  const covered = granularityClashes(
+    transactions,
+    includedCash.map((r) => ({ date: r.date, type: r.type, granularity: "individual" as const })),
+  );
+  const coveredMonths = new Set(covered.map((c) => `${c.month}|${c.type}`));
+  const blockedRows = includedCash.filter((r) =>
+    coveredMonths.has(`${r.date.slice(0, 7)}|${r.type}`),
+  );
+  const dropBlocked = () => {
+    const ids = new Set(blockedRows.map((r) => r.id));
+    setCashRows((prev) =>
+      prev.map((r) => (ids.has(r.id) ? { ...r, include: false } : r)),
+    );
+  };
+
   const includedTrades = checkedTrades.filter((r) => r.include);
   const dupCash = cashRows.filter((r) => r.dup).length;
   const dupTrades = checkedTrades.filter((r) => r.duplicate).length;
@@ -579,6 +602,40 @@ export default function ImportPage() {
               </Card>
             </div>
 
+            {covered.length > 0 && (
+              <Card className="border-negative/40 bg-negative/5 p-4">
+                <p className="flex items-center gap-2 text-xs font-medium text-negative">
+                  <AlertTriangle size={14} /> Already recorded as monthly totals
+                </p>
+                <ul className="mt-2 space-y-1 text-[0.6875rem] text-ink-dim">
+                  {covered.map((c) => (
+                    <li key={`${c.month}|${c.type}`}>
+                      <span className="font-medium text-ink">{labelMonth(c.month)}</span>{" "}
+                      holds {c.type} as {c.count} monthly total
+                      {c.count === 1 ? "" : "s"}, so the {c.incoming} row
+                      {c.incoming === 1 ? "" : "s"} here would count the same money
+                      a second time.
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
+                  To itemise a month instead, delete its monthly totals first —
+                  and check what they hold before you do. Anything that never
+                  appears on a statement, a payroll deduction or income paid into
+                  an account you are not importing, will not come back with the
+                  file.
+                </p>
+                <Button
+                  variant="secondary"
+                  className="mt-3"
+                  onClick={dropBlocked}
+                >
+                  Leave those {blockedRows.length} row
+                  {blockedRows.length === 1 ? "" : "s"} out
+                </Button>
+              </Card>
+            )}
+
             {(needsAttention.length > 0 ||
               unmatchedRegistrations.length > 0 ||
               unassignedDebt.length > 0) && (
@@ -922,7 +979,10 @@ export default function ImportPage() {
               </Button>
               <Button
                 onClick={save}
-                disabled={includedCash.length + includedTrades.length === 0}
+                disabled={
+                  covered.length > 0 ||
+                  includedCash.length + includedTrades.length === 0
+                }
               >
                 Import {includedCash.length + includedTrades.length} row
                 {includedCash.length + includedTrades.length === 1 ? "" : "s"}

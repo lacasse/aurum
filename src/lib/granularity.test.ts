@@ -1,6 +1,11 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { conflictingGranularity, monthOf, type Transaction } from "./types";
+import {
+  conflictingGranularity,
+  granularityClashes,
+  monthOf,
+  type Transaction,
+} from "./types";
 
 /*
  * A month is kept one way or the other: as a set of month-end totals, or as the
@@ -86,6 +91,49 @@ describe("what the rule does not reach across", () => {
 
   test("nothing recorded means nothing conflicts", () => {
     assert.equal(conflictingGranularity([], txn({ granularity: "monthly" })), null);
+  });
+});
+
+describe("a whole import is checked before any of it is written", () => {
+  const summarised: Transaction[] = [
+    txn({ id: "s1", date: "2026-06-30", granularity: "monthly" }),
+    txn({ id: "s2", date: "2026-06-30", category: "Housing", granularity: "monthly" }),
+    txn({ id: "s3", date: "2026-06-30", type: "income", granularity: "monthly" }),
+  ];
+  const incoming = [
+    { date: "2026-06-02", type: "expense" as const, granularity: "individual" as const },
+    { date: "2026-06-14", type: "expense" as const, granularity: "individual" as const },
+    { date: "2026-06-14", type: "income" as const, granularity: "individual" as const },
+    { date: "2026-07-03", type: "expense" as const, granularity: "individual" as const },
+  ];
+
+  test("a covered month is reported once, with both counts", () => {
+    const found = granularityClashes(summarised, incoming);
+    assert.deepEqual(
+      found.map((c) => [c.month, c.type, c.count, c.incoming]),
+      [
+        ["2026-06", "expense", 2, 2],
+        ["2026-06", "income", 1, 1],
+      ],
+    );
+  });
+
+  test("a month nobody has summarised is not reported", () => {
+    const found = granularityClashes(summarised, incoming);
+    assert.ok(!found.some((c) => c.month === "2026-07"), "July is free");
+  });
+
+  test("expense and income are asked separately", () => {
+    // Only the income side is summarised, so importing spending is fine.
+    const found = granularityClashes(
+      [txn({ id: "s3", type: "income", granularity: "monthly" })],
+      [{ date: "2026-06-02", type: "expense" as const, granularity: "individual" as const }],
+    );
+    assert.deepEqual(found, []);
+  });
+
+  test("an empty record blocks nothing", () => {
+    assert.deepEqual(granularityClashes([], incoming), []);
   });
 });
 

@@ -182,6 +182,49 @@ export function conflictingGranularity(
   return { month, type: incoming.type, existing: opposite, count: clashes.length };
 }
 
+export interface GranularityClash {
+  month: string;
+  type: TxnType;
+  /** What already covers the month. */
+  existing: Granularity;
+  /** How many rows do the covering. */
+  count: number;
+  /** How many of the incoming rows fall in it. */
+  incoming: number;
+}
+
+/**
+ * The same question asked of a whole import at once, before any of it is
+ * written.
+ *
+ * The import used to ask nothing and find out from the database, one rejected
+ * row at a time: a file spanning a month already held as monthly totals landed
+ * in part, and what the user got for the rest was a constraint violation after
+ * they had already reviewed and committed. The rule was here the whole time
+ * and only the checklist called it.
+ */
+export function granularityClashes(
+  existing: Pick<Transaction, "date" | "type" | "granularity">[],
+  incoming: Pick<Transaction, "date" | "type" | "granularity">[],
+): GranularityClash[] {
+  // Answered once per month and type — the question is about the month, not
+  // about the row, and a year of statements would otherwise ask it thousands
+  // of times.
+  const found = new Map<string, GranularityClash | null>();
+  for (const row of incoming) {
+    const key = `${monthOf(row.date)}|${row.type}`;
+    if (!found.has(key)) {
+      const clash = conflictingGranularity(existing, row);
+      found.set(key, clash ? { ...clash, incoming: 0 } : null);
+    }
+    const hit = found.get(key);
+    if (hit) hit.incoming += 1;
+  }
+  return [...found.values()]
+    .filter((c): c is GranularityClash => c !== null)
+    .sort((a, b) => a.month.localeCompare(b.month) || a.type.localeCompare(b.type));
+}
+
 export type AssetClass = "US Equity" | "Intl Equity" | "Bonds" | "Crypto";
 
 export type Currency = "CAD" | "USD";
