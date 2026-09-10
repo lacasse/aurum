@@ -191,6 +191,17 @@ export interface GranularityClash {
   count: number;
   /** How many of the incoming rows fall in it. */
   incoming: number;
+  /**
+   * Categories the month is summarised under that the file does not mention.
+   *
+   * The list of what a delete-and-reimport would drop. A monthly total is not
+   * a statement line: a payroll deduction, or income paid into an account this
+   * file does not cover, is inside the total and on no statement, so nothing
+   * in the import replaces it and nothing says so. Read against the file's
+   * suggested categories, which is the best the review has before a person
+   * corrects them — so it is a prompt to look, not a proof.
+   */
+  missing: string[];
 }
 
 /**
@@ -204,21 +215,43 @@ export interface GranularityClash {
  * and only the checklist called it.
  */
 export function granularityClashes(
-  existing: Pick<Transaction, "date" | "type" | "granularity">[],
-  incoming: Pick<Transaction, "date" | "type" | "granularity">[],
+  existing: Pick<Transaction, "date" | "type" | "granularity" | "category">[],
+  incoming: Pick<Transaction, "date" | "type" | "granularity" | "category">[],
 ): GranularityClash[] {
   // Answered once per month and type — the question is about the month, not
   // about the row, and a year of statements would otherwise ask it thousands
   // of times.
   const found = new Map<string, GranularityClash | null>();
+  const brought = new Map<string, Set<string>>();
   for (const row of incoming) {
     const key = `${monthOf(row.date)}|${row.type}`;
     if (!found.has(key)) {
       const clash = conflictingGranularity(existing, row);
-      found.set(key, clash ? { ...clash, incoming: 0 } : null);
+      found.set(key, clash ? { ...clash, incoming: 0, missing: [] } : null);
     }
     const hit = found.get(key);
-    if (hit) hit.incoming += 1;
+    if (hit) {
+      hit.incoming += 1;
+      const seen = brought.get(key) ?? new Set<string>();
+      seen.add(row.category);
+      brought.set(key, seen);
+    }
+  }
+
+  for (const [key, clash] of found) {
+    if (!clash) continue;
+    const inFile = brought.get(key) ?? new Set<string>();
+    const summarised = new Set(
+      existing
+        .filter(
+          (t) =>
+            t.type === clash.type &&
+            (t.granularity ?? "individual") === clash.existing &&
+            monthOf(t.date) === clash.month,
+        )
+        .map((t) => t.category),
+    );
+    clash.missing = [...summarised].filter((c) => !inFile.has(c)).sort();
   }
   return [...found.values()]
     .filter((c): c is GranularityClash => c !== null)

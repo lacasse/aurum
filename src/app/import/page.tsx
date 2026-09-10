@@ -187,7 +187,12 @@ export default function ImportPage() {
    */
   const covered = granularityClashes(
     transactions,
-    includedCash.map((r) => ({ date: r.date, type: r.type, granularity: "individual" as const })),
+    includedCash.map((r) => ({
+      date: r.date,
+      type: r.type,
+      category: r.category,
+      granularity: "individual" as const,
+    })),
   );
   const coveredMonths = new Set(covered.map((c) => `${c.month}|${c.type}`));
   const blockedRows = includedCash.filter((r) =>
@@ -615,15 +620,25 @@ export default function ImportPage() {
                       {c.count === 1 ? "" : "s"}, so the {c.incoming} row
                       {c.incoming === 1 ? "" : "s"} here would count the same money
                       a second time.
+                      {c.missing.length > 0 && (
+                        <span className="mt-1 block text-ink-faint">
+                          Not in this file:{" "}
+                          <span className="text-ink-dim">{c.missing.join(", ")}</span>
+                          {" — "}
+                          delete the totals and {c.missing.length === 1 ? "it" : "they"}{" "}
+                          {c.missing.length === 1 ? "goes" : "go"} with them.
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>
                 <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
-                  To itemise a month instead, delete its monthly totals first —
-                  and check what they hold before you do. Anything that never
-                  appears on a statement, a payroll deduction or income paid into
-                  an account you are not importing, will not come back with the
-                  file.
+                  To itemise a month instead, delete its monthly totals first.
+                  What is named above is what this file does not replace — a
+                  payroll deduction, or income paid into an account you are not
+                  importing, sits inside the total and on no statement, so it
+                  will not come back. Re-enter it by hand, or leave the month
+                  summarised.
                 </p>
                 <Button
                   variant="secondary"

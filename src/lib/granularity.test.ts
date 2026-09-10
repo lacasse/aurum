@@ -98,13 +98,19 @@ describe("a whole import is checked before any of it is written", () => {
   const summarised: Transaction[] = [
     txn({ id: "s1", date: "2026-06-30", granularity: "monthly" }),
     txn({ id: "s2", date: "2026-06-30", category: "Housing", granularity: "monthly" }),
-    txn({ id: "s3", date: "2026-06-30", type: "income", granularity: "monthly" }),
+    txn({ id: "s3", date: "2026-06-30", type: "income", category: "Salary", granularity: "monthly" }),
   ];
+  const row = (
+    date: string,
+    type: "expense" | "income",
+    category: string,
+  ) => ({ date, type, category, granularity: "individual" as const });
+
   const incoming = [
-    { date: "2026-06-02", type: "expense" as const, granularity: "individual" as const },
-    { date: "2026-06-14", type: "expense" as const, granularity: "individual" as const },
-    { date: "2026-06-14", type: "income" as const, granularity: "individual" as const },
-    { date: "2026-07-03", type: "expense" as const, granularity: "individual" as const },
+    row("2026-06-02", "expense", "Groceries"),
+    row("2026-06-14", "expense", "Groceries"),
+    row("2026-06-14", "income", "Salary"),
+    row("2026-07-03", "expense", "Groceries"),
   ];
 
   test("a covered month is reported once, with both counts", () => {
@@ -127,9 +133,42 @@ describe("a whole import is checked before any of it is written", () => {
     // Only the income side is summarised, so importing spending is fine.
     const found = granularityClashes(
       [txn({ id: "s3", type: "income", granularity: "monthly" })],
-      [{ date: "2026-06-02", type: "expense" as const, granularity: "individual" as const }],
+      [row("2026-06-02", "expense", "Groceries")],
     );
     assert.deepEqual(found, []);
+  });
+
+  test("what the file does not cover is named, per month and type", () => {
+    const [spending, pay] = granularityClashes(summarised, incoming);
+    // Housing is summarised and nothing in the file is filed under it.
+    assert.deepEqual(spending.missing, ["Housing"]);
+    // The file's own income category matches the summary's, so nothing is lost.
+    assert.deepEqual(pay.missing, []);
+  });
+
+  test("a deduction on no statement is what this is for", () => {
+    // The month holds pay and a pension contribution; a bank export shows the
+    // deposit and can never show the deduction.
+    const [pay] = granularityClashes(
+      [
+        txn({ id: "s1", type: "income", category: "Salary", granularity: "monthly" }),
+        txn({ id: "s2", type: "income", category: "RSP / Pension", granularity: "monthly" }),
+      ],
+      [row("2026-06-14", "income", "Salary")],
+    );
+    assert.deepEqual(pay.missing, ["RSP / Pension"]);
+  });
+
+  test("a category named twice in the file is not named twice as missing", () => {
+    const [spending] = granularityClashes(
+      [
+        txn({ id: "s1", category: "Groceries", granularity: "monthly" }),
+        txn({ id: "s2", category: "Housing", granularity: "monthly" }),
+        txn({ id: "s3", category: "Housing", granularity: "monthly" }),
+      ],
+      [row("2026-06-02", "expense", "Groceries")],
+    );
+    assert.deepEqual(spending.missing, ["Housing"], "listed once, though summarised twice");
   });
 
   test("an empty record blocks nothing", () => {
