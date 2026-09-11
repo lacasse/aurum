@@ -1,6 +1,7 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import {
   Area,
   Bar,
@@ -693,7 +694,22 @@ export function ExposurePie({
    */
   order?: "value" | "class";
 }) {
-  const total = data.reduce((sum, d) => sum + d.value, 0);
+  /*
+   * Classes folded away by clicking their heading. Only the key with the
+   * holdings list offers this, and it keeps the state here because the ring
+   * and the list have to agree about what is being shown.
+   */
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const toggleClass = (assetClass: string) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(assetClass)) next.delete(assetClass);
+      // Never fold the last one away: a ring of nothing answers no question.
+      else if (data.some((d) => d.assetClass !== assetClass && !next.has(d.assetClass))) {
+        next.add(assetClass);
+      }
+      return next;
+    });
 
   /*
    * One step of the spectrum per holding, in the order they arrive — which is
@@ -701,10 +717,22 @@ export function ExposurePie({
    * is a tag on the legend row instead, which says the same thing without
    * spending a whole hue family on a class that holds two positions.
    */
-  const colored = (order === "class" ? byClassThenValue(data) : byValueDesc(data)).map((d, i) => ({
-    ...d,
-    color: spectrumAt(i, data.length),
-  }));
+  const colored = useMemo(
+    () =>
+      (order === "class" ? byClassThenValue(data) : byValueDesc(data)).map((d, i) => ({
+        ...d,
+        color: spectrumAt(i, data.length),
+      })),
+    [data, order],
+  );
+
+  /*
+   * What the ring draws, and what every percentage is measured against. A
+   * colour is a position's own, taken from the full list, so folding a class
+   * away does not recolour everything that stays.
+   */
+  const shown = details ? colored.filter((d) => !hidden.has(d.assetClass)) : colored;
+  const total = shown.reduce((sum, d) => sum + d.value, 0);
 
   const pct = (v: number) => (total > 0 ? `${((v / total) * 100).toFixed(1)}%` : "—");
 
@@ -716,7 +744,7 @@ export function ExposurePie({
         <ResponsiveContainer width="100%" height={height}>
           <PieChart>
             <Pie
-              data={colored}
+              data={shown}
               dataKey="value"
               nameKey="ticker"
               startAngle={PIE_START}
@@ -727,7 +755,7 @@ export function ExposurePie({
               stroke="var(--surface)"
               strokeWidth={1}
             >
-              {colored.map((d) => (
+              {shown.map((d) => (
                 <Cell key={d.ticker} fill={d.color} />
               ))}
             </Pie>
@@ -739,7 +767,16 @@ export function ExposurePie({
       </div>
 
       {details ? (
-        <HoldingsKey rows={colored} details={details} fmt={fmt} pct={pct} beside={beside} />
+        <HoldingsKey
+          rows={colored}
+          details={details}
+          fmt={fmt}
+          pct={pct}
+          beside={beside}
+          hidden={hidden}
+          onToggleClass={toggleClass}
+          onShowAll={() => setHidden(new Set())}
+        />
       ) : (
       /*
         One row per holding, because that is now what a colour means. It used
@@ -801,12 +838,18 @@ function HoldingsKey({
   fmt,
   pct,
   beside,
+  hidden,
+  onToggleClass,
+  onShowAll,
 }: {
   rows: (ExposureDatum & { color: string })[];
   details: Record<string, ExposureDetail>;
   fmt?: (n: number) => string;
   pct: (v: number) => string;
   beside: boolean;
+  hidden: Set<string>;
+  onToggleClass: (assetClass: string) => void;
+  onShowAll: () => void;
 }) {
   /*
    * Runs of one class, in the order the ring draws them. The class is a
@@ -852,17 +895,56 @@ function HoldingsKey({
           Return / yr
         </span>
       </div>
+      {hidden.size > 0 && (
+        <div className="flex justify-end px-3 pt-2">
+          <button
+            type="button"
+            onClick={onShowAll}
+            className="rounded-md px-1.5 py-0.5 text-[0.625rem] font-medium text-brand hover:bg-elevated"
+          >
+            Show all classes
+          </button>
+        </div>
+      )}
 
-      {groups.map((g) => (
+      {groups.map((g) => {
+        const folded = hidden.has(g.assetClass);
+        return (
         <div key={g.assetClass} role="rowgroup" className="pt-2 first:pt-1.5">
-          {/* The class's share sits beside its name, as each position's does. */}
-          <div className="flex items-baseline gap-2 px-3 pb-0.5">
-            <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-ink-dim">
+          {/*
+            * The heading is the control: clicking a class folds it away and
+            * takes it out of the ring, and every percentage is then measured
+            * against what is left — fold everything but one class and that
+            * class reads 100%, with each holding's share of it beside its name.
+            *
+            * The chevron says so without a legend, and the whole heading is the
+            * hit area rather than the chevron alone.
+            */}
+          <button
+            type="button"
+            onClick={() => onToggleClass(g.assetClass)}
+            aria-expanded={!folded}
+            className={cn(
+              "group flex w-full items-baseline gap-2 rounded-md px-3 py-0.5 text-left transition-colors hover:bg-elevated/60",
+              folded && "opacity-60 hover:opacity-100",
+            )}
+          >
+            <ChevronDown
+              size={11}
+              className={cn(
+                "shrink-0 self-center text-ink-faint transition-transform",
+                folded && "-rotate-90",
+              )}
+              aria-hidden
+            />
+            <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-ink-dim group-hover:text-ink">
               {g.assetClass}
             </span>
-            <span className="text-[0.625rem] tabular-nums text-ink-faint">{pct(g.value)}</span>
-          </div>
-          <ul>
+            <span className="text-[0.625rem] tabular-nums text-ink-faint">
+              {folded ? `${g.rows.length} hidden` : pct(g.value)}
+            </span>
+          </button>
+          <ul hidden={folded}>
             {g.rows.map((r) => {
               const d = details[r.ticker];
               const gainTone = d && d.gain >= 0 ? "text-positive" : "text-negative";
@@ -950,7 +1032,8 @@ function HoldingsKey({
             })}
           </ul>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
