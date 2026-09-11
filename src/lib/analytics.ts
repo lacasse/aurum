@@ -982,7 +982,30 @@ export function sortHoldingRows(
   dir: "asc" | "desc",
 ): HoldingRow[] {
   const sign = dir === "asc" ? 1 : -1;
+  /*
+   * A class is ranked by what it holds in total, not by its name. Grouped
+   * alphabetically, a class with one small position could sit above the one
+   * holding most of the portfolio; ranked by size, the list reads as the
+   * portfolio's shape — its largest part first — and inside each class the
+   * positions still run largest first.
+   */
+  const classTotals = new Map<string, number>();
+  if (key === "assetClass") {
+    for (const r of rows) {
+      classTotals.set(r.assetClass, (classTotals.get(r.assetClass) ?? 0) + r.marketValue);
+    }
+  }
   return [...rows].sort((a, b) => {
+    if (key === "assetClass") {
+      const at = classTotals.get(a.assetClass) ?? 0;
+      const bt = classTotals.get(b.assetClass) ?? 0;
+      if (a.assetClass !== b.assetClass) {
+        // Descending means largest class first; equal totals fall back to name.
+        if (at !== bt) return (at - bt) * sign;
+        return a.assetClass.localeCompare(b.assetClass);
+      }
+      return b.marketValue - a.marketValue;
+    }
     if (key === "mwrr") {
       // Positions with no measurable return sort last in either direction,
       // rather than being treated as zero.
@@ -993,12 +1016,10 @@ export function sortHoldingRows(
       if (bv === null) return -1;
       return av !== bv ? (av - bv) * sign : b.marketValue - a.marketValue;
     }
-    if (key === "name" || key === "assetClass") {
-      const av = key === "name" ? a.name || a.ticker : a.assetClass;
-      const bv = key === "name" ? b.name || b.ticker : b.assetClass;
-      const cmp = av.localeCompare(bv, undefined, { sensitivity: "base" });
-      // Ties fall through to market value, which is what makes sorting by
-      // class read as the classes in order and, inside each, largest first.
+    if (key === "name") {
+      const cmp = (a.name || a.ticker).localeCompare(b.name || b.ticker, undefined, {
+        sensitivity: "base",
+      });
       return cmp !== 0 ? cmp * sign : b.marketValue - a.marketValue;
     }
     const numeric = key as Exclude<SortKey, "name" | "assetClass" | "mwrr">;

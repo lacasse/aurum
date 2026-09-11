@@ -978,7 +978,8 @@ describe("sortHoldingRows", () => {
     );
   });
 
-  test("sorting by class groups the classes, largest first inside each", () => {
+  test("sorting by class ranks the classes by size, largest first inside each", () => {
+    // Bonds come first alphabetically and hold less; size decides, not the name.
     const mixed = consolidateHoldings([
       lot({ id: "a", ticker: "AAA", assetClass: "US Equity", shares: 1, priceCAD: 100 }),
       lot({ id: "b", ticker: "BBB", assetClass: "Bonds", shares: 1, priceCAD: 50 }),
@@ -986,20 +987,20 @@ describe("sortHoldingRows", () => {
       lot({ id: "d", ticker: "DDD", assetClass: "Bonds", shares: 1, priceCAD: 500 }),
     ]);
     assert.deepEqual(
-      sortHoldingRows(mixed, "assetClass", "asc").map((r) => r.ticker),
-      ["DDD", "BBB", "CCC", "AAA"],
+      sortHoldingRows(mixed, "assetClass", "desc").map((r) => r.ticker),
+      ["CCC", "AAA", "DDD", "BBB"],
     );
   });
 
-  test("and the other way round, still largest first inside each", () => {
+  test("and the other way round: smallest class first, still largest first inside", () => {
     const mixed = consolidateHoldings([
       lot({ id: "a", ticker: "AAA", assetClass: "US Equity", shares: 1, priceCAD: 100 }),
       lot({ id: "b", ticker: "BBB", assetClass: "Bonds", shares: 1, priceCAD: 500 }),
       lot({ id: "c", ticker: "CCC", assetClass: "US Equity", shares: 1, priceCAD: 900 }),
     ]);
     assert.deepEqual(
-      sortHoldingRows(mixed, "assetClass", "desc").map((r) => r.ticker),
-      ["CCC", "AAA", "BBB"],
+      sortHoldingRows(mixed, "assetClass", "asc").map((r) => r.ticker),
+      ["BBB", "CCC", "AAA"],
     );
   });
 
