@@ -1,10 +1,7 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
-  ChevronRight,
   Coins,
   Flame,
   Layers,
@@ -23,7 +20,6 @@ import {
   CardHeader,
   Input,
   Modal,
-  Progress,
   Segmented,
   cn,
 } from "@/components/ui";
@@ -105,49 +101,23 @@ interface BenchmarkData {
   series: { month: string; price: number }[];
 }
 
-/**
- * A column header that sorts. The arrow only appears on the active column, so
- * the header row stays quiet until it is being used.
+/*
+ * The five columns of the holdings list, from a tablet up. Written out whole
+ * because Tailwind only generates classes it can find literally in the source.
  */
-function SortHeader({
-  label,
-  unit,
-  sortKey,
-  sort,
-  onSort,
-  align = "left",
-  className,
-}: {
-  label: string;
-  unit?: string;
-  sortKey: SortKey;
-  sort: { key: SortKey; dir: "asc" | "desc" };
-  onSort: (key: SortKey) => void;
-  align?: "left" | "right";
-  className?: string;
-}) {
-  const active = sort.key === sortKey;
-  const Arrow = sort.dir === "asc" ? ArrowUp : ArrowDown;
-  return (
-    <th
-      className={cn("px-3 py-2.5 font-medium", align === "right" && "text-right", className)}
-      aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
-    >
-      <button
-        type="button"
-        onClick={() => onSort(sortKey)}
-        className={cn(
-          "inline-flex items-center gap-1 uppercase tracking-wider transition-colors hover:text-ink",
-          active && "text-ink",
-        )}
-      >
-        <span>{label}</span>
-        {unit && <span className="text-muted font-normal normal-case">{unit}</span>}
-        <Arrow size={10} className={cn("shrink-0", !active && "invisible")} />
-      </button>
-    </th>
-  );
-}
+const HOLDING_COLUMNS = "md:grid-cols-[minmax(0,1fr)_8.5rem_7rem_7rem_5.5rem_2.25rem]";
+
+/*
+ * Class first — the shape of the portfolio rather than a ranking of positions
+ * that happen to be held — then the three figures worth ranking by.
+ */
+const HOLDING_SORTS: { value: SortKey; label: string }[] = [
+  { value: "assetClass", label: "Class" },
+  { value: "marketValue", label: "Value" },
+  { value: "totalReturn", label: "Gain" },
+  { value: "mwrr", label: "Return" },
+];
+
 
 /**
  * Rewards that arrived without a value, waiting for one.
@@ -242,14 +212,6 @@ export default function InvestmentsPage() {
   const accounts = useFinance((s) => s.accounts);
   const updateHolding = useFinance((s) => s.updateHolding);
 
-  /** Short label for the account a position sits in, e.g. "TFSA". */
-  const accountLabel = (id: string) => {
-    const account = accounts.find((a) => a.id === id);
-    if (!account) return "—";
-    return account.registration && account.registration !== "non-registered"
-      ? account.registration
-      : account.name;
-  };
 
   const [formOpen, setFormOpen] = useState(false);
   const [tradesOpen, setTradesOpen] = useState(false);
@@ -278,13 +240,6 @@ export default function InvestmentsPage() {
     key: "assetClass",
     dir: "asc",
   });
-  const toggleSort = (key: SortKey) =>
-    setSort((prev) =>
-      prev.key === key
-        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
-        : // Text reads naturally A-Z; numbers are most useful largest-first.
-          { key, dir: key === "name" ? "asc" : "desc" },
-    );
 
   /*
    * Fully-sold positions are hidden rather than deleted, so the cost basis and
@@ -294,15 +249,6 @@ export default function InvestmentsPage() {
   const [growthRange, setGrowthRange] = useState<RangeKey>("ALL");
   const [twrRange, setTwrRange] = useState<RangeKey>("ALL");
 
-  /* Tickers whose per-account lots are shown; only ever set for pooled rows. */
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const toggleExpanded = (ticker: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(ticker)) next.delete(ticker);
-      else next.add(ticker);
-      return next;
-    });
   const [quota, setQuota] = useState<{
     used: number;
     limit: number;
@@ -1271,262 +1217,168 @@ export default function InvestmentsPage() {
           </div>
         </Card>
 
-        {/* Holdings table */}
+        {/*
+          * Holdings, as a list rather than a spreadsheet.
+          *
+          * The table carried eleven columns — shares, average cost, price,
+          * dividends, weight, per-account tags and more — and the five things
+          * actually read off it were lost among them. What stays is what a
+          * position is (name and class), what it is worth, what it made in
+          * dollars, and how fast it made it. Everything removed is still on
+          * the page in its own card, or one click away in the edit form.
+          */}
         <Card>
           <CardHeader
             title="Holdings"
-            subtitle="Click the pencil to rename a holding or change its asset class"
+            subtitle={`${data.rows.filter((r) => !r.closed).length} positions`}
             action={
-              data.closedCount > 0 ? (
-                <Button variant="secondary" onClick={() => setShowClosed((v) => !v)}>
-                  {showClosed
-                    ? "Hide closed positions"
-                    : `Show ${data.closedCount} closed position${data.closedCount === 1 ? "" : "s"}`}
-                </Button>
-              ) : undefined
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Segmented<SortKey>
+                  options={HOLDING_SORTS}
+                  value={sort.key}
+                  onChange={(key) =>
+                    setSort({ key, dir: key === "assetClass" ? "asc" : "desc" })
+                  }
+                />
+                {data.closedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowClosed((v) => !v)}
+                    className="rounded-md px-2 py-1 text-[0.6875rem] font-medium text-ink-faint hover:bg-elevated hover:text-ink"
+                  >
+                    {showClosed ? "Hide closed" : `+ ${data.closedCount} closed`}
+                  </button>
+                )}
+              </div>
             }
           />
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-line text-left text-[0.625rem] uppercase tracking-wider text-ink-faint">
-                  <SortHeader label="Position" sortKey="name" sort={sort} onSort={toggleSort} />
-                  {/* Sorting by class falls through to value, so it reads as
-                      the classes in turn and, inside each, largest first. */}
-                  <SortHeader label="Class" sortKey="assetClass" sort={sort} onSort={toggleSort} className="hidden sm:table-cell" />
-                  <SortHeader label="Shares" sortKey="shares" sort={sort} onSort={toggleSort} align="right" className="hidden md:table-cell" />
-                  <SortHeader label="Avg cost" unit="(CAD)" sortKey="avgCostCAD" sort={sort} onSort={toggleSort} align="right" className="hidden md:table-cell" />
-                  <SortHeader label="Price" unit="(CAD)" sortKey="priceCAD" sort={sort} onSort={toggleSort} align="right" />
-                  <SortHeader label="Value" unit="(CAD)" sortKey="marketValue" sort={sort} onSort={toggleSort} align="right" />
-                  <SortHeader label="Dividends" sortKey="totalDividends" sort={sort} onSort={toggleSort} align="right" className="hidden lg:table-cell" />
-                  <SortHeader label="Gain" sortKey="totalReturn" sort={sort} onSort={toggleSort} align="right" />
-                  <SortHeader label="MWRR" sortKey="mwrr" sort={sort} onSort={toggleSort} align="right" />
-                  <SortHeader label="Weight" sortKey="weightPct" sort={sort} onSort={toggleSort} className="hidden xl:table-cell" />
-                  <th className="px-3 py-2.5 text-right font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.rows.map((r) => {
-                  /*
-                   * A security held in several accounts keeps its sold-off lots
-                   * out of the breakdown on the same terms as the table itself:
-                   * hidden by default, shown when closed positions are shown.
-                   * The row's own totals still count them — a realized gain
-                   * pooled across accounts is the point of pooling — so this
-                   * hides the line, never the money.
-                   */
-                  const lots = showClosed ? r.lots : r.lots.filter((l) => l.shares > 0);
-                  // Counted after the filter, so a position left in one account
-                  // reads and behaves as the single holding it now is.
-                  const pooled = lots.length > 1;
-                  const open = expanded.has(r.ticker);
-                  return (
-                  <Fragment key={r.ticker}>
-                  <tr
+          <div className="px-2 pb-2" role="table" aria-label="Holdings">
+            <div
+              role="row"
+              className={cn(
+                HOLDING_COLUMNS,
+                "hidden items-center gap-x-4 px-3 pb-2 text-[0.625rem] font-medium uppercase tracking-wider text-ink-faint md:grid",
+              )}
+            >
+              <span role="columnheader">Asset</span>
+              <span role="columnheader">Class</span>
+              <span role="columnheader" className="text-right">Value</span>
+              <span role="columnheader" className="text-right" title="Everything the position has made: its unrealized gain, any realized gain from sales, and the dividends it paid">
+                Gain
+              </span>
+              <span role="columnheader" className="text-right" title="Money-weighted return, annualized — the rate your own money grew at, with the timing of every purchase and sale taken into account">
+                Return / yr
+              </span>
+              <span />
+            </div>
+            <ul className="divide-y divide-line/50">
+              {data.rows.map((r) => {
+                const color = data.classColors[r.assetClass] ?? "var(--ink-faint)";
+                return (
+                  <li
+                    key={r.ticker}
+                    role="row"
                     className={cn(
-                      "border-b border-line/50 transition-colors last:border-0 hover:bg-elevated/60",
-                      pooled && "cursor-pointer",
-                      r.closed && "opacity-60",
+                      "group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 rounded-lg px-3 py-3 transition-colors hover:bg-elevated/50",
+                      HOLDING_COLUMNS,
+                      r.closed && "opacity-55",
                     )}
-                    onClick={pooled ? () => toggleExpanded(r.ticker) : undefined}
                   >
-                    <td className="px-3 py-2.5">
-                      <span className="flex items-center gap-2">
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-elevated text-[0.5625rem] font-bold tracking-wide text-brand">
-                          {r.ticker.slice(0, 3)}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="flex items-center gap-1 font-semibold text-ink">
-                            <span className="truncate">{r.name || r.ticker}</span>
-                            {pooled && (
-                              <ChevronRight
-                                size={12}
-                                className={cn(
-                                  "shrink-0 text-ink-faint transition-transform",
-                                  open && "rotate-90",
-                                )}
-                              />
-                            )}
-                          </span>
-                          <span className="flex items-center gap-1 text-ink-faint">
-                            <span className="truncate max-w-[100px]">{r.ticker}</span>
-                            {r.closed && (
-                              <span
-                                className="shrink-0 rounded bg-elevated px-1 py-px text-[0.5rem] font-medium text-ink-faint"
-                                title="Every share has been sold. Kept for the record of the realized gain and the dividends it paid."
-                              >
-                                CLOSED
-                              </span>
-                            )}
-                            {/* One tag per account the security sits in. */}
-                            {r.accountIds.map((id) => (
-                              <span
-                                key={id}
-                                className="shrink-0 rounded bg-elevated px-1 py-px text-[0.5rem] font-medium text-ink-faint"
-                              >
-                                {accountLabel(id)}
-                              </span>
-                            ))}
-                            {staleTickers.has(r.ticker) && (
-                              <span
-                                className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[0.5rem] font-medium text-amber-400"
-                                title="Last known price — the daily EODHD limit is used up, this updates automatically after 00:00 GMT"
-                              >
-                                STALE
-                              </span>
-                            )}
-                            {r.currency === "USD" && (
-                              /* Not amber: that is what STALE uses, and a
-                                 listing currency is a fact about the security,
-                                 not a warning about its price. */
-                              <span className="shrink-0 rounded bg-info/15 px-1 py-px text-[0.5rem] font-medium text-info">
-                                USD
-                              </span>
-                            )}
-                          </span>
-                        </span>
+                    {/* Asset */}
+                    <div role="cell" className="min-w-0 md:order-1">
+                      <p className="line-clamp-2 text-sm font-semibold leading-snug text-ink">
+                        {r.name || r.ticker}
+                      </p>
+                      <p className="mt-0.5 flex items-center gap-1.5 text-[0.6875rem] text-ink-faint">
+                        <span className="truncate">{r.ticker}</span>
+                        {r.currency === "USD" && <span className="text-info">USD</span>}
+                        {r.closed && <span>· Closed</span>}
+                      </p>
+                    </div>
+
+                    {/* Value — beside the name on a phone, in its column on a wider screen */}
+                    <div role="cell" className="text-right md:order-3">
+                      <span className="inline-flex items-center gap-1.5 text-sm font-semibold tabular-nums text-ink">
+                        {staleTickers.has(r.ticker) && (
+                          <span
+                            className="h-1.5 w-1.5 rounded-full bg-amber-400"
+                            title="Last known price — today's price could not be fetched yet"
+                            aria-label="Price not updated today"
+                          />
+                        )}
+                        {r.closed ? "—" : fmtCAD(r.marketValue)}
                       </span>
-                    </td>
-                    <td className="hidden px-3 py-2.5 sm:table-cell">
-                      <span className="flex items-center gap-1.5 whitespace-nowrap text-ink-dim">
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{
-                            backgroundColor:
-                              data.classColors[r.assetClass] ?? "var(--ink-faint)",
-                          }}
-                        />
-                        {r.assetClass}
-                      </span>
-                    </td>
-                    <td className="hidden px-3 py-2.5 text-right tabular-nums md:table-cell">
-                      {r.shares.toLocaleString("en-US")}
-                    </td>
-                    <td className="hidden px-3 py-2.5 text-right tabular-nums text-ink-dim md:table-cell">
-                      {fmtCAD(r.avgCostCAD, 2)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
-                      {fmtCAD(r.priceCAD, 2)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-semibold tabular-nums">
-                      {fmtCAD(r.marketValue)}
-                    </td>
-                    <td className="hidden px-3 py-2.5 text-right tabular-nums text-ink-dim lg:table-cell">
-                      {r.totalDividends > 0 ? (
-                        <span className="text-positive">{fmtCAD(r.totalDividends)}</span>
-                      ) : (
-                        <span className="text-ink-faint">—</span>
-                      )}
-                    </td>
-                    <td
-                      className={
-                        "px-3 py-2.5 text-right tabular-nums font-medium " +
-                        (r.totalReturn >= 0 ? "text-positive" : "text-negative")
-                      }
-                    >
-                      {fmtSignedCAD(r.totalReturn)}
-                    </td>
-                    <td
-                      className={cn(
-                        "px-3 py-2.5 text-right tabular-nums font-medium",
-                        r.mwrr === null
-                          ? "text-ink-faint"
-                          : r.mwrr >= 0
-                            ? "text-positive"
-                            : "text-negative",
-                      )}
-                    >
-                      {/* A dash, not a zero: no trade history means the return
-                          is unknown, which is not the same as no return. */}
-                      {r.mwrr === null ? (
-                        <span title="No trade history for this position — import trades or log them to measure a return">
-                          —
-                        </span>
-                      ) : (
-                        fmtPct(r.mwrr)
-                      )}
-                    </td>
-                    <td className="hidden px-3 py-2.5 xl:table-cell">
-                      <div className="flex items-center gap-2">
-                        <Progress value={r.weightPct} max={100} className="w-20" />
-                        <span className="w-10 text-right text-[0.6875rem] tabular-nums text-ink-faint">
-                          {r.weightPct.toFixed(1)}%
+                    </div>
+
+                    {/*
+                      * Class, gain and return share a line on a phone. On a
+                      * wider screen the wrapper steps aside (`contents`) and
+                      * each takes its own column.
+                      */}
+                    <div className="col-span-2 flex items-center gap-3 md:contents">
+                      <div role="cell" className="md:order-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-elevated px-2 py-0.5 text-[0.6875rem] font-medium text-ink-dim">
+                          <span
+                            className="h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: color }}
+                          />
+                          {r.assetClass}
                         </span>
                       </div>
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right">
-                      {/*
-                        * The pencil edits the security — ticker, name, asset
-                        * class — which is the same in every account holding it,
-                        * so a pooled row can be edited from here directly and
-                        * the change reaches all of its lots.
-                        */}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Edit ${r.ticker}`}
-                        onClick={() => {
-                          setEditing(lots[0]);
-                          setFormOpen(true);
-                        }}
+                      <div
+                        role="cell"
+                        className={cn(
+                          "ml-auto text-right text-sm font-medium tabular-nums md:order-4 md:ml-0",
+                          r.totalReturn >= 0 ? "text-positive" : "text-negative",
+                        )}
                       >
-                        <Pencil size={14} />
-                      </Button>
-                    </td>
-                  </tr>
-                  {pooled &&
-                    open &&
-                    lots.map((lot) => (
-                      <tr key={lot.id} className="border-b border-line/50 bg-elevated/30 last:border-0">
-                        <td className="py-2 pl-12 pr-3">
-                          <span className="text-[0.6875rem] text-ink-dim">
-                            {accountLabel(lot.accountId)}
+                        {fmtSignedCAD(r.totalReturn)}
+                      </div>
+                      <div role="cell" className="text-right md:order-5">
+                        {/* A dash, not a zero: no trade history means the
+                            return is unknown, which is not no return. */}
+                        {r.mwrr === null ? (
+                          <span
+                            className="text-sm text-ink-faint"
+                            title="No trade history for this position — import trades or log them to measure a return"
+                          >
+                            —
                           </span>
-                          {lot.shares <= 0 && (
-                            <span className="ml-1 rounded bg-elevated px-1 py-px text-[0.5rem] font-medium text-ink-faint">
-                              CLOSED
-                            </span>
-                          )}
-                        </td>
-                        {/* The class belongs to the security, not the lot. */}
-                        <td className="hidden px-3 py-2 sm:table-cell" />
-                        <td className="hidden px-3 py-2 text-right tabular-nums text-ink-dim md:table-cell">
-                          {lot.shares.toLocaleString("en-US")}
-                        </td>
-                        <td className="hidden px-3 py-2 text-right tabular-nums text-ink-dim md:table-cell">
-                          {fmtCAD(lot.avgCostCAD ?? lot.avgCost, 2)}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
-                          {fmtCAD(lot.priceCAD ?? lot.price, 2)}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
-                          {fmtCAD(lot.shares * (lot.priceCAD ?? lot.price))}
-                        </td>
-                        <td className="hidden px-3 py-2 lg:table-cell" />
-                        <td className="px-3 py-2" />
-                        <td className="px-3 py-2" />
-                        <td className="hidden px-3 py-2 xl:table-cell" />
+                        ) : (
+                          <Badge tone={r.mwrr >= 0 ? "positive" : "negative"}>
+                            <span className="tabular-nums">{fmtPct(r.mwrr)}</span>
+                          </Badge>
+                        )}
+                      </div>
+                      <div role="cell" className="text-right md:order-6">
                         {/*
-                          * No pencil per account. Everything the form edits is
-                          * a property of the security and saves to every
-                          * account at once, so a pencil here would promise a
-                          * per-account edit that does not exist.
+                          * The pencil edits the security — name and class —
+                          * which is the same in every account holding it, so
+                          * the change reaches every lot.
                           */}
-                        <td className="px-3 py-2" />
-                      </tr>
-                    ))}
-                  </Fragment>
-                  );
-                })}
-                {data.rows.length === 0 && (
-                  <tr>
-                    <td colSpan={11} className="py-12 text-center text-xs text-ink-faint">
-                      No holdings yet — use Log trades above to record your first.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Edit ${r.ticker}`}
+                          className="md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+                          onClick={() => {
+                            setEditing(r.lots[0]);
+                            setFormOpen(true);
+                          }}
+                        >
+                          <Pencil size={14} />
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            {data.rows.length === 0 && (
+              <p className="py-12 text-center text-xs text-ink-faint">
+                No holdings yet — use Log trades above to record your first.
+              </p>
+            )}
           </div>
         </Card>
       </div>
