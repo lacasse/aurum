@@ -6,8 +6,8 @@ import {
   ArrowUp,
   ChevronRight,
   Coins,
-  Flame,
   Layers,
+  Wallet,
   Pencil,
   Plus,
   RefreshCw,
@@ -92,19 +92,25 @@ const RANGE_OPTIONS: { value: RangeKey; label: string }[] = [
 const RANGE_KEYS = RANGE_OPTIONS.map((o) => o.value);
 
 /**
- * Keep the last `n` months, or the year to date. Both charts cut here are
- * levels — a value, a compounded return — so the year opens on last December.
+ * Keep the last `n` months, or the year to date.
+ *
+ * Both charts cut here are levels — a value, a compounded return — so a window
+ * of n months needs n+1 month-ends: the close it opened on, and one per month
+ * after it. Slicing n points covered n-1 months of movement, so "3M" drew two
+ * months and said so in the label beside it. The year to date takes the same
+ * shape, opening on last December.
  */
 function windowed<T>(rows: T[], range: RangeKey, keyOf: (row: T) => string): T[] {
   if (range === "YTD") return yearToDate(rows, keyOf, { withBase: true });
   const n = RANGE_MONTHS[range];
-  return Number.isFinite(n) ? rows.slice(-n) : rows;
+  return Number.isFinite(n) ? rows.slice(-(n + 1)) : rows;
 }
 
 /** "since Feb 2022" for the full run, "last 6 months" for a window of it. */
 function rangeLabel(range: RangeKey, points: { label: string }[]): string {
   if (range === "YTD") return "year to date";
-  if (range !== "ALL") return `last ${points.length} months`;
+  // Intervals, not points: the first month-end is where the window opens.
+  if (range !== "ALL") return `last ${Math.max(1, points.length - 1)} months`;
   return points.length > 0 ? `since ${points[0].label}` : "all time";
 }
 
@@ -156,6 +162,65 @@ function SortHeader({
       </button>
     </th>
   );
+}
+
+/*
+ * One fact under a tile's rule: a name, a figure ranged right, and an optional
+ * bar behind them.
+ *
+ * The tiles used to end in a run-on caption that wrapped to three lines at any
+ * width the card actually gets. A row per fact fits the space the tile already
+ * has, holds its shape as the figures change, and never wraps: the name
+ * truncates, the figure does not.
+ */
+function FactRow({
+  name,
+  figure,
+  share,
+  tone = "neutral",
+  color,
+}: {
+  name: string;
+  figure: string;
+  /** 0-100. Given, the row is drawn over a bar of that width. */
+  share?: number;
+  tone?: "neutral" | "positive" | "negative";
+  color?: string;
+}) {
+  return (
+    <div className="relative flex items-baseline gap-2 rounded px-1.5 py-1">
+      {share !== undefined && (
+        <span
+          className="absolute inset-y-0 left-0 rounded bg-elevated"
+          style={{
+            width: `${Math.max(2, Math.min(100, share))}%`,
+            ...(color ? { background: color, opacity: 0.28 } : {}),
+          }}
+          aria-hidden
+        />
+      )}
+      <span className="relative min-w-0 flex-1 truncate text-[0.6875rem] text-ink-dim">
+        {name}
+      </span>
+      <span
+        className={cn(
+          "relative shrink-0 text-[0.6875rem] font-medium tabular-nums",
+          tone === "positive" && "text-positive",
+          tone === "negative" && "text-negative",
+          tone === "neutral" && "text-ink",
+        )}
+      >
+        {figure}
+      </span>
+    </div>
+  );
+}
+
+/** "9 months", "1 year", "3.2 years" — a span in the unit that reads best. */
+function spanLabel(months: number): string {
+  if (months < 24) return `${months} month${months === 1 ? "" : "s"}`;
+  const years = months / 12;
+  return `${Number.isInteger(years) ? years : years.toFixed(1)} years`;
 }
 
 type HoldingView = "simple" | "detailed";
@@ -573,20 +638,6 @@ export default function InvestmentsPage() {
     const totalCost = open.reduce((s, r) => s + r.costBasis, 0);
     const totalDividends = open.reduce((s, r) => s + r.totalDividends, 0);
     /*
-     * The two halves of "how has this gone", kept apart.
-     *
-     * Every figure on this page pooled them: what the positions you hold are
-     * worth against their cost, plus what everything you have ever closed made
-     * or lost. They answer different questions — one is the portfolio, the
-     * other is its history — and adding them means a position sold years ago
-     * decides how today's looks. On this record the open positions are up
-     * [figure redacted] and the closed ones down [figure redacted], so one number reports a portfolio
-     * that is doing well as a loss.
-     */
-    const unrealized = open.reduce((s, r) => s + r.gain, 0);
-    const realized = rows.reduce((s, r) => s + r.realizedGain, 0);
-    const dividendsAll = rows.reduce((s, r) => s + r.totalDividends, 0);
-    /*
      * How few positions carry the gain.
      *
      * A portfolio-level gain reads as though everything worked, and usually a
@@ -598,15 +649,30 @@ export default function InvestmentsPage() {
     const winners = open.filter((r) => r.gain > 0).sort((a, b) => b.gain - a.gain);
     const gainTotal = winners.reduce((s, r) => s + r.gain, 0);
     let carried = 0;
-    let carriers = 0;
+    const carrying: typeof winners = [];
     for (const r of winners) {
       if (carried >= gainTotal * 0.8) break;
       carried += r.gain;
-      carriers += 1;
+      carrying.push(r);
     }
     const concentration =
       gainTotal > 0 && winners.length > 0
-        ? { carriers, of: winners.length, share: (carried / gainTotal) * 100 }
+        ? {
+            carriers: carrying.length,
+            of: winners.length,
+            share: (carried / gainTotal) * 100,
+            /*
+             * Named, because "3 holdings" invites the question and the answer
+             * is short. Each carries its share of the whole gain, so the rows
+             * add up to the share stated above them.
+             */
+            carrying: carrying.map((r) => ({
+              ticker: r.ticker,
+              name: r.name,
+              assetClass: r.assetClass,
+              share: (r.gain / gainTotal) * 100,
+            })),
+          }
         : null;
 
     /*
@@ -657,9 +723,6 @@ export default function InvestmentsPage() {
       totalValue,
       totalCost,
       totalDividends,
-      unrealized,
-      realized,
-      dividendsAll,
     };
   }, [holdings, accounts, sort, showClosed]);
 
@@ -770,8 +833,6 @@ export default function InvestmentsPage() {
       // Intervals, not points: n months of prices give n-1 monthly returns,
       // and this is the same count the returns card above reports.
       months: windowedMonths.length - 1,
-      from: labelMonth(windowedMonths[0]),
-      through: labelMonth(windowedMonths[windowedMonths.length - 1]),
       name: benchmark.name,
       note: benchmark.note,
     };
@@ -799,9 +860,17 @@ export default function InvestmentsPage() {
   const prev = data.series[data.series.length - 2] ?? last;
   const monthDelta = prev.value !== 0 ? ((last.value - prev.value) / prev.value) * 100 : 0;
   const monthDeltaCAD = last.value - prev.value;
-  const unrealized = data.totalValue - data.totalCost + data.totalDividends;
-  const unrealizedPct =
-    data.totalCost > 0 ? (unrealized / data.totalCost) * 100 : 0;
+  /*
+   * What the positions are worth above what they cost, and the share of the
+   * bar that cost takes. Above cost the bar is cost then gain; below it, the
+   * whole bar is the loss against a full-width cost.
+   */
+  const above = data.totalValue - data.totalCost;
+  const largest = Math.max(data.totalValue, data.totalCost);
+  // The bar is drawn against the larger of the two, so the tail is the gap
+  // between them either way: gain above cost, shortfall below it.
+  const costShare =
+    largest > 0 ? (Math.min(data.totalValue, data.totalCost) / largest) * 100 : 100;
 
   return (
     <Shell
@@ -883,30 +952,52 @@ export default function InvestmentsPage() {
           </Card>
         )}
         <PendingRewards />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {/*
+            * Value and cost in one tile. They were two, and the second said
+            * only what the first already implies — the interesting figure is
+            * the distance between them, which neither card drew. The bar is
+            * that distance: the filled part is what the positions cost, the
+            * rest is what they have gained.
+            */}
           <StatCard
             label="Portfolio value"
             value={fmtCAD(data.totalValue)}
             delta={monthDelta}
             deltaValue={fmtSignedCAD(monthDeltaCAD)}
             deltaLabel="vs last month"
-            icon={<TrendingUp size={16} />}
-            spark={data.series.map((p) => ({ v: p.value }))}
-            sparkKey="v"
-            sparkColor="#22d3ee"
-          />
-          <StatCard
-            label="Cost basis"
-            value={fmtCAD(data.totalCost)}
-            deltaLabel={`across ${data.rows.length} positions`}
-            icon={<Flame size={16} />}
-          />
-          <StatCard
-            label="Unrealized gain"
-            value={fmtSignedCAD(unrealized)}
-            delta={unrealizedPct}
-            deltaLabel="of cost basis"
-            tone={unrealized >= 0 ? "positive" : "negative"}
+            icon={<Wallet size={16} />}
+            footer={
+              <div>
+                <div
+                  className="flex h-1.5 overflow-hidden rounded-full bg-elevated"
+                  role="img"
+                  aria-label={`${fmtCAD(data.totalCost)} invested, now worth ${fmtCAD(data.totalValue)}`}
+                >
+                  <span
+                    className="bg-ink-faint/60"
+                    style={{ width: `${Math.min(100, costShare)}%` }}
+                  />
+                  <span
+                    className={above >= 0 ? "bg-positive" : "bg-negative"}
+                    style={{ width: `${Math.max(0, 100 - costShare)}%` }}
+                  />
+                </div>
+                {/* The bar above says which is which: what it cost, and what
+                    that has become. */}
+                <p className="mt-2 flex items-baseline justify-between gap-2 text-[0.6875rem] text-ink-faint">
+                  <span className="tabular-nums text-ink-dim">{fmtCAD(data.totalCost)}</span>
+                  <span
+                    className={cn(
+                      "font-medium tabular-nums",
+                      above >= 0 ? "text-positive" : "text-negative",
+                    )}
+                  >
+                    {fmtSignedCAD(above)}
+                  </span>
+                </p>
+              </div>
+            }
           />
           {/*
             * Against the index, not against the best line inside the
@@ -928,23 +1019,38 @@ export default function InvestmentsPage() {
                 ? `${Math.abs(twr.alpha).toFixed(1)}% ${twr.alpha >= 0 ? "ahead" : "behind"}`
                 : "—"
             }
-            deltaValue={
-              twr
-                ? `You ${fmtPct(twr.portfolioTwr)} · market ${fmtPct(twr.benchmarkTwr)}`
-                : undefined
-            }
             /*
-             * The period spelled out as dates. "Last 15 months" left the reader
-             * to work out which fifteen, and the window follows the range picked
-             * on the returns chart, so it moves.
+             * How long, not which months. The window follows the returns chart
+             * below, so the dates moved with it and told the reader less than
+             * the span does.
              */
-            deltaLabel={
-              twr
-                ? `${twr.from} – ${twr.through} · ${twr.months} months`
-                : "no market data yet"
-            }
+            deltaLabel={twr ? `over ${spanLabel(twr.months)}` : "no market data yet"}
             tone={(twr?.alpha ?? 0) >= 0 ? "positive" : "negative"}
             icon={<TrendingUp size={16} />}
+            footer={
+              twr ? (
+                <div className="-mx-1.5 space-y-0.5">
+                  {/* Both bars share one scale, so the gap between them is the
+                      claim the headline above makes. */}
+                  {[
+                    { name: "You", value: twr.portfolioTwr },
+                    { name: "The market", value: twr.benchmarkTwr },
+                  ].map((row) => (
+                    <FactRow
+                      key={row.name}
+                      name={row.name}
+                      figure={fmtPct(row.value)}
+                      share={
+                        (Math.max(row.value, 0) /
+                          Math.max(twr.portfolioTwr, twr.benchmarkTwr, 1)) *
+                        100
+                      }
+                      tone={row.value >= 0 ? "positive" : "negative"}
+                    />
+                  ))}
+                </div>
+              ) : undefined
+            }
           />
           <StatCard
             label="Where your gains come from"
@@ -959,22 +1065,54 @@ export default function InvestmentsPage() {
                 : undefined
             }
             deltaLabel={
-              data.concentration
-                ? `out of ${data.concentration.of} in profit`
-                : "nothing is in profit yet"
+              data.concentration ? `of ${data.concentration.of} in profit` : "nothing is in profit yet"
             }
             icon={<Layers size={16} />}
+            footer={
+              data.concentration && data.concentration.carrying.length > 0 ? (
+                <div className="-mx-1.5 space-y-0.5">
+                  {/* The ones doing the carrying, each against the whole gain,
+                      so the rows add up to the share above them. */}
+                  {data.concentration.carrying.slice(0, 3).map((c) => (
+                    <FactRow
+                      key={c.ticker}
+                      name={c.name || c.ticker}
+                      figure={`${c.share.toFixed(0)}%`}
+                      share={c.share}
+                      color={data.classColors[c.assetClass]}
+                    />
+                  ))}
+                  {data.concentration.carrying.length > 3 && (
+                    <FactRow
+                      name={`${data.concentration.carrying.length - 3} more`}
+                      figure={`${data.concentration.carrying
+                        .slice(3)
+                        .reduce((sum, c) => sum + c.share, 0)
+                        .toFixed(0)}%`}
+                    />
+                  )}
+                </div>
+              ) : undefined
+            }
           />
           <StatCard
             label="Dividend income"
             value={`${fmtCAD(data.ttmDividends)} / yr`}
-            deltaValue={
-              data.totalCost > 0
-                ? `${((data.ttmDividends / data.totalCost) * 100).toFixed(1)}% of what you invested`
-                : undefined
-            }
             deltaLabel="paid in the last 12 months"
             icon={<Coins size={16} />}
+            footer={
+              <div className="-mx-1.5 space-y-0.5">
+                <FactRow
+                  name="Yield on cost"
+                  figure={
+                    data.totalCost > 0
+                      ? `${((data.ttmDividends / data.totalCost) * 100).toFixed(1)}%`
+                      : "—"
+                  }
+                />
+                <FactRow name="A month, on average" figure={fmtCAD(data.ttmDividends / 12)} />
+              </div>
+            }
           />
         </div>
 
@@ -1031,272 +1169,6 @@ export default function InvestmentsPage() {
             </div>
           </Card>
         </div>
-
-        {/* What you hold, apart from what you closed */}
-        <Card>
-          <CardHeader
-            title="Where the money stands"
-            subtitle="What you hold, what you closed, and what was paid out along the way"
-          />
-          <div className="grid gap-px bg-line sm:grid-cols-3">
-            <div className="bg-surface p-5">
-              <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
-                Positions you hold
-              </p>
-              <p
-                className={cn(
-                  "mt-1 text-2xl font-semibold tabular-nums",
-                  data.unrealized >= 0 ? "text-positive" : "text-negative",
-                )}
-              >
-                {fmtSignedCAD(data.unrealized)}
-              </p>
-              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
-                {fmtCAD(data.totalValue)} against {fmtCAD(data.totalCost)} paid
-                {data.totalCost > 0 && (
-                  <>
-                    {" "}
-                    ·{" "}
-                    <strong
-                      className={
-                        data.unrealized >= 0 ? "text-positive" : "text-negative"
-                      }
-                    >
-                      {fmtPct((data.unrealized / data.totalCost) * 100)}
-                    </strong>
-                  </>
-                )}
-              </p>
-              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
-                The portfolio as it stands. Nothing here is settled — it moves
-                with the next price.
-              </p>
-            </div>
-
-            <div className="bg-surface p-5">
-              <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
-                Positions you closed
-              </p>
-              <p
-                className={cn(
-                  "mt-1 text-2xl font-semibold tabular-nums",
-                  data.realized >= 0 ? "text-positive" : "text-negative",
-                )}
-              >
-                {fmtSignedCAD(data.realized)}
-              </p>
-              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
-                Everything sold, against what those shares had cost.
-              </p>
-              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
-                Settled and in the past. It is history rather than performance,
-                which is why it is not mixed into the figure beside it — a
-                position closed years ago should not decide how today&apos;s
-                looks.
-              </p>
-            </div>
-
-            <div className="bg-surface p-5">
-              <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
-                Paid out to you
-              </p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums text-positive">
-                {fmtCAD(data.dividendsAll)}
-              </p>
-              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
-                Dividends and distributions, across every position ever held.
-              </p>
-              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
-                Money that arrived whatever the price did, which is the part of
-                a return that cannot be given back.
-              </p>
-            </div>
-          </div>
-          <p className="border-t border-line px-5 py-3 text-[0.6875rem] leading-relaxed text-ink-faint">
-            Together{" "}
-            <strong
-              className={cn(
-                "tabular-nums",
-                data.unrealized + data.realized + data.dividendsAll >= 0
-                  ? "text-positive"
-                  : "text-negative",
-              )}
-            >
-              {fmtSignedCAD(
-                data.unrealized + data.realized + data.dividendsAll,
-              )}
-            </strong>{" "}
-            — the figure the three below are percentages of. A sale recorded
-            without its proceeds lands entirely in the middle column, so a
-            surprising figure there is worth reading as a question about the
-            data before a verdict on the investing.
-          </p>
-        </Card>
-
-        <Card>
-          <CardHeader
-            title="Three ways of asking how it went"
-            subtitle={`Since ${returns.from} · the same portfolio, measured three ways`}
-          />
-          <div className="grid gap-px bg-line sm:grid-cols-3">
-            <div className="bg-surface p-5">
-              <p className="text-xs uppercase tracking-wider text-ink-faint">Simple return</p>
-              <p
-                className={cn(
-                  "mt-1 text-2xl font-semibold tabular-nums",
-                  (returns.simple.pct ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400",
-                )}
-              >
-                {returns.simple.pct === null ? "—" : fmtPct(returns.simple.pct)}
-              </p>
-              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
-                What you actually put in against what it is worth now.
-              </p>
-              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
-                {fmtCAD(returns.simple.contributed)} in · {fmtCAD(returns.simple.returned)}{" "}
-                in dividends · {fmtCAD(returns.simple.held)} held. It ignores time
-                entirely, so the same figure could be one good year or five slow ones.
-              </p>
-              {/*
-                Said out loud because the two numbers differ by a lot here, and
-                the larger one is the one a broker statement shows. Without this
-                the card looks like it has simply lost track of a few hundred
-                thousand dollars.
-              */}
-              {returns.simple.grossSold > 0 ? (
-                <p className="mt-1 text-[0.6875rem] leading-relaxed text-ink-faint">
-                  {fmtCAD(returns.simple.grossBought)} of purchases, less{" "}
-                  {fmtCAD(returns.simple.grossSold)} of sale proceeds that paid for
-                  some of them.
-                </p>
-              ) : null}
-            </div>
-
-            <div className="bg-surface p-5">
-              <p className="text-xs uppercase tracking-wider text-ink-faint">
-                Money-weighted · MWRR
-              </p>
-              <p
-                className={cn(
-                  "mt-1 text-2xl font-semibold tabular-nums",
-                  (returns.mwrr ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400",
-                )}
-              >
-                {returns.mwrr === null ? "—" : `${fmtPct(returns.mwrr)}/yr`}
-              </p>
-              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
-                What your actual dollars earned, counting when each one arrived.
-              </p>
-              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
-                Money added just before a fall drags this down; money added before a rise
-                lifts it. This is your return, and it is the one you cannot compare to an
-                index — the index never had your deposits.
-              </p>
-            </div>
-
-            <div className="bg-surface p-5">
-              <p className="text-xs uppercase tracking-wider text-ink-faint">
-                Time-weighted · TWRR
-              </p>
-              <p
-                className={cn(
-                  "mt-1 text-2xl font-semibold tabular-nums",
-                  (returns.twrAnnual ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400",
-                )}
-              >
-                {returns.twrAnnual === null ? "—" : `${fmtPct(returns.twrAnnual)}/yr`}
-              </p>
-              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
-                How the holdings performed, with deposits and withdrawals removed.
-              </p>
-              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
-                {returns.twrTotal === null
-                  ? ""
-                  : `${fmtPct(returns.twrTotal)} in total over ${returns.months} months, through ${returns.through}. `}
-                Because it ignores when money moved, it judges what you bought rather than
-                when you bought it — which is why it is the one set against XEQT below.
-              </p>
-            </div>
-          </div>
-
-          {returns.gap !== null && (
-            <div className="border-t border-line px-5 py-4">
-              <p className="text-xs leading-relaxed text-ink-dim">
-                <span className="font-medium text-ink">Why they differ.</span>{" "}
-                {Math.abs(returns.gap) < 1 ? (
-                  <>
-                    Your money and your holdings returned about the same, which means the
-                    timing of your contributions made little difference either way.
-                  </>
-                ) : returns.gap < 0 ? (
-                  <>
-                    The holdings earned{" "}
-                    <span className="font-medium text-ink">
-                      {fmtPct(returns.twrAnnual!)}/yr
-                    </span>{" "}
-                    while your money earned{" "}
-                    <span className="font-medium text-rose-400">
-                      {fmtPct(returns.mwrr!)}/yr
-                    </span>
-                    , a gap of {Math.abs(returns.gap).toFixed(1)} points. More was invested
-                    before the falls than before the rises: the choices did better than the
-                    timing.
-                  </>
-                ) : (
-                  <>
-                    Your money earned{" "}
-                    <span className="font-medium text-emerald-400">
-                      {fmtPct(returns.mwrr!)}/yr
-                    </span>{" "}
-                    against the holdings&rsquo;{" "}
-                    <span className="font-medium text-ink">
-                      {fmtPct(returns.twrAnnual!)}/yr
-                    </span>
-                    , a gap of {returns.gap.toFixed(1)} points in your favour — you tended to
-                    add money before the rises.
-                  </>
-                )}
-              </p>
-            </div>
-          )}
-        </Card>
-
-        {twr && (
-          <Card>
-            <CardHeader
-              title="Time-weighted return vs XEQT"
-              subtitle={`Chained monthly returns over ${twr.months} months · deposits and withdrawals removed`}
-              action={
-                <div className="flex items-center gap-2">
-                  <Segmented
-                    options={RANGE_OPTIONS}
-                    value={twrRange}
-                    onChange={setTwrRange}
-                  />
-                  <Badge tone={twr.alpha >= 0 ? "positive" : "negative"}>
-                    {twr.alpha >= 0 ? "+" : ""}
-                    {twr.alpha.toFixed(1)}% alpha
-                  </Badge>
-                </div>
-              }
-            />
-            <div className="px-3 pb-4">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 pb-2">
-                <span className="flex items-center gap-2 text-xs text-ink-dim">
-                  <span className="h-2 w-2 rounded-full bg-cyan-400" />
-                  Portfolio{" "}
-                  <span className="font-medium text-ink">{fmtPct(twr.portfolioTwr)}</span>
-                </span>
-                <span className="flex items-center gap-2 text-xs text-ink-dim">
-                  <span className="h-2 w-2 rounded-full bg-amber-400" />
-                  {twr.name}{" "}
-                  <span className="font-medium text-ink">{fmtPct(twr.benchmarkTwr)}</span>
-                </span>
-              </div>
-              <TwrChart data={twr.rows} height={300} benchmarkName="XEQT" />
-            </div>
-          </Card>
-        )}
 
         {/*
           * One card for the holdings, two ways of reading them.
@@ -1597,6 +1469,172 @@ export default function InvestmentsPage() {
           </div>
           )}
         </Card>
+
+        <Card>
+          <CardHeader
+            title="Three ways of asking how it went"
+            subtitle={`Since ${returns.from} · the same portfolio, measured three ways`}
+          />
+          <div className="grid gap-px bg-line sm:grid-cols-3">
+            <div className="bg-surface p-5">
+              <p className="text-xs uppercase tracking-wider text-ink-faint">Simple return</p>
+              <p
+                className={cn(
+                  "mt-1 text-2xl font-semibold tabular-nums",
+                  (returns.simple.pct ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400",
+                )}
+              >
+                {returns.simple.pct === null ? "—" : fmtPct(returns.simple.pct)}
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+                What you actually put in against what it is worth now.
+              </p>
+              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
+                {fmtCAD(returns.simple.contributed)} in · {fmtCAD(returns.simple.returned)}{" "}
+                in dividends · {fmtCAD(returns.simple.held)} held. It ignores time
+                entirely, so the same figure could be one good year or five slow ones.
+              </p>
+              {/*
+                Said out loud because the two numbers differ by a lot here, and
+                the larger one is the one a broker statement shows. Without this
+                the card looks like it has simply lost track of a few hundred
+                thousand dollars.
+              */}
+              {returns.simple.grossSold > 0 ? (
+                <p className="mt-1 text-[0.6875rem] leading-relaxed text-ink-faint">
+                  {fmtCAD(returns.simple.grossBought)} of purchases, less{" "}
+                  {fmtCAD(returns.simple.grossSold)} of sale proceeds that paid for
+                  some of them.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="bg-surface p-5">
+              <p className="text-xs uppercase tracking-wider text-ink-faint">
+                Money-weighted · MWRR
+              </p>
+              <p
+                className={cn(
+                  "mt-1 text-2xl font-semibold tabular-nums",
+                  (returns.mwrr ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400",
+                )}
+              >
+                {returns.mwrr === null ? "—" : `${fmtPct(returns.mwrr)}/yr`}
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+                What your actual dollars earned, counting when each one arrived.
+              </p>
+              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
+                Money added just before a fall drags this down; money added before a rise
+                lifts it. This is your return, and it is the one you cannot compare to an
+                index — the index never had your deposits.
+              </p>
+            </div>
+
+            <div className="bg-surface p-5">
+              <p className="text-xs uppercase tracking-wider text-ink-faint">
+                Time-weighted · TWRR
+              </p>
+              <p
+                className={cn(
+                  "mt-1 text-2xl font-semibold tabular-nums",
+                  (returns.twrAnnual ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400",
+                )}
+              >
+                {returns.twrAnnual === null ? "—" : `${fmtPct(returns.twrAnnual)}/yr`}
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+                How the holdings performed, with deposits and withdrawals removed.
+              </p>
+              <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
+                {returns.twrTotal === null
+                  ? ""
+                  : `${fmtPct(returns.twrTotal)} in total over ${returns.months} months, through ${returns.through}. `}
+                Because it ignores when money moved, it judges what you bought rather than
+                when you bought it — which is why it is the one set against XEQT below.
+              </p>
+            </div>
+          </div>
+
+          {returns.gap !== null && (
+            <div className="border-t border-line px-5 py-4">
+              <p className="text-xs leading-relaxed text-ink-dim">
+                <span className="font-medium text-ink">Why they differ.</span>{" "}
+                {Math.abs(returns.gap) < 1 ? (
+                  <>
+                    Your money and your holdings returned about the same, which means the
+                    timing of your contributions made little difference either way.
+                  </>
+                ) : returns.gap < 0 ? (
+                  <>
+                    The holdings earned{" "}
+                    <span className="font-medium text-ink">
+                      {fmtPct(returns.twrAnnual!)}/yr
+                    </span>{" "}
+                    while your money earned{" "}
+                    <span className="font-medium text-rose-400">
+                      {fmtPct(returns.mwrr!)}/yr
+                    </span>
+                    , a gap of {Math.abs(returns.gap).toFixed(1)} points. More was invested
+                    before the falls than before the rises: the choices did better than the
+                    timing.
+                  </>
+                ) : (
+                  <>
+                    Your money earned{" "}
+                    <span className="font-medium text-emerald-400">
+                      {fmtPct(returns.mwrr!)}/yr
+                    </span>{" "}
+                    against the holdings&rsquo;{" "}
+                    <span className="font-medium text-ink">
+                      {fmtPct(returns.twrAnnual!)}/yr
+                    </span>
+                    , a gap of {returns.gap.toFixed(1)} points in your favour — you tended to
+                    add money before the rises.
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+        </Card>
+
+        {twr && (
+          <Card>
+            <CardHeader
+              title="Time-weighted return vs XEQT"
+              subtitle={`Chained monthly returns over ${twr.months} months · deposits and withdrawals removed`}
+              action={
+                <div className="flex items-center gap-2">
+                  <Segmented
+                    options={RANGE_OPTIONS}
+                    value={twrRange}
+                    onChange={setTwrRange}
+                  />
+                  <Badge tone={twr.alpha >= 0 ? "positive" : "negative"}>
+                    {twr.alpha >= 0 ? "+" : ""}
+                    {twr.alpha.toFixed(1)}% alpha
+                  </Badge>
+                </div>
+              }
+            />
+            <div className="px-3 pb-4">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 pb-2">
+                <span className="flex items-center gap-2 text-xs text-ink-dim">
+                  <span className="h-2 w-2 rounded-full bg-cyan-400" />
+                  Portfolio{" "}
+                  <span className="font-medium text-ink">{fmtPct(twr.portfolioTwr)}</span>
+                </span>
+                <span className="flex items-center gap-2 text-xs text-ink-dim">
+                  <span className="h-2 w-2 rounded-full bg-amber-400" />
+                  {twr.name}{" "}
+                  <span className="font-medium text-ink">{fmtPct(twr.benchmarkTwr)}</span>
+                </span>
+              </div>
+              <TwrChart data={twr.rows} height={300} benchmarkName="XEQT" />
+            </div>
+          </Card>
+        )}
+
       </div>
 
       {/*
