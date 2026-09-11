@@ -210,6 +210,16 @@ describe("what was repaid is named, opposite what was borrowed", () => {
     assert.ok(!names.includes("Debt repaid"));
   });
 
+  test("the Spending bar carries spending only", () => {
+    const d = yearFlow(base, "2025");
+    const into = (name: string) =>
+      d.links
+        .filter((l) => d.nodes[l.target].name === name)
+        .reduce((a, l) => a + l.value, 0);
+    assert.equal(into("Spending"), 20000, "the groceries, and not the repayment");
+    assert.equal(into("Debt repaid"), 5000);
+  });
+
   test("a year with no repayments has neither", () => {
     const names = flowOf([base[0], base[1]]).nodes.map((n) => n.name);
     assert.ok(!names.includes("Debt repaid"));
@@ -863,8 +873,11 @@ describe("what the money left an account for", () => {
       d.links
         .filter((l) => d.nodes[l.source].name === from && d.nodes[l.target].name === to)
         .reduce((a, l) => a + l.value, 0);
-    assert.equal(e("Money in", "Spending"), 7000);
-    assert.equal(e("Spending", "Debt repaid"), 7000);
+    // Straight off the account: the Spending bar shows what was spent, and a
+    // repayment is not that.
+    assert.equal(e("Money in", "Debt repaid"), 7000);
+    assert.equal(e("Money in", "Spending"), 0);
+    assert.ok(!d.nodes.some((n) => n.name === "Spending"), "no spending this year");
     assert.equal(d.nodes.some((n) => n.name === "Debt Repayment"), false);
   });
 

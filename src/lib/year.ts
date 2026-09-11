@@ -1175,13 +1175,21 @@ export function yearFlow(
        * every dollar spent, and the Spending bar becomes what was spent out of
        * an account you can spend from, which is what the column beside it is
        * already about.
+       *
+       * A repayment takes the same route, for a plainer reason: the page does
+       * not count it as spending, so it must not be drawn inside the bar that
+       * shows what spending was. Hanging it off that bar made the chart and the
+       * figure beside it disagree about one number.
        */
       rows.push({
         from: hub,
         to: spendBand(t.category),
         cents,
         stage: 2,
-        group: hub === INVESTMENTS ? DIRECT : SPENDING,
+        group:
+          hub === INVESTMENTS || spendGroup(t.category) === "excluded"
+            ? DIRECT
+            : SPENDING,
       });
     } else if (t.type === "transfer") {
       const dest = byId.get(t.destinationAccountId ?? "");
