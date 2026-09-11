@@ -149,6 +149,15 @@ function SortHeader({
   );
 }
 
+type HoldingView = "simple" | "detailed";
+const HOLDING_VIEWS: { value: HoldingView; label: string }[] = [
+  { value: "simple", label: "Simple" },
+  { value: "detailed", label: "Detailed" },
+];
+const HOLDING_VIEW_KEY = "aurum.holdings.view";
+
+
+
 /**
  * Rewards that arrived without a value, waiting for one.
  *
@@ -242,6 +251,7 @@ export default function InvestmentsPage() {
   const accounts = useFinance((s) => s.accounts);
   const updateHolding = useFinance((s) => s.updateHolding);
 
+
   /** Short label for the account a position sits in, e.g. "TFSA". */
   const accountLabel = (id: string) => {
     const account = accounts.find((a) => a.id === id);
@@ -276,8 +286,9 @@ export default function InvestmentsPage() {
    */
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
     key: "assetClass",
-    dir: "asc",
+    dir: "desc",
   });
+
   const toggleSort = (key: SortKey) =>
     setSort((prev) =>
       prev.key === key
@@ -285,6 +296,32 @@ export default function InvestmentsPage() {
         : // Text reads naturally A-Z; numbers are most useful largest-first.
           { key, dir: key === "name" ? "asc" : "desc" },
     );
+
+  /*
+   * Which holdings view is showing, remembered per browser. Simple is the
+   * default: the five figures actually read off the list. Detailed is the full
+   * table — shares, cost, price, dividends, weight and the per-account lots —
+   * for the times those are the question.
+   */
+  // Read once, on the client. The page shows a skeleton until it is ready, so
+  // a server render never draws the card this decides between.
+  const [holdingView, setHoldingView] = useState<HoldingView>(() => {
+    if (typeof window === "undefined") return "simple";
+    try {
+      const saved = window.localStorage.getItem(HOLDING_VIEW_KEY);
+      return saved === "detailed" ? "detailed" : "simple";
+    } catch {
+      return "simple";
+    }
+  });
+  const chooseHoldingView = (view: HoldingView) => {
+    setHoldingView(view);
+    try {
+      window.localStorage.setItem(HOLDING_VIEW_KEY, view);
+    } catch {
+      /* not remembered, still switched */
+    }
+  };
 
   /*
    * Fully-sold positions are hidden rather than deleted, so the cost basis and
@@ -580,14 +617,31 @@ export default function InvestmentsPage() {
     const cutoff = new Date();
     cutoff.setFullYear(cutoff.getFullYear() - 1);
     const since = cutoff.toISOString().slice(0, 10);
-    const ttmDividends = holdings.reduce(
-      (sum, h) =>
-        sum +
-        (h.flows ?? [])
-          .filter((f) => f.kind === "dividend" && f.date >= since)
-          .reduce((a, f) => a + f.amount, 0),
-      0,
+    /*
+     * Every distribution paid into an investment account, open positions and
+     * closed ones alike — a fund sold in March still paid in January.
+     *
+     * Decided by the account, not by the asset class. The crypto account is
+     * left out because a coin pays no dividend: what the trade history files
+     * as one there is a staking reward, recorded with the dividend kind
+     * because that is the only kind of income a flow can carry. One batch of
+     * rewards outweighed a year of real distributions when it was counted.
+     * Reading the account rather than the class keeps a fund that happens to
+     * be classed as crypto, held in a TFSA, counted for what it pays.
+     */
+    const investmentAccountIds = new Set(
+      accounts.filter((a) => a.kind === "investment").map((a) => a.id),
     );
+    const ttmDividends = holdings
+      .filter((h) => investmentAccountIds.has(h.accountId))
+      .reduce(
+        (sum, h) =>
+          sum +
+          (h.flows ?? [])
+            .filter((f) => f.kind === "dividend" && f.date >= since)
+            .reduce((a, f) => a + f.amount, 0),
+        0,
+      );
     return {
       rows,
       closedCount,
@@ -604,7 +658,7 @@ export default function InvestmentsPage() {
       realized,
       dividendsAll,
     };
-  }, [holdings, sort, showClosed]);
+  }, [holdings, accounts, sort, showClosed]);
 
   /*
    * The whole run is computed once; the window only trims what is drawn, so
@@ -713,10 +767,28 @@ export default function InvestmentsPage() {
       // Intervals, not points: n months of prices give n-1 monthly returns,
       // and this is the same count the returns card above reports.
       months: windowedMonths.length - 1,
+      from: labelMonth(windowedMonths[0]),
+      through: labelMonth(windowedMonths[windowedMonths.length - 1]),
       name: benchmark.name,
       note: benchmark.note,
     };
   }, [benchmark, fullSeries, flowsByMonth, twrRange]);
+
+  /*
+   * What the ring's key says about each position beyond its size: the same
+   * per-holding figures the detailed table shows, looked up by ticker so the
+   * key and the table cannot disagree about a position.
+   */
+  const exposureDetails = useMemo(
+    () =>
+      Object.fromEntries(
+        data.rows.map((r) => [
+          r.ticker,
+          { gain: r.totalReturn, mwrr: r.mwrr, stale: staleTickers.has(r.ticker) },
+        ]),
+      ),
+    [data.rows, staleTickers],
+  );
 
   if (!ready) return <PageSkeleton />;
 
@@ -840,38 +912,65 @@ export default function InvestmentsPage() {
             * no decision. This judges the portfolio, and most of the time the
             * honest answer is "behind".
             */}
+          {/*
+            * Each card leads with the answer in words a person would use, and
+            * puts the working underneath. The first version led with the
+            * working — a return, then a gap in "points", then a caption — so
+            * the reader had to assemble the claim themselves.
+            */}
           <StatCard
-            label="Against the index"
-            value={twr ? fmtPct(twr.portfolioTwr) : "—"}
-            delta={twr?.alpha ?? undefined}
+            label="You vs the market"
+            value={
+              twr
+                ? `${Math.abs(twr.alpha).toFixed(1)}% ${twr.alpha >= 0 ? "ahead" : "behind"}`
+                : "—"
+            }
+            deltaValue={
+              twr
+                ? `You ${fmtPct(twr.portfolioTwr)} · market ${fmtPct(twr.benchmarkTwr)}`
+                : undefined
+            }
+            /*
+             * The period spelled out as dates. "Last 15 months" left the reader
+             * to work out which fifteen, and the window follows the range picked
+             * on the returns chart, so it moves.
+             */
             deltaLabel={
-              twr ? `points vs the index · ${twr.months} months` : "no benchmark yet"
+              twr
+                ? `${twr.from} – ${twr.through} · ${twr.months} months`
+                : "no market data yet"
             }
             tone={(twr?.alpha ?? 0) >= 0 ? "positive" : "negative"}
+            icon={<TrendingUp size={16} />}
           />
           <StatCard
-            label="Carrying the gain"
+            label="Where your gains come from"
             value={
               data.concentration
-                ? `${data.concentration.carriers} of ${data.concentration.of}`
+                ? `${data.concentration.carriers} holding${data.concentration.carriers === 1 ? "" : "s"}`
                 : "—"
             }
             deltaValue={
               data.concentration
-                ? `${data.concentration.share.toFixed(0)}% of it`
+                ? `${data.concentration.share.toFixed(0)}% of your gains`
                 : undefined
             }
             deltaLabel={
-              data.concentration ? "positions hold the unrealized gain" : "nothing is up yet"
+              data.concentration
+                ? `out of ${data.concentration.of} in profit`
+                : "nothing is in profit yet"
             }
             icon={<Layers size={16} />}
           />
           <StatCard
-            label="Dividends, last 12 months"
-            value={fmtCAD(data.ttmDividends)}
-            delta={data.totalCost > 0 ? (data.ttmDividends / data.totalCost) * 100 : undefined}
-            deltaLabel="yield on cost"
-            tone="positive"
+            label="Dividend income"
+            value={`${fmtCAD(data.ttmDividends)} / yr`}
+            deltaValue={
+              data.totalCost > 0
+                ? `${((data.ttmDividends / data.totalCost) * 100).toFixed(1)}% of what you invested`
+                : undefined
+            }
+            deltaLabel="paid in the last 12 months"
             icon={<Coins size={16} />}
           />
         </div>
@@ -1196,50 +1295,61 @@ export default function InvestmentsPage() {
           </Card>
         )}
 
-        <Card>
-          <CardHeader
-            title="Holdings exposure"
-            subtitle="Every position, largest to smallest"
-          />
-          <div className="px-5 pb-5">
-            {data.exposure.length > 0 ? (
-              /*
-                * The ring and its key side by side across the whole width.
-                *
-                * It shared a row with a gain/loss bar chart that ranked the
-                * same positions by a different measure, and the pair was one
-                * question asked twice — the table below answers both per
-                * holding, with every position rather than the top ten.
-                */
-              <ExposurePie
-                data={data.exposure}
-                height={320}
-                fmt={(n) => fmtCompact(n)}
-                legend="right"
-              />
-            ) : (
-              <p className="py-16 text-center text-xs text-ink-faint">
-                Add a holding to see the breakdown.
-              </p>
-            )}
-          </div>
-        </Card>
-
-        {/* Holdings table */}
+        {/*
+          * One card for the holdings, two ways of reading them.
+          *
+          * Simple is the ring with its key as the list: each position's colour,
+          * name, class, value, what it made, how fast, and its share. The
+          * ring and a separate holdings list used to sit one above the other
+          * naming the same positions twice. Detailed swaps the whole card for
+          * the full table — shares, cost, price, dividends, weight and the
+          * per-account lots — for when those are the question.
+          */}
         <Card>
           <CardHeader
             title="Holdings"
-            subtitle="Click the pencil to rename a holding or change its asset class"
+            subtitle={
+              holdingView === "simple"
+                ? `${data.exposure.length} positions, grouped by class`
+                : "Every figure per position · click a column to sort"
+            }
             action={
-              data.closedCount > 0 ? (
-                <Button variant="secondary" onClick={() => setShowClosed((v) => !v)}>
-                  {showClosed
-                    ? "Hide closed positions"
-                    : `Show ${data.closedCount} closed position${data.closedCount === 1 ? "" : "s"}`}
-                </Button>
-              ) : undefined
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {holdingView === "detailed" && data.closedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowClosed((v) => !v)}
+                    className="rounded-md px-2 py-1 text-[0.6875rem] font-medium text-ink-faint hover:bg-elevated hover:text-ink"
+                  >
+                    {showClosed ? "Hide closed" : `+ ${data.closedCount} closed`}
+                  </button>
+                )}
+                <Segmented<HoldingView>
+                  options={HOLDING_VIEWS}
+                  value={holdingView}
+                  onChange={chooseHoldingView}
+                />
+              </div>
             }
           />
+          {holdingView === "simple" ? (
+            <div className="px-5 pb-5">
+              {data.exposure.length > 0 ? (
+                <ExposurePie
+                  data={data.exposure}
+                  height={320}
+                  fmt={(n) => fmtCAD(n)}
+                  legend="right"
+                  details={exposureDetails}
+                  order="class"
+                />
+              ) : (
+                <p className="py-16 text-center text-xs text-ink-faint">
+                  No holdings yet — use Log trades above to record your first.
+                </p>
+              )}
+            </div>
+          ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -1482,6 +1592,7 @@ export default function InvestmentsPage() {
               </tbody>
             </table>
           </div>
+          )}
         </Card>
       </div>
 
