@@ -580,14 +580,24 @@ export default function InvestmentsPage() {
     const cutoff = new Date();
     cutoff.setFullYear(cutoff.getFullYear() - 1);
     const since = cutoff.toISOString().slice(0, 10);
-    const ttmDividends = holdings.reduce(
-      (sum, h) =>
-        sum +
-        (h.flows ?? [])
-          .filter((f) => f.kind === "dividend" && f.date >= since)
-          .reduce((a, f) => a + f.amount, 0),
-      0,
-    );
+    /*
+     * Crypto is left out. A coin pays no dividend: what the trade history
+     * files as one on a coin is a staking reward — tokens received and valued
+     * on the day, recorded with the dividend kind because that is the only
+     * kind of income a flow can be. Counted here, a single batch of rewards
+     * outweighed a year of real distributions and turned "dividend income"
+     * into mostly something else.
+     */
+    const ttmDividends = holdings
+      .filter((h) => h.assetClass !== "Crypto")
+      .reduce(
+        (sum, h) =>
+          sum +
+          (h.flows ?? [])
+            .filter((f) => f.kind === "dividend" && f.date >= since)
+            .reduce((a, f) => a + f.amount, 0),
+        0,
+      );
     return {
       rows,
       closedCount,
