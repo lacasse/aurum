@@ -712,7 +712,7 @@ export function ExposurePie({
   return (
     <div className={cn(beside && "flex flex-col gap-5 lg:flex-row lg:items-center")}>
       {/* With the list as its key, the ring gives up width to the names. */}
-      <div className={cn(beside && (details ? "lg:w-1/3 lg:shrink-0" : "lg:w-2/5 lg:shrink-0"))}>
+      <div className={cn(beside && (details ? "lg:w-[27%] lg:shrink-0" : "lg:w-2/5 lg:shrink-0"))}>
         <ResponsiveContainer width="100%" height={height}>
           <PieChart>
             <Pie
@@ -794,7 +794,7 @@ export function ExposurePie({
  * how it has done — class, value, gain, return — and its share of the ring
  * last, where the key always put it.
  */
-const KEY_COLUMNS = "sm:grid-cols-[0.75rem_minmax(0,1fr)_5rem_5rem_4.5rem_3.25rem]";
+const KEY_COLUMNS = "sm:grid-cols-[0.75rem_minmax(0,1fr)_4.75rem_4.75rem_4.5rem_4.25rem_3rem]";
 
 function HoldingsKey({
   rows,
@@ -815,11 +815,12 @@ function HoldingsKey({
         role="row"
         className={cn(
           KEY_COLUMNS,
-          "hidden items-center gap-x-3 px-2 pb-2 text-[0.625rem] font-medium uppercase tracking-wider text-ink-faint sm:grid",
+          "hidden items-center gap-x-2.5 px-2 pb-2 text-[0.625rem] font-medium uppercase tracking-wider text-ink-faint sm:grid",
         )}
       >
         <span />
         <span role="columnheader">Asset</span>
+        <span role="columnheader">Class</span>
         <span role="columnheader" className="text-right">Value</span>
         <span
           role="columnheader"
@@ -860,7 +861,7 @@ function HoldingsKey({
               role="row"
               className={cn(
                 KEY_COLUMNS,
-                "grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 rounded-md px-2 py-1.5 transition-colors hover:bg-elevated/50",
+                "grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 rounded-md px-2 py-1.5 transition-colors hover:bg-elevated/50",
               )}
             >
               <span
@@ -868,22 +869,34 @@ function HoldingsKey({
                 style={{ background: r.color }}
                 aria-hidden
               />
+              {/*
+                * The name alone in its cell, so it sits on the row's centre line
+                * with the figures. The class used to ride underneath it, which
+                * lifted every name above the numbers beside it; from a tablet
+                * up it has a column of its own.
+                */}
               <div role="cell" className="min-w-0">
                 <p className="line-clamp-2 text-[0.8125rem] font-semibold leading-tight text-ink" title={r.name}>
                   {r.name || r.ticker}
                 </p>
-                <p className="mt-0.5 flex items-center gap-2 text-[0.625rem] leading-4 text-ink-faint">
+                {/* On a phone there is no room for the columns, so the class,
+                    gain and return ride under the name. */}
+                <p className="mt-0.5 flex items-center gap-2 text-[0.625rem] leading-4 text-ink-faint sm:hidden">
                   <span className="rounded-full bg-elevated px-1.5">{r.assetClass}</span>
-                  {/* On a phone the gain and return ride under the name. */}
                   {d && (
-                    <span className="flex items-center gap-2 sm:hidden">
+                    <>
                       <span className={cn("font-medium tabular-nums", gainTone)}>
                         {fmtSignedCAD(d.gain)}
                       </span>
                       {ret}
-                    </span>
+                    </>
                   )}
                 </p>
+              </div>
+              <div role="cell" className="hidden min-w-0 items-center sm:flex">
+                <span className="inline-block max-w-full truncate rounded-full bg-elevated px-1.5 text-[0.625rem] leading-4 text-ink-faint">
+                  {r.assetClass}
+                </span>
               </div>
               <div role="cell" className="text-right">
                 <span className="inline-flex items-center gap-1.5 text-[0.8125rem] font-semibold tabular-nums text-ink">
