@@ -154,6 +154,69 @@ describe("yearRows", () => {
   });
 });
 
+describe("paying down a loan is not spending", () => {
+  test("an excluded category is kept out of the year's expenses", () => {
+    const [y] = yearRows(
+      [
+        txn("2025-03-01", "income", 50000, "Salary"),
+        txn("2025-05-01", "expense", 20000),
+        txn("2025-06-01", "expense", 30000, "Debt Repayment"),
+      ],
+      [nw("2025-12", 40000)],
+      [],
+      {},
+      "2026-01-01",
+    );
+    assert.equal(y.expenses, 20000, "the repayment is not consumption");
+    assert.equal(y.netCashflow, 30000, "and so it counts as kept");
+  });
+
+  test("the caller's own assignment wins over the default", () => {
+    const [y] = yearRows(
+      [
+        txn("2025-03-01", "income", 50000, "Salary"),
+        txn("2025-05-01", "expense", 20000, "Travel"),
+      ],
+      [nw("2025-12", 40000)],
+      [],
+      {},
+      "2026-01-01",
+      () => "excluded",
+    );
+    assert.equal(y.expenses, 0, "the Expenses page decides, not this module");
+  });
+});
+
+describe("what was repaid is named, opposite what was borrowed", () => {
+  const base = [
+    txn("2025-03-01", "income", 50000, "Salary"),
+    txn("2025-05-01", "expense", 20000, "Groceries"),
+    txn("2025-06-01", "expense", 5000, "Debt Repayment"),
+  ];
+  const flowOf = (txns: Transaction[], group?: (c: string) => "necessity" | "excluded") =>
+    yearFlow(txns, "2025", group ? { spendGroup: group } : {});
+
+  test("a band holding only repayments says so", () => {
+    const names = flowOf(base).nodes.map((n) => n.name);
+    assert.ok(names.includes("Debt repaid"), names.join(", "));
+    assert.ok(!names.includes("Not consumption"));
+  });
+
+  test("with anything else in it, the general name is kept", () => {
+    const names = flowOf(base, (c) =>
+      c === "Debt Repayment" || c === "Groceries" ? "excluded" : "necessity",
+    ).nodes.map((n) => n.name);
+    assert.ok(names.includes("Not consumption"), names.join(", "));
+    assert.ok(!names.includes("Debt repaid"));
+  });
+
+  test("a year with no repayments has neither", () => {
+    const names = flowOf([base[0], base[1]]).nodes.map((n) => n.name);
+    assert.ok(!names.includes("Debt repaid"));
+    assert.ok(!names.includes("Not consumption"));
+  });
+});
+
 describe("milestones", () => {
   const points = [
     { key: "2024-01", net: 10000 },
@@ -801,7 +864,7 @@ describe("what the money left an account for", () => {
         .filter((l) => d.nodes[l.source].name === from && d.nodes[l.target].name === to)
         .reduce((a, l) => a + l.value, 0);
     assert.equal(e("Money in", "Spending"), 7000);
-    assert.equal(e("Spending", "Not consumption"), 7000);
+    assert.equal(e("Spending", "Debt repaid"), 7000);
     assert.equal(d.nodes.some((n) => n.name === "Debt Repayment"), false);
   });
 
