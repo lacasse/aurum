@@ -985,12 +985,13 @@ export default function InvestmentsPage() {
                     style={{ width: `${Math.max(0, 100 - costShare)}%` }}
                   />
                 </div>
-                <p className="mt-2 flex flex-wrap items-baseline gap-x-2 text-[0.6875rem] text-ink-faint">
+                {/* The bar above says which is which: what it cost, and what
+                    that has become. */}
+                <p className="mt-2 flex items-baseline justify-between gap-2 text-[0.6875rem] text-ink-faint">
                   <span className="tabular-nums text-ink-dim">{fmtCAD(data.totalCost)}</span>
-                  <span>invested in {data.rows.length} positions</span>
                   <span
                     className={cn(
-                      "ml-auto font-medium tabular-nums",
+                      "font-medium tabular-nums",
                       above >= 0 ? "text-positive" : "text-negative",
                     )}
                   >
