@@ -107,7 +107,8 @@ function yearOverYear(
   const rose = change >= 0;
   const tone = change === 0 ? "neutral" : (rose === (good === "up") ? "positive" : "negative");
   /*
-   * Unsigned: the arrow on the badge is the sign, and "▲ +[figure redacted]" says it twice.
+   * Unsigned: the arrow on the badge is the sign, and the amount beside it
+   * says the direction twice.
    */
   return {
     deltaValue: fmtCAD(Math.abs(change)),

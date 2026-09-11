@@ -45,7 +45,7 @@ describe("buying securities is net-worth neutral", () => {
 
   test("cash leaving the account offsets the position it bought", () => {
     const before = netWorth(1000, 0);
-    // Buy $400 of stock inside the account: cash falls, holdings appear.
+    // INVENTED: buy $400 of stock inside the account: cash falls, holdings appear.
     const after = netWorth(1000 - 400, 400);
     assert.equal(after, before);
   });

@@ -159,8 +159,8 @@ describe("avgSpendByCategory", () => {
     txn({ amount, type: "expense", category, date: `${month}-10` });
 
   test("divides by the months on record, not by the twelve asked for", () => {
-    // Three months of history, $300 of rent in each: the average month has
-    // $300 of rent in it, not $75.
+    // INVENTED: three months of history, $300 of rent in each: the average
+    // month has $300 of rent in it, not $75. INVENTED
     const rows = avgSpendByCategory(
       months.slice(-3).map((m) => spend(m, 300, "Housing")),
       12,
