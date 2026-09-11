@@ -831,7 +831,7 @@ function HoldingsKey({
         role="row"
         className={cn(
           KEY_COLUMNS,
-          "hidden items-end gap-x-3 border-b border-line px-3 pb-2 text-[0.625rem] font-medium uppercase tracking-wider text-ink-faint sm:grid",
+          "hidden items-end gap-x-3 border-b border-line px-3 pb-1.5 text-[0.625rem] font-medium uppercase tracking-wider text-ink-faint sm:grid",
         )}
       >
         <span />
@@ -855,8 +855,8 @@ function HoldingsKey({
       </div>
 
       {groups.map((g) => (
-        <div key={g.assetClass} role="rowgroup" className="pt-3 first:pt-2">
-          <div className="flex items-baseline justify-between px-3 pb-1">
+        <div key={g.assetClass} role="rowgroup" className="pt-2 first:pt-1.5">
+          <div className="flex items-baseline justify-between px-3 pb-0.5">
             <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-ink-dim">
               {g.assetClass}
             </span>
@@ -885,7 +885,7 @@ function HoldingsKey({
                   role="row"
                   className={cn(
                     KEY_COLUMNS,
-                    "grid grid-cols-[0.625rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-lg px-3 py-2 transition-colors hover:bg-elevated/60",
+                    "grid grid-cols-[0.625rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 rounded-md px-3 py-1 transition-colors hover:bg-elevated/60",
                   )}
                 >
                   <span
@@ -894,7 +894,7 @@ function HoldingsKey({
                     aria-hidden
                   />
                   <div role="cell" className="min-w-0">
-                    <p className="line-clamp-2 text-[0.8125rem] font-semibold leading-snug text-ink" title={r.name}>
+                    <p className="truncate text-[0.8125rem] font-semibold leading-snug text-ink" title={r.name}>
                       {r.name || r.ticker}
                     </p>
                     {/* On a phone the gain and return ride under the name. */}
