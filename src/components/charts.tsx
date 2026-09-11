@@ -510,6 +510,19 @@ function byValueDesc<T extends { value: number }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => b.value - a.value);
 }
 
+/** Grouped by class, largest class first, largest first inside each. */
+function byClassThenValue<T extends { value: number; assetClass: string }>(rows: T[]): T[] {
+  const totals = new Map<string, number>();
+  for (const r of rows) totals.set(r.assetClass, (totals.get(r.assetClass) ?? 0) + r.value);
+  return [...rows].sort((a, b) => {
+    if (a.assetClass !== b.assetClass) {
+      const diff = (totals.get(b.assetClass) ?? 0) - (totals.get(a.assetClass) ?? 0);
+      return diff !== 0 ? diff : a.assetClass.localeCompare(b.assetClass);
+    }
+    return b.value - a.value;
+  });
+}
+
 export function DonutChart({
   data,
   height = 260,
@@ -657,6 +670,7 @@ export function ExposurePie({
   fmt,
   legend = "below",
   details,
+  order = "value",
 }: {
   data: ExposureDatum[];
   height?: number;
@@ -672,6 +686,12 @@ export function ExposurePie({
    */
   legend?: "below" | "right";
   details?: Record<string, ExposureDetail>;
+  /**
+   * "value" runs the ring largest position first. "class" groups it by asset
+   * class, the largest class first and the largest position first inside each,
+   * so a class's slices sit together and its share reads as one arc.
+   */
+  order?: "value" | "class";
 }) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
 
@@ -681,7 +701,7 @@ export function ExposurePie({
    * is a tag on the legend row instead, which says the same thing without
    * spending a whole hue family on a class that holds two positions.
    */
-  const colored = byValueDesc(data).map((d, i) => ({
+  const colored = (order === "class" ? byClassThenValue(data) : byValueDesc(data)).map((d, i) => ({
     ...d,
     color: spectrumAt(i, data.length),
   }));

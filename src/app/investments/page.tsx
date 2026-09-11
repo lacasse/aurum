@@ -286,7 +286,7 @@ export default function InvestmentsPage() {
    */
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
     key: "assetClass",
-    dir: "asc",
+    dir: "desc",
   });
 
   const toggleSort = (key: SortKey) =>
@@ -1310,7 +1310,7 @@ export default function InvestmentsPage() {
             title="Holdings"
             subtitle={
               holdingView === "simple"
-                ? `${data.exposure.length} positions, largest first`
+                ? `${data.exposure.length} positions, grouped by class`
                 : "Every figure per position · click a column to sort"
             }
             action={
@@ -1341,6 +1341,7 @@ export default function InvestmentsPage() {
                   fmt={(n) => fmtCAD(n)}
                   legend="right"
                   details={exposureDetails}
+                  order="class"
                 />
               ) : (
                 <p className="py-16 text-center text-xs text-ink-faint">
