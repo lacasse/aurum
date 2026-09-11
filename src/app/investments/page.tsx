@@ -581,15 +581,22 @@ export default function InvestmentsPage() {
     cutoff.setFullYear(cutoff.getFullYear() - 1);
     const since = cutoff.toISOString().slice(0, 10);
     /*
-     * Crypto is left out. A coin pays no dividend: what the trade history
-     * files as one on a coin is a staking reward — tokens received and valued
-     * on the day, recorded with the dividend kind because that is the only
-     * kind of income a flow can be. Counted here, a single batch of rewards
-     * outweighed a year of real distributions and turned "dividend income"
-     * into mostly something else.
+     * Every distribution paid into an investment account, open positions and
+     * closed ones alike — a fund sold in March still paid in January.
+     *
+     * Decided by the account, not by the asset class. The crypto account is
+     * left out because a coin pays no dividend: what the trade history files
+     * as one there is a staking reward, recorded with the dividend kind
+     * because that is the only kind of income a flow can carry. One batch of
+     * rewards outweighed a year of real distributions when it was counted.
+     * Reading the account rather than the class keeps a fund that happens to
+     * be classed as crypto, held in a TFSA, counted for what it pays.
      */
+    const investmentAccountIds = new Set(
+      accounts.filter((a) => a.kind === "investment").map((a) => a.id),
+    );
     const ttmDividends = holdings
-      .filter((h) => h.assetClass !== "Crypto")
+      .filter((h) => investmentAccountIds.has(h.accountId))
       .reduce(
         (sum, h) =>
           sum +
@@ -614,7 +621,7 @@ export default function InvestmentsPage() {
       realized,
       dividendsAll,
     };
-  }, [holdings, sort, showClosed]);
+  }, [holdings, accounts, sort, showClosed]);
 
   /*
    * The whole run is computed once; the window only trims what is drawn, so
@@ -723,6 +730,8 @@ export default function InvestmentsPage() {
       // Intervals, not points: n months of prices give n-1 monthly returns,
       // and this is the same count the returns card above reports.
       months: windowedMonths.length - 1,
+      from: labelMonth(windowedMonths[0]),
+      through: labelMonth(windowedMonths[windowedMonths.length - 1]),
       name: benchmark.name,
       note: benchmark.note,
     };
@@ -868,7 +877,16 @@ export default function InvestmentsPage() {
                 ? `You ${fmtPct(twr.portfolioTwr)} · market ${fmtPct(twr.benchmarkTwr)}`
                 : undefined
             }
-            deltaLabel={twr ? `last ${twr.months} months` : "no market data yet"}
+            /*
+             * The period spelled out as dates. "Last 15 months" left the reader
+             * to work out which fifteen, and the window follows the range picked
+             * on the returns chart, so it moves.
+             */
+            deltaLabel={
+              twr
+                ? `${twr.from} – ${twr.through} · ${twr.months} months`
+                : "no market data yet"
+            }
             tone={(twr?.alpha ?? 0) >= 0 ? "positive" : "negative"}
             icon={<TrendingUp size={16} />}
           />
