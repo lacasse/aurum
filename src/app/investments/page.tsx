@@ -148,6 +148,58 @@ function SortHeader({
   );
 }
 
+/*
+ * One fact under a tile's rule: a name, a figure ranged right, and an optional
+ * bar behind them.
+ *
+ * The tiles used to end in a run-on caption that wrapped to three lines at any
+ * width the card actually gets. A row per fact fits the space the tile already
+ * has, holds its shape as the figures change, and never wraps: the name
+ * truncates, the figure does not.
+ */
+function FactRow({
+  name,
+  figure,
+  share,
+  tone = "neutral",
+  color,
+}: {
+  name: string;
+  figure: string;
+  /** 0-100. Given, the row is drawn over a bar of that width. */
+  share?: number;
+  tone?: "neutral" | "positive" | "negative";
+  color?: string;
+}) {
+  return (
+    <div className="relative flex items-baseline gap-2 rounded px-1.5 py-1">
+      {share !== undefined && (
+        <span
+          className="absolute inset-y-0 left-0 rounded bg-elevated"
+          style={{
+            width: `${Math.max(2, Math.min(100, share))}%`,
+            ...(color ? { background: color, opacity: 0.28 } : {}),
+          }}
+          aria-hidden
+        />
+      )}
+      <span className="relative min-w-0 flex-1 truncate text-[0.6875rem] text-ink-dim">
+        {name}
+      </span>
+      <span
+        className={cn(
+          "relative shrink-0 text-[0.6875rem] font-medium tabular-nums",
+          tone === "positive" && "text-positive",
+          tone === "negative" && "text-negative",
+          tone === "neutral" && "text-ink",
+        )}
+      >
+        {figure}
+      </span>
+    </div>
+  );
+}
+
 type HoldingView = "simple" | "detailed";
 const HOLDING_VIEWS: { value: HoldingView; label: string }[] = [
   { value: "simple", label: "Simple" },
@@ -608,10 +660,15 @@ export default function InvestmentsPage() {
             share: (carried / gainTotal) * 100,
             /*
              * Named, because "3 holdings" invites the question and the answer
-             * is short. Tickers rather than names: the card is a tile, and the
-             * list below gives the full name of every one of them.
+             * is short. Each carries its share of the whole gain, so the rows
+             * add up to the share stated above them.
              */
-            names: carrying.map((r) => r.ticker),
+            carrying: carrying.map((r) => ({
+              ticker: r.ticker,
+              name: r.name,
+              assetClass: r.assetClass,
+              share: (r.gain / gainTotal) * 100,
+            })),
           }
         : null;
 
@@ -963,23 +1020,33 @@ export default function InvestmentsPage() {
                 ? `${Math.abs(twr.alpha).toFixed(1)}% ${twr.alpha >= 0 ? "ahead" : "behind"}`
                 : "—"
             }
-            deltaValue={
-              twr
-                ? `You ${fmtPct(twr.portfolioTwr)} · market ${fmtPct(twr.benchmarkTwr)}`
-                : undefined
-            }
-            /*
-             * The period spelled out as dates. "Last 15 months" left the reader
-             * to work out which fifteen, and the window follows the range picked
-             * on the returns chart, so it moves.
-             */
-            deltaLabel={
-              twr
-                ? `${twr.from} – ${twr.through} · ${twr.months} months`
-                : "no market data yet"
-            }
+            deltaLabel={twr ? `${twr.from} – ${twr.through}` : "no market data yet"}
             tone={(twr?.alpha ?? 0) >= 0 ? "positive" : "negative"}
             icon={<TrendingUp size={16} />}
+            footer={
+              twr ? (
+                <div className="-mx-1.5 space-y-0.5">
+                  {/* Both bars share one scale, so the gap between them is the
+                      claim the headline above makes. */}
+                  {[
+                    { name: "You", value: twr.portfolioTwr },
+                    { name: "The market", value: twr.benchmarkTwr },
+                  ].map((row) => (
+                    <FactRow
+                      key={row.name}
+                      name={row.name}
+                      figure={fmtPct(row.value)}
+                      share={
+                        (Math.max(row.value, 0) /
+                          Math.max(twr.portfolioTwr, twr.benchmarkTwr, 1)) *
+                        100
+                      }
+                      tone={row.value >= 0 ? "positive" : "negative"}
+                    />
+                  ))}
+                </div>
+              ) : undefined
+            }
           />
           <StatCard
             label="Where your gains come from"
@@ -994,26 +1061,54 @@ export default function InvestmentsPage() {
                 : undefined
             }
             deltaLabel={
-              data.concentration
-                ? `${data.concentration.names.slice(0, 4).join(" · ")}${
-                    data.concentration.names.length > 4
-                      ? ` +${data.concentration.names.length - 4}`
-                      : ""
-                  } · of ${data.concentration.of} in profit`
-                : "nothing is in profit yet"
+              data.concentration ? `of ${data.concentration.of} in profit` : "nothing is in profit yet"
             }
             icon={<Layers size={16} />}
+            footer={
+              data.concentration && data.concentration.carrying.length > 0 ? (
+                <div className="-mx-1.5 space-y-0.5">
+                  {/* The ones doing the carrying, each against the whole gain,
+                      so the rows add up to the share above them. */}
+                  {data.concentration.carrying.slice(0, 3).map((c) => (
+                    <FactRow
+                      key={c.ticker}
+                      name={c.name || c.ticker}
+                      figure={`${c.share.toFixed(0)}%`}
+                      share={c.share}
+                      color={data.classColors[c.assetClass]}
+                    />
+                  ))}
+                  {data.concentration.carrying.length > 3 && (
+                    <FactRow
+                      name={`${data.concentration.carrying.length - 3} more`}
+                      figure={`${data.concentration.carrying
+                        .slice(3)
+                        .reduce((sum, c) => sum + c.share, 0)
+                        .toFixed(0)}%`}
+                    />
+                  )}
+                </div>
+              ) : undefined
+            }
           />
           <StatCard
             label="Dividend income"
             value={`${fmtCAD(data.ttmDividends)} / yr`}
-            deltaValue={
-              data.totalCost > 0
-                ? `${((data.ttmDividends / data.totalCost) * 100).toFixed(1)}% of what you invested`
-                : undefined
-            }
             deltaLabel="paid in the last 12 months"
             icon={<Coins size={16} />}
+            footer={
+              <div className="-mx-1.5 space-y-0.5">
+                <FactRow
+                  name="Yield on cost"
+                  figure={
+                    data.totalCost > 0
+                      ? `${((data.ttmDividends / data.totalCost) * 100).toFixed(1)}%`
+                      : "—"
+                  }
+                />
+                <FactRow name="A month, on average" figure={fmtCAD(data.ttmDividends / 12)} />
+              </div>
+            }
           />
         </div>
 
