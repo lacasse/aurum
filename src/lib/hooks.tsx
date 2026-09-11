@@ -27,6 +27,45 @@ export function useReady(): boolean {
   return mounted && hydrated;
 }
 
+/**
+ * A choice that survives leaving the page: a chart's time span, a view.
+ *
+ * Read once, on the client, from this browser's storage, and written back on
+ * every change. Only values from `allowed` are accepted back, so a stored value
+ * from an older version of the page — an option since removed — falls back to
+ * the default rather than selecting nothing.
+ *
+ * Safe only on pages gated by `useReady`: the server render and the hydrating
+ * render both draw the skeleton, so the stored value never has to agree with
+ * a server that cannot see it.
+ */
+export function useRemembered<T extends string>(
+  key: string,
+  fallback: T,
+  allowed: readonly T[],
+): [T, (value: T) => void] {
+  const [value, setValue] = useState<T>(() => {
+    if (typeof window === "undefined") return fallback;
+    try {
+      const saved = window.localStorage.getItem(key);
+      return saved !== null && (allowed as readonly string[]).includes(saved)
+        ? (saved as T)
+        : fallback;
+    } catch {
+      return fallback;
+    }
+  });
+  const remember = (next: T) => {
+    setValue(next);
+    try {
+      window.localStorage.setItem(key, next);
+    } catch {
+      /* Storage blocked or full: still switched, just not remembered. */
+    }
+  };
+  return [value, remember];
+}
+
 export function PageSkeleton() {
   return (
     <div className="animate-pulse space-y-4">
