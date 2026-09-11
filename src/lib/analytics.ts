@@ -1143,7 +1143,8 @@ export const NON_SPENDABLE_INCOME = new Set(["RSP / Pension", "Dividends"]);
  * is typed as income for want of a better type — but it is not earnings. It is
  * a liability appearing on the other side of the ledger at the same moment,
  * and counting it makes a month of borrowing look like a month of earning: on
- * this record one drawdown added [figure redacted] a month to a five-year average.
+ * this record one drawdown lifted a five-year average by a noticeable
+ * amount a month.
  *
  * So it is excluded from every figure that answers "what came in" — the income
  * totals, the averages, the cash-flow charts and the year rollups. The

@@ -161,7 +161,7 @@ export default function AccountsPage() {
    * whenever a month was missing — and the current month is missing until
    * something writes it. So the chequing account compared today's balance
    * against its balance in February 2020 and reported the difference as one
-   * month's movement: −[figure redacted] a month, every month, for six years.
+   * month's movement: the same fall, every month, for six years.
    */
   const accountDelta1m = (acc: Account): number | undefined => {
     const [prevKey, curKey] = lastMonthKeys(2);

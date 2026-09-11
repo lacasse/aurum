@@ -32,12 +32,21 @@ set -eu
 
 MONEY='\$ ?[0-9]{1,3}(,[0-9]{3})+(\.[0-9]+)?'
 
-# Shorthand: [figure redacted], [figure redacted], [figure redacted]. Comma grouping was the only shape the guard
-# knew, so an amount written the way a person says it out loud walked straight
-# past -- three of them sat in code comments in a public repository, one for
-# months. An invented figure in a fixture is round and small; these are not the
-# shape anybody invents.
+# Shorthand: a dollar sign, digits, and a k or an M. Comma grouping was the only
+# shape the guard knew, so an amount written the way a person says it out loud
+# walked straight past -- several sat in code comments and commit messages in a
+# public repository, some for months.
+#
+# No example here, because this file is in ALLOWED: anything written as an
+# example would be exempt from every check, which is how a real figure came to
+# sit in this very comment.
 SHORT='\$ ?[0-9]+(\.[0-9]+)? ?[kKmM]([^a-zA-Z0-9]|$)'
+
+# A plain amount of three digits or more: [figure redacted], $1450.00. Neither of the shapes
+# above catches it, and four of these were sitting in comments describing what
+# the owner's own record did. Two digits are left alone -- a fixture explaining
+# itself says $40, and the line that means something says [figure redacted].
+BARE='\$[0-9]{3,}(\.[0-9]+)?'
 
 # The same, without interval expressions. `--staged` pipes through awk, whose
 # POSIX regex has no {n,m}, and the variable it read did not exist at all: with
@@ -49,7 +58,8 @@ MONEY_AWK='\$?[ ]?[0-9][0-9]?[0-9]?(,[0-9][0-9][0-9])+(\.[0-9]+)?'
 # The same for awk: no interval expressions, and a bracket for the dollar sign
 # because awk swallows the backslash escape and then matches every k in the
 # file. Checked by running it, not by reading it.
-SHORT_AWK='[$] ?[0-9]+(\.[0-9]+)? ?[kKmM]([^a-zA-Z0-9]|$)' 
+SHORT_AWK='[$] ?[0-9]+(\.[0-9]+)? ?[kKmM]([^a-zA-Z0-9]|$)'
+BARE_AWK='[$][0-9][0-9][0-9]+(\.[0-9]+)?' 
 
 # A private list of terms that must never appear: tickers actually held,
 # the broker, the pension plan, account identifiers off a statement, the
@@ -108,7 +118,7 @@ report() {
 if [ "${1:-}" = "--staged" ]; then
   # Only added lines. A figure already in the tree is the history rewrite's
   # problem, not this commit's; failing on it would block every unrelated commit.
-  git diff --cached --unified=0 | awk -v money="$MONEY_AWK" -v short="$SHORT_AWK" -v row="$EXPORT_ROW_AWK" -v terms="$TERMS_RE" -v allowed="$ALLOWED" -v spelled="$SPELLED_AWK" '
+  git diff --cached --unified=0 | awk -v money="$MONEY_AWK" -v short="$SHORT_AWK" -v bare="$BARE_AWK" -v row="$EXPORT_ROW_AWK" -v terms="$TERMS_RE" -v allowed="$ALLOWED" -v spelled="$SPELLED_AWK" '
     /^\+\+\+ b\// {
       file = substr($0, 7)
       skip = (file ~ allowed)
@@ -127,6 +137,7 @@ if [ "${1:-}" = "--staged" ]; then
       if (line ~ /INVENTED/) next
       if (line ~ money)  { printf "%s [amount]: %s\n",  file, substr(line, 1, 100); next }
       if (line ~ short)  { printf "%s [amount]: %s\n",  file, substr(line, 1, 100); next }
+      if (line ~ bare)   { printf "%s [amount]: %s\n",  file, substr(line, 1, 100); next }
       if (line ~ spelled) { printf "%s [quantity in words]: %s\n", file, substr(line, 1, 100); next }
       if (!loose && line ~ row) { printf "%s [export row]: %s\n", file, substr(line, 1, 100); next }
       if (terms != "" && line ~ terms) { printf "%s [private term]: %s\n", file, substr(line, 1, 100) }
@@ -166,7 +177,7 @@ elif [ "${1:-}" = "--build-context" ]; then
         case "$f" in ${rule%/}/*|$rule) excluded=1; break ;; esac
       done < .dockerignore
       [ "$excluded" -eq 1 ] && continue
-      if grep -Eq "$MONEY|$SHORT" "$f" 2>/dev/null; then
+      if grep -Eq "$MONEY|$SHORT|$BARE" "$f" 2>/dev/null; then
         report "$f [amount] is gitignored but would be copied into the image"
       elif [ -n "$TERMS_RE" ] && grep -Eq "$TERMS_RE" "$f" 2>/dev/null; then
         report "$f [private term] is gitignored but would be copied into the image"
@@ -186,7 +197,7 @@ elif [ "${1:-}" = "--message" ]; then
   while IFS= read -r line; do
     case "$line" in \#*) continue ;; esac
     case "$line" in *INVENTED*) continue ;; esac
-    if printf '%s' "$line" | grep -Eq "$MONEY|$SHORT"; then
+    if printf '%s' "$line" | grep -Eq "$MONEY|$SHORT|$BARE"; then
       report "commit message [amount]: $(printf '%s' "$line" | cut -c1-110)"
     elif printf '%s' "$line" | grep -Eq "$SPELLED"; then
       report "commit message [quantity in words]: $(printf '%s' "$line" | cut -c1-110)"
@@ -209,9 +220,9 @@ else
         strict="$strict $f"
       fi
     done
-    pattern="$MONEY|$SHORT|$EXPORT_ROW|$SPELLED"
+    pattern="$MONEY|$SHORT|$BARE|$EXPORT_ROW|$SPELLED"
     [ -n "$TERMS_RE" ] && pattern="$pattern|$TERMS_RE"
-    loose_pattern="$MONEY|$SHORT|$SPELLED"
+    loose_pattern="$MONEY|$SHORT|$BARE|$SPELLED"
     [ -n "$TERMS_RE" ] && loose_pattern="$loose_pattern|$TERMS_RE"
     hits=""
     [ -n "$strict" ] && hits=$(grep -nEH "$pattern" $strict 2>/dev/null | grep -v INVENTED || true)

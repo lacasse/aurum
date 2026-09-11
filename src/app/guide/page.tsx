@@ -505,7 +505,7 @@ export default function GuidePage() {
             better type. It is not earnings: it is a debt appearing on the
             other side of the ledger at the same moment, and counting it makes
             a month of borrowing look like a month of earning. One drawdown on
-            this record was adding [figure redacted] a month to a five-year average.
+            this record was adding several hundred a month to a five-year average.
           </p>
           <p>
             So it is left out of every figure that answers{" "}

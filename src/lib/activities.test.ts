@@ -225,7 +225,8 @@ describe("parseActivitiesCsv", () => {
     );
     const rent = res.cash.filter((r) => r.category === "Housing");
     assert.equal(rent.length, 3);
-    assert.match(rent[0].payee, /\$1450\.00$/, "the payee names the amount, so correcting it teaches this transfer only");
+    // INVENTED
+    assert.match(rent[0].payee, /\$1450\.00$/, "the payee names the amount, so correcting it teaches this transfer only"); // INVENTED
     const oneOff = res.cash.find((r) => r.amount === 80);
     assert.notEqual(oneOff?.category, "Housing", "a one-off transfer is not rent");
   });

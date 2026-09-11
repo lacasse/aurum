@@ -129,7 +129,7 @@ describe("an action and a trade on the same position", () => {
    * holdings as they were *before* the action. Writing that plan afterwards
    * restored the parent's old basis, while the child kept the basis the action
    * had moved to it — so the two together held more cost than the position ever
-   * had. On real data that invented [figure redacted] of cost base out of nothing.
+   * had. On real data that invented cost base out of nothing.
    *
    * The fix is ordering: whatever plans the trades has to see the positions the
    * actions left behind. This asserts the arithmetic that makes that visible.
