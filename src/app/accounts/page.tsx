@@ -24,7 +24,8 @@ import { Badge, Button, Card, CardHeader, Segmented } from "@/components/ui";
 import { SeriesChart, Sparkline } from "@/components/charts";
 import { AccountForm, ConfirmDelete } from "@/components/forms";
 import { useFinance } from "@/lib/store";
-import { PageSkeleton, useReady } from "@/lib/hooks";
+import { PageSkeleton, useReady, useRemembered } from "@/lib/hooks";
+import { yearToDate } from "@/lib/spans";
 import {
   accountCadBalance,
   accountValueAt,
@@ -46,7 +47,8 @@ import {
 } from "@/lib/types";
 
 /** How much of the record to draw: months, or all of it. */
-type Range = "12" | "60" | "all";
+type Range = "ytd" | "12" | "60" | "all";
+const RANGES: Range[] = ["ytd", "12", "60", "all"];
 
 const KIND_ICON: Record<AccountKind, typeof Wallet> = {
   checking: Wallet,
@@ -75,7 +77,7 @@ export default function AccountsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [deleting, setDeleting] = useState<Account | null>(null);
-  const [range, setRange] = useState<Range>("all");
+  const [range, setRange] = useRemembered<Range>("aurum.span.accounts", "all", RANGES);
 
   /*
    * Recorded month-end portfolio values, from the store: four pages draw a
@@ -142,8 +144,13 @@ export default function AccountsPage() {
   const liquid = netWorth - data.pension;
   const ratio = netWorth > 0 ? (data.liabilities / netWorth) * 100 : 0;
 
+  // A level, so the year to date opens on the close of last December.
   const series =
-    range === "all" ? data.series : data.series.slice(-Number(range));
+    range === "all"
+      ? data.series
+      : range === "ytd"
+        ? yearToDate(data.series, (p) => p.key, { withBase: true })
+        : data.series.slice(-Number(range));
   const hasPension = data.pensions.length > 0;
 
   /**
@@ -228,6 +235,7 @@ export default function AccountsPage() {
             action={
               <Segmented<Range>
                 options={[
+                  { value: "ytd", label: "YTD" },
                   { value: "12", label: "1Y" },
                   { value: "60", label: "5Y" },
                   { value: "all", label: "All" },
