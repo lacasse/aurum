@@ -25,7 +25,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { cn } from "./ui";
+import { Badge, cn } from "./ui";
+import { fmtPct, fmtSignedCAD } from "@/lib/format";
 import { accent, spectrumAt, type AccentName } from "@/lib/palette";
 import type { NetWorthClass } from "@/lib/analytics";
 import { seatColumns } from "@/lib/flow-layout";
@@ -636,11 +637,26 @@ export type ExposureDatum = {
   value: number;
 };
 
+/**
+ * What the key can say about each position beyond its size, keyed by ticker.
+ * Given, the key becomes the holdings list itself: name, class, value, what
+ * the position made and how fast, and its share of the ring.
+ */
+export type ExposureDetail = {
+  /** Everything the position made, in dollars. */
+  gain: number;
+  /** Annualized money-weighted return, or null with no trade history. */
+  mwrr: number | null;
+  /** The price could not be refreshed today. */
+  stale?: boolean;
+};
+
 export function ExposurePie({
   data,
   height = 300,
   fmt,
   legend = "below",
+  details,
 }: {
   data: ExposureDatum[];
   height?: number;
@@ -655,6 +671,7 @@ export function ExposurePie({
    * wants.
    */
   legend?: "below" | "right";
+  details?: Record<string, ExposureDetail>;
 }) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
 
@@ -674,7 +691,8 @@ export function ExposurePie({
   const beside = legend === "right";
   return (
     <div className={cn(beside && "flex flex-col gap-5 lg:flex-row lg:items-center")}>
-      <div className={cn(beside && "lg:w-2/5 lg:shrink-0")}>
+      {/* With the list as its key, the ring gives up width to the names. */}
+      <div className={cn(beside && (details ? "lg:w-1/3 lg:shrink-0" : "lg:w-2/5 lg:shrink-0"))}>
         <ResponsiveContainer width="100%" height={height}>
           <PieChart>
             <Pie
@@ -700,12 +718,15 @@ export function ExposurePie({
         </ResponsiveContainer>
       </div>
 
-      {/*
+      {details ? (
+        <HoldingsKey rows={colored} details={details} fmt={fmt} pct={pct} beside={beside} />
+      ) : (
+      /*
         One row per holding, because that is now what a colour means. It used
         to be one row per asset class with the holdings inside it as a bar; the
         classes are still here, as a tag, but they no longer decide the colour
         and so cannot organise the key.
-      */}
+      */
       <div className={cn("space-y-px px-1", beside ? "min-w-0 flex-1" : "mt-3")}>
         {colored.map((r) => (
           <div
@@ -738,6 +759,146 @@ export function ExposurePie({
           </div>
         ))}
       </div>
+      )}
+    </div>
+  );
+}
+
+
+/*
+ * The key as the holdings list.
+ *
+ * The ring's colour is the row's identity, so the dot leads; the ticker is
+ * dropped because the name says the same thing to a person and the colour
+ * already ties the row to its slice. What follows is what a position is and
+ * how it has done — class, value, gain, return — and its share of the ring
+ * last, where the key always put it.
+ */
+const KEY_COLUMNS = "sm:grid-cols-[0.75rem_minmax(0,1fr)_5rem_5rem_4.5rem_3.25rem]";
+
+function HoldingsKey({
+  rows,
+  details,
+  fmt,
+  pct,
+  beside,
+}: {
+  rows: (ExposureDatum & { color: string })[];
+  details: Record<string, ExposureDetail>;
+  fmt?: (n: number) => string;
+  pct: (v: number) => string;
+  beside: boolean;
+}) {
+  return (
+    <div className={cn("min-w-0", beside ? "flex-1" : "mt-4")} role="table" aria-label="Holdings">
+      <div
+        role="row"
+        className={cn(
+          KEY_COLUMNS,
+          "hidden items-center gap-x-3 px-2 pb-2 text-[0.625rem] font-medium uppercase tracking-wider text-ink-faint sm:grid",
+        )}
+      >
+        <span />
+        <span role="columnheader">Asset</span>
+        <span role="columnheader" className="text-right">Value</span>
+        <span
+          role="columnheader"
+          className="text-right"
+          title="Everything the position has made: its unrealized gain, any realized gain from sales, and the dividends it paid"
+        >
+          Gain
+        </span>
+        <span
+          role="columnheader"
+          className="text-right"
+          title="Money-weighted return, annualized — the rate your own money grew at, with the timing of every purchase and sale taken into account"
+        >
+          Return / yr
+        </span>
+        <span role="columnheader" className="text-right">Share</span>
+      </div>
+      <ul className="divide-y divide-line/50">
+        {rows.map((r) => {
+          const d = details[r.ticker];
+          const gainTone = d && d.gain >= 0 ? "text-positive" : "text-negative";
+          const ret =
+            d?.mwrr === null || d?.mwrr === undefined ? (
+              <span
+                className="text-ink-faint"
+                title="No trade history for this position — import trades or log them to measure a return"
+              >
+                —
+              </span>
+            ) : (
+              <Badge tone={d.mwrr >= 0 ? "positive" : "negative"}>
+                <span className="tabular-nums">{fmtPct(d.mwrr)}</span>
+              </Badge>
+            );
+          return (
+            <li
+              key={r.ticker}
+              role="row"
+              className={cn(
+                KEY_COLUMNS,
+                "grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-lg px-2 py-2.5 transition-colors hover:bg-elevated/50",
+              )}
+            >
+              <span
+                className="h-3 w-3 rounded-full"
+                style={{ background: r.color }}
+                aria-hidden
+              />
+              <div role="cell" className="min-w-0">
+                <p className="line-clamp-2 text-sm font-semibold leading-snug text-ink" title={r.name}>
+                  {r.name || r.ticker}
+                </p>
+                <p className="mt-0.5 flex items-center gap-2 text-[0.6875rem] text-ink-faint">
+                  <span className="rounded-full bg-elevated px-1.5 py-px">{r.assetClass}</span>
+                  {/* On a phone the gain and return ride under the name. */}
+                  {d && (
+                    <span className="flex items-center gap-2 sm:hidden">
+                      <span className={cn("font-medium tabular-nums", gainTone)}>
+                        {fmtSignedCAD(d.gain)}
+                      </span>
+                      {ret}
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div role="cell" className="text-right">
+                <span className="inline-flex items-center gap-1.5 text-sm font-semibold tabular-nums text-ink">
+                  {d?.stale && (
+                    <span
+                      className="h-1.5 w-1.5 rounded-full bg-amber-400"
+                      title="Last known price — today's price could not be fetched yet"
+                      aria-label="Price not updated today"
+                    />
+                  )}
+                  {fmt ? fmt(r.value) : r.value}
+                </span>
+                <span className="block text-[0.6875rem] tabular-nums text-ink-faint sm:hidden">
+                  {pct(r.value)}
+                </span>
+              </div>
+              <div
+                role="cell"
+                className={cn("hidden text-right text-sm font-medium tabular-nums sm:block", gainTone)}
+              >
+                {d ? fmtSignedCAD(d.gain) : "—"}
+              </div>
+              <div role="cell" className="hidden text-right sm:block">
+                {ret}
+              </div>
+              <div
+                role="cell"
+                className="hidden text-right text-sm font-medium tabular-nums text-ink-dim sm:block"
+              >
+                {pct(r.value)}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

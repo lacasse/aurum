@@ -149,12 +149,6 @@ function SortHeader({
   );
 }
 
-/*
- * The five columns of the holdings list, from a tablet up. Written out whole
- * because Tailwind only generates classes it can find literally in the source.
- */
-const HOLDING_COLUMNS = "md:grid-cols-[minmax(0,1fr)_8.5rem_7rem_7rem_5.5rem_2.25rem]";
-
 type HoldingView = "simple" | "detailed";
 const HOLDING_VIEWS: { value: HoldingView; label: string }[] = [
   { value: "simple", label: "Simple" },
@@ -162,16 +156,6 @@ const HOLDING_VIEWS: { value: HoldingView; label: string }[] = [
 ];
 const HOLDING_VIEW_KEY = "aurum.holdings.view";
 
-/*
- * Class first — the shape of the portfolio rather than a ranking of positions
- * that happen to be held — then the three figures worth ranking by.
- */
-const HOLDING_SORTS: { value: SortKey; label: string }[] = [
-  { value: "assetClass", label: "Class" },
-  { value: "marketValue", label: "Value" },
-  { value: "totalReturn", label: "Gain" },
-  { value: "mwrr", label: "Return" },
-];
 
 
 /**
@@ -790,6 +774,22 @@ export default function InvestmentsPage() {
     };
   }, [benchmark, fullSeries, flowsByMonth, twrRange]);
 
+  /*
+   * What the ring's key says about each position beyond its size: the same
+   * per-holding figures the detailed table shows, looked up by ticker so the
+   * key and the table cannot disagree about a position.
+   */
+  const exposureDetails = useMemo(
+    () =>
+      Object.fromEntries(
+        data.rows.map((r) => [
+          r.ticker,
+          { gain: r.totalReturn, mwrr: r.mwrr, stale: staleTickers.has(r.ticker) },
+        ]),
+      ),
+    [data.rows, staleTickers],
+  );
+
   if (!ready) return <PageSkeleton />;
 
   const last = data.series[data.series.length - 1];
@@ -1295,67 +1295,27 @@ export default function InvestmentsPage() {
           </Card>
         )}
 
-        <Card>
-          <CardHeader
-            title="Holdings exposure"
-            subtitle="Every position, largest to smallest"
-          />
-          <div className="px-5 pb-5">
-            {data.exposure.length > 0 ? (
-              /*
-                * The ring and its key side by side across the whole width.
-                *
-                * It shared a row with a gain/loss bar chart that ranked the
-                * same positions by a different measure, and the pair was one
-                * question asked twice — the table below answers both per
-                * holding, with every position rather than the top ten.
-                */
-              <ExposurePie
-                data={data.exposure}
-                height={320}
-                fmt={(n) => fmtCompact(n)}
-                legend="right"
-              />
-            ) : (
-              <p className="py-16 text-center text-xs text-ink-faint">
-                Add a holding to see the breakdown.
-              </p>
-            )}
-          </div>
-        </Card>
-
         {/*
-          * Holdings, as a list rather than a spreadsheet.
+          * One card for the holdings, two ways of reading them.
           *
-          * The table carried eleven columns — shares, average cost, price,
-          * dividends, weight, per-account tags and more — and the five things
-          * actually read off it were lost among them. What stays is what a
-          * position is (name and class), what it is worth, what it made in
-          * dollars, and how fast it made it. Everything removed is still on
-          * the page in its own card, or one click away in the edit form.
+          * Simple is the ring with its key as the list: each position's colour,
+          * name, class, value, what it made, how fast, and its share. The
+          * ring and a separate holdings list used to sit one above the other
+          * naming the same positions twice. Detailed swaps the whole card for
+          * the full table — shares, cost, price, dividends, weight and the
+          * per-account lots — for when those are the question.
           */}
         <Card>
           <CardHeader
             title="Holdings"
-            subtitle={`${data.rows.filter((r) => !r.closed).length} positions`}
+            subtitle={
+              holdingView === "simple"
+                ? `${data.exposure.length} positions, largest first`
+                : "Every figure per position · click a column to sort"
+            }
             action={
               <div className="flex flex-wrap items-center justify-end gap-2">
-                {/* The detailed table sorts from its own column headers. */}
-                {holdingView === "simple" && (
-                  <Segmented<SortKey>
-                    options={HOLDING_SORTS}
-                    value={sort.key}
-                    onChange={(key) =>
-                      setSort({ key, dir: key === "assetClass" ? "asc" : "desc" })
-                    }
-                  />
-                )}
-                <Segmented<HoldingView>
-                  options={HOLDING_VIEWS}
-                  value={holdingView}
-                  onChange={chooseHoldingView}
-                />
-                {data.closedCount > 0 && (
+                {holdingView === "detailed" && data.closedCount > 0 && (
                   <button
                     type="button"
                     onClick={() => setShowClosed((v) => !v)}
@@ -1364,138 +1324,30 @@ export default function InvestmentsPage() {
                     {showClosed ? "Hide closed" : `+ ${data.closedCount} closed`}
                   </button>
                 )}
+                <Segmented<HoldingView>
+                  options={HOLDING_VIEWS}
+                  value={holdingView}
+                  onChange={chooseHoldingView}
+                />
               </div>
             }
           />
           {holdingView === "simple" ? (
-          <div className="px-2 pb-2" role="table" aria-label="Holdings">
-            <div
-              role="row"
-              className={cn(
-                HOLDING_COLUMNS,
-                "hidden items-center gap-x-4 px-3 pb-2 text-[0.625rem] font-medium uppercase tracking-wider text-ink-faint md:grid",
+            <div className="px-5 pb-5">
+              {data.exposure.length > 0 ? (
+                <ExposurePie
+                  data={data.exposure}
+                  height={320}
+                  fmt={(n) => fmtCAD(n)}
+                  legend="right"
+                  details={exposureDetails}
+                />
+              ) : (
+                <p className="py-16 text-center text-xs text-ink-faint">
+                  No holdings yet — use Log trades above to record your first.
+                </p>
               )}
-            >
-              <span role="columnheader">Asset</span>
-              <span role="columnheader">Class</span>
-              <span role="columnheader" className="text-right">Value</span>
-              <span role="columnheader" className="text-right" title="Everything the position has made: its unrealized gain, any realized gain from sales, and the dividends it paid">
-                Gain
-              </span>
-              <span role="columnheader" className="text-right" title="Money-weighted return, annualized — the rate your own money grew at, with the timing of every purchase and sale taken into account">
-                Return / yr
-              </span>
-              <span />
             </div>
-            <ul className="divide-y divide-line/50">
-              {data.rows.map((r) => {
-                const color = data.classColors[r.assetClass] ?? "var(--ink-faint)";
-                return (
-                  <li
-                    key={r.ticker}
-                    role="row"
-                    className={cn(
-                      "group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 rounded-lg px-3 py-3 transition-colors hover:bg-elevated/50",
-                      HOLDING_COLUMNS,
-                      r.closed && "opacity-55",
-                    )}
-                  >
-                    {/* Asset */}
-                    <div role="cell" className="min-w-0 md:order-1">
-                      <p className="line-clamp-2 text-sm font-semibold leading-snug text-ink">
-                        {r.name || r.ticker}
-                      </p>
-                      <p className="mt-0.5 flex items-center gap-1.5 text-[0.6875rem] text-ink-faint">
-                        <span className="truncate">{r.ticker}</span>
-                        {r.currency === "USD" && <span className="text-info">USD</span>}
-                        {r.closed && <span>· Closed</span>}
-                      </p>
-                    </div>
-
-                    {/* Value — beside the name on a phone, in its column on a wider screen */}
-                    <div role="cell" className="text-right md:order-3">
-                      <span className="inline-flex items-center gap-1.5 text-sm font-semibold tabular-nums text-ink">
-                        {staleTickers.has(r.ticker) && (
-                          <span
-                            className="h-1.5 w-1.5 rounded-full bg-amber-400"
-                            title="Last known price — today's price could not be fetched yet"
-                            aria-label="Price not updated today"
-                          />
-                        )}
-                        {r.closed ? "—" : fmtCAD(r.marketValue)}
-                      </span>
-                    </div>
-
-                    {/*
-                      * Class, gain and return share a line on a phone. On a
-                      * wider screen the wrapper steps aside (`contents`) and
-                      * each takes its own column.
-                      */}
-                    <div className="col-span-2 flex items-center gap-3 md:contents">
-                      <div role="cell" className="md:order-2">
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-elevated px-2 py-0.5 text-[0.6875rem] font-medium text-ink-dim">
-                          <span
-                            className="h-2 w-2 shrink-0 rounded-full"
-                            style={{ backgroundColor: color }}
-                          />
-                          {r.assetClass}
-                        </span>
-                      </div>
-                      <div
-                        role="cell"
-                        className={cn(
-                          "ml-auto text-right text-sm font-medium tabular-nums md:order-4 md:ml-0",
-                          r.totalReturn >= 0 ? "text-positive" : "text-negative",
-                        )}
-                      >
-                        {fmtSignedCAD(r.totalReturn)}
-                      </div>
-                      <div role="cell" className="text-right md:order-5">
-                        {/* A dash, not a zero: no trade history means the
-                            return is unknown, which is not no return. */}
-                        {r.mwrr === null ? (
-                          <span
-                            className="text-sm text-ink-faint"
-                            title="No trade history for this position — import trades or log them to measure a return"
-                          >
-                            —
-                          </span>
-                        ) : (
-                          <Badge tone={r.mwrr >= 0 ? "positive" : "negative"}>
-                            <span className="tabular-nums">{fmtPct(r.mwrr)}</span>
-                          </Badge>
-                        )}
-                      </div>
-                      <div role="cell" className="text-right md:order-6">
-                        {/*
-                          * The pencil edits the security — name and class —
-                          * which is the same in every account holding it, so
-                          * the change reaches every lot.
-                          */}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Edit ${r.ticker}`}
-                          className="md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
-                          onClick={() => {
-                            setEditing(r.lots[0]);
-                            setFormOpen(true);
-                          }}
-                        >
-                          <Pencil size={14} />
-                        </Button>
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-            {data.rows.length === 0 && (
-              <p className="py-12 text-center text-xs text-ink-faint">
-                No holdings yet — use Log trades above to record your first.
-              </p>
-            )}
-          </div>
           ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
