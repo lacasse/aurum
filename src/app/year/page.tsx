@@ -159,7 +159,14 @@ export default function YearPage() {
       ? allTimeSeries(holdings, {}, monthsSince(start), snapshots).points
       : portfolioSeries(holdings, 18);
     const netWorth = netWorthOver(accounts, portfolio, usdCadRate);
-    const rows = yearRows(transactions, netWorth, portfolio, netExternalFlows(holdings));
+    const rows = yearRows(
+      transactions,
+      netWorth,
+      portfolio,
+      netExternalFlows(holdings),
+      undefined,
+      (c) => groupOf(c, spendGroups),
+    );
     /*
      * The balance sheet, month by month, so each year can be closed on the last
      * month the record actually reaches rather than on a December that may not
@@ -174,7 +181,7 @@ export default function YearPage() {
       /* The last month the record reaches, for closing a year still running. */
       lastMonth: netWorth[netWorth.length - 1]?.key ?? null,
     };
-  }, [accounts, holdings, transactions, snapshots, usdCadRate]);
+  }, [accounts, holdings, transactions, snapshots, usdCadRate, spendGroups]);
 
   if (!ready) return <PageSkeleton />;
 
