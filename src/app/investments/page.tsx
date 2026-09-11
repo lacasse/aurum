@@ -36,7 +36,8 @@ import {
 } from "@/components/charts";
 import { HoldingForm, TradeEntry } from "@/components/forms";
 import { useFinance } from "@/lib/store";
-import { PageSkeleton, useReady } from "@/lib/hooks";
+import { PageSkeleton, useReady, useRemembered } from "@/lib/hooks";
+import { yearToDate } from "@/lib/spans";
 import type { SortKey } from "@/lib/analytics";
 import {
   allTimeSeries,
@@ -77,9 +78,10 @@ const POLL_MS = 60 * 60_000;
  */
 const RANGE_MONTHS = { "3M": 3, "6M": 6, "1Y": 12, "3Y": 36, ALL: Infinity } as const;
 
-type RangeKey = keyof typeof RANGE_MONTHS;
+type RangeKey = keyof typeof RANGE_MONTHS | "YTD";
 
 const RANGE_OPTIONS: { value: RangeKey; label: string }[] = [
+  { value: "YTD", label: "YTD" },
   { value: "3M", label: "3M" },
   { value: "6M", label: "6M" },
   { value: "1Y", label: "1Y" },
@@ -87,20 +89,26 @@ const RANGE_OPTIONS: { value: RangeKey; label: string }[] = [
   { value: "ALL", label: "All" },
 ];
 
+const RANGE_KEYS = RANGE_OPTIONS.map((o) => o.value);
+
 /**
- * Keep the last `n` months; `Infinity` keeps them all.
+ * Keep the last `n` months, or the year to date.
  *
- * n+1 month-ends, not n: a window of three months is the close it opened on
- * and one per month after it. Slicing n points covered n-1 months of movement,
- * so "3M" drew two months and said "2 months" in the label beside it.
+ * Both charts cut here are levels — a value, a compounded return — so a window
+ * of n months needs n+1 month-ends: the close it opened on, and one per month
+ * after it. Slicing n points covered n-1 months of movement, so "3M" drew two
+ * months and said so in the label beside it. The year to date takes the same
+ * shape, opening on last December.
  */
-function windowed<T>(rows: T[], range: RangeKey): T[] {
+function windowed<T>(rows: T[], range: RangeKey, keyOf: (row: T) => string): T[] {
+  if (range === "YTD") return yearToDate(rows, keyOf, { withBase: true });
   const n = RANGE_MONTHS[range];
   return Number.isFinite(n) ? rows.slice(-(n + 1)) : rows;
 }
 
 /** "since Feb 2022" for the full run, "last 6 months" for a window of it. */
 function rangeLabel(range: RangeKey, points: { label: string }[]): string {
+  if (range === "YTD") return "year to date";
   // Intervals, not points: the first month-end is where the window opens.
   if (range !== "ALL") return `last ${Math.max(1, points.length - 1)} months`;
   return points.length > 0 ? `since ${points[0].label}` : "all time";
@@ -369,33 +377,27 @@ export default function InvestmentsPage() {
    * table — shares, cost, price, dividends, weight and the per-account lots —
    * for the times those are the question.
    */
-  // Read once, on the client. The page shows a skeleton until it is ready, so
-  // a server render never draws the card this decides between.
-  const [holdingView, setHoldingView] = useState<HoldingView>(() => {
-    if (typeof window === "undefined") return "simple";
-    try {
-      const saved = window.localStorage.getItem(HOLDING_VIEW_KEY);
-      return saved === "detailed" ? "detailed" : "simple";
-    } catch {
-      return "simple";
-    }
-  });
-  const chooseHoldingView = (view: HoldingView) => {
-    setHoldingView(view);
-    try {
-      window.localStorage.setItem(HOLDING_VIEW_KEY, view);
-    } catch {
-      /* not remembered, still switched */
-    }
-  };
+  const [holdingView, chooseHoldingView] = useRemembered<HoldingView>(
+    HOLDING_VIEW_KEY,
+    "simple",
+    ["simple", "detailed"],
+  );
 
   /*
    * Fully-sold positions are hidden rather than deleted, so the cost basis and
    * dividends behind a realized gain survive for tax reporting.
    */
   const [showClosed, setShowClosed] = useState(false);
-  const [growthRange, setGrowthRange] = useState<RangeKey>("ALL");
-  const [twrRange, setTwrRange] = useState<RangeKey>("ALL");
+  const [growthRange, setGrowthRange] = useRemembered<RangeKey>(
+    "aurum.span.investments.growth",
+    "ALL",
+    RANGE_KEYS,
+  );
+  const [twrRange, setTwrRange] = useRemembered<RangeKey>(
+    "aurum.span.investments.returns",
+    "ALL",
+    RANGE_KEYS,
+  );
 
   /* Tickers whose per-account lots are shown; only ever set for pooled rows. */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -739,7 +741,7 @@ export default function InvestmentsPage() {
   const fullSeries = allTime?.points ?? data.series;
 
   const growthSeries = useMemo(
-    () => windowed(fullSeries, growthRange),
+    () => windowed(fullSeries, growthRange, (p) => p.key),
     [fullSeries, growthRange],
   );
 
@@ -798,7 +800,7 @@ export default function InvestmentsPage() {
     const months = benchmark.series
       .map((p) => p.month)
       .filter((m) => valueByMonth.has(m) && valueByMonth.get(m)! > 0);
-    const windowedMonths = windowed(months, twrRange);
+    const windowedMonths = windowed(months, twrRange, (m) => m);
     if (windowedMonths.length < 2) return null;
     const b0 = priceByMonth.get(windowedMonths[0])!;
     if (!b0) return null;

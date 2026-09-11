@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Banknote, Coins, HandCoins } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
@@ -13,7 +13,8 @@ import {
 } from "@/components/charts";
 import { accent } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
-import { PageSkeleton, useReady } from "@/lib/hooks";
+import { PageSkeleton, useReady, useRemembered } from "@/lib/hooks";
+import { monthsToDate } from "@/lib/spans";
 import { incomeBySource, PASSIVE_INCOME_CATEGORIES } from "@/lib/analytics";
 import {
   fmtCAD,
@@ -23,12 +24,13 @@ import {
   lastCompleteMonthKey,
 } from "@/lib/format";
 
-type Window = 12 | 24 | 60;
+type Window = "ytd" | "12" | "24" | "60";
+const WINDOWS: Window[] = ["ytd", "12", "24", "60"];
 
 export default function IncomePage() {
   const ready = useReady();
   const transactions = useFinance((s) => s.transactions);
-  const [window, setWindow] = useState<Window>(12);
+  const [window, setWindow] = useRemembered<Window>("aurum.span.income", "12", WINDOWS);
 
   /*
    * Through the last complete month, like everything else that compares one
@@ -36,9 +38,11 @@ export default function IncomePage() {
    * a collapse in earnings, which would be a fact about the calendar.
    */
   const through = lastCompleteMonthKey();
+  // The year to date counts whole months, like every other window here.
+  const months = window === "ytd" ? monthsToDate(through) : Number(window);
 
   const data = useMemo(() => {
-    const breakdown = incomeBySource(transactions, window, through);
+    const breakdown = incomeBySource(transactions, months, through);
     const colors = categoryColors(breakdown.sources.map((s) => s.category));
 
     /*
@@ -96,7 +100,7 @@ export default function IncomePage() {
       passiveMonths,
       passiveBest,
     };
-  }, [transactions, window, through]);
+  }, [transactions, months, through]);
 
   if (!ready) return <PageSkeleton />;
 
@@ -121,12 +125,13 @@ export default function IncomePage() {
       action={
         <Segmented<string>
           options={[
+            { value: "ytd", label: "YTD" },
             { value: "12", label: "1y" },
             { value: "24", label: "2y" },
             { value: "60", label: "5y" },
           ]}
-          value={String(window)}
-          onChange={(v) => setWindow(Number(v) as Window)}
+          value={window}
+          onChange={(v) => setWindow(v as Window)}
         />
       }
     >

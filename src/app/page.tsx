@@ -27,7 +27,8 @@ import {
 } from "@/components/charts";
 import { MonthlyChecklistButton, MonthlyChecklistModal } from "@/components/monthly-checklist";
 import { useFinance } from "@/lib/store";
-import { PageSkeleton, useReady } from "@/lib/hooks";
+import { PageSkeleton, useReady, useRemembered } from "@/lib/hooks";
+import { yearToDate } from "@/lib/spans";
 import {
   allTimeSeries,
   avgSpendByCategory,
@@ -72,8 +73,16 @@ import { roundMoney } from "@/lib/money";
  * re-running the check rather than assuming it still holds.
  */
 
-/** How much of the net worth history to draw: months, or the whole record. */
-type Range = "12" | "60" | "all";
+/** How much of the net worth history to draw: months, the year so far, or all of it. */
+type Range = "ytd" | "12" | "60" | "all";
+const RANGES: Range[] = ["ytd", "12", "60", "all"];
+
+/** A net worth series cut to a range. A level, so YTD opens on last December. */
+function inRange<T extends { key: string }>(rows: T[], range: Range): T[] {
+  if (range === "all") return rows;
+  if (range === "ytd") return yearToDate(rows, (r) => r.key, { withBase: true });
+  return rows.slice(-Number(range));
+}
 
 /**
  * A year-over-year move for one of the average-month figures.
@@ -124,7 +133,7 @@ export default function DashboardPage() {
   const transactions = useFinance((s) => s.transactions);
   const holdings = useFinance((s) => s.holdings);
   const usdCadRate = useFinance((s) => s.usdCadRate);
-  const [range, setRange] = useState<Range>("all");
+  const [range, setRange] = useRemembered<Range>("aurum.span.dashboard", "all", RANGES);
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [rate, setRate] = useState("0.035");
 
@@ -257,12 +266,12 @@ export default function DashboardPage() {
   }, [accounts, transactions, holdings, snapshots, usdCadRate]);
 
   const nw = useMemo(
-    () => (range === "all" ? data.port : data.port.slice(-Number(range))),
+    () => inRange(data.port, range),
     [data.port, range],
   );
   const bandsLast = data.byClass[data.byClass.length - 1];
   const bands = useMemo(
-    () => (range === "all" ? data.byClass : data.byClass.slice(-Number(range))),
+    () => inRange(data.byClass, range),
     [data.byClass, range],
   );
   /*
@@ -496,6 +505,7 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-2">
                   <Segmented<Range>
                     options={[
+                      { value: "ytd", label: "YTD" },
                       { value: "12", label: "1Y" },
                       { value: "60", label: "5Y" },
                       { value: "all", label: "All" },
