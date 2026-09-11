@@ -309,7 +309,12 @@ export function Shell({
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col lg:ml-60">
-        <header className="sticky top-0 z-20 border-b border-line bg-background/80 backdrop-blur-md">
+        {/*
+          * Scrolls away with the page. It was pinned to the top, which kept a
+          * title and two buttons over every screen of content below it — a
+          * band of the window spent restating where you already are.
+          */}
+        <header className="border-b border-line bg-background">
           <div className="flex items-center gap-3 px-4 py-4 sm:px-6 lg:px-8">
             <Button
               variant="ghost"
