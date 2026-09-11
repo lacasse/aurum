@@ -42,10 +42,14 @@ MONEY='\$ ?[0-9]{1,3}(,[0-9]{3})+(\.[0-9]+)?'
 # sit in this very comment.
 SHORT='\$ ?[0-9]+(\.[0-9]+)? ?[kKmM]([^a-zA-Z0-9]|$)'
 
-# A plain amount of three digits or more: [figure redacted], $1450.00. Neither of the shapes
+# A plain amount: a dollar sign and three digits or more. Neither of the shapes
 # above catches it, and four of these were sitting in comments describing what
-# the owner's own record did. Two digits are left alone -- a fixture explaining
-# itself says $40, and the line that means something says [figure redacted].
+# the owner's own record did. Two digits are left alone, since a fixture
+# explaining itself uses them and a real figure rarely is one.
+#
+# Nothing here is written as an example. This file is in ALLOWED, so an example
+# would be exempt from every check -- which is how a real figure came to sit in
+# this comment twice, the second time in the rule written to catch the first.
 BARE='\$[0-9]{3,}(\.[0-9]+)?'
 
 # The same, without interval expressions. `--staged` pipes through awk, whose
