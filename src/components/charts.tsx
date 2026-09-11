@@ -860,7 +860,7 @@ function HoldingsKey({
               role="row"
               className={cn(
                 KEY_COLUMNS,
-                "grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-lg px-2 py-2.5 transition-colors hover:bg-elevated/50",
+                "grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 rounded-md px-2 py-1.5 transition-colors hover:bg-elevated/50",
               )}
             >
               <span
@@ -869,11 +869,11 @@ function HoldingsKey({
                 aria-hidden
               />
               <div role="cell" className="min-w-0">
-                <p className="line-clamp-2 text-sm font-semibold leading-snug text-ink" title={r.name}>
+                <p className="line-clamp-2 text-[0.8125rem] font-semibold leading-tight text-ink" title={r.name}>
                   {r.name || r.ticker}
                 </p>
-                <p className="mt-0.5 flex items-center gap-2 text-[0.6875rem] text-ink-faint">
-                  <span className="rounded-full bg-elevated px-1.5 py-px">{r.assetClass}</span>
+                <p className="mt-0.5 flex items-center gap-2 text-[0.625rem] leading-4 text-ink-faint">
+                  <span className="rounded-full bg-elevated px-1.5">{r.assetClass}</span>
                   {/* On a phone the gain and return ride under the name. */}
                   {d && (
                     <span className="flex items-center gap-2 sm:hidden">
@@ -886,7 +886,7 @@ function HoldingsKey({
                 </p>
               </div>
               <div role="cell" className="text-right">
-                <span className="inline-flex items-center gap-1.5 text-sm font-semibold tabular-nums text-ink">
+                <span className="inline-flex items-center gap-1.5 text-[0.8125rem] font-semibold tabular-nums text-ink">
                   {d?.stale && (
                     <span
                       className="h-1.5 w-1.5 rounded-full bg-amber-400"
@@ -902,7 +902,7 @@ function HoldingsKey({
               </div>
               <div
                 role="cell"
-                className={cn("hidden text-right text-sm font-medium tabular-nums sm:block", gainTone)}
+                className={cn("hidden text-right text-[0.8125rem] font-medium tabular-nums sm:block", gainTone)}
               >
                 {d ? fmtSignedCAD(d.gain) : "—"}
               </div>
@@ -911,7 +911,7 @@ function HoldingsKey({
               </div>
               <div
                 role="cell"
-                className="hidden text-right text-sm font-medium tabular-nums text-ink-dim sm:block"
+                className="hidden text-right text-[0.8125rem] font-medium tabular-nums text-ink-dim sm:block"
               >
                 {pct(r.value)}
               </div>
