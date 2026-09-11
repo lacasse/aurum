@@ -712,7 +712,7 @@ export function ExposurePie({
   return (
     <div className={cn(beside && "flex flex-col gap-5 lg:flex-row lg:items-center")}>
       {/* With the list as its key, the ring gives up width to the names. */}
-      <div className={cn(beside && (details ? "lg:w-[27%] lg:shrink-0" : "lg:w-2/5 lg:shrink-0"))}>
+      <div className={cn(beside && (details ? "lg:w-[30%] lg:shrink-0" : "lg:w-2/5 lg:shrink-0"))}>
         <ResponsiveContainer width="100%" height={height}>
           <PieChart>
             <Pie
@@ -784,17 +784,16 @@ export function ExposurePie({
   );
 }
 
-
 /*
  * The key as the holdings list.
  *
  * The ring's colour is the row's identity, so the dot leads; the ticker is
  * dropped because the name says the same thing to a person and the colour
- * already ties the row to its slice. What follows is what a position is and
- * how it has done — class, value, gain, return — and its share of the ring
- * last, where the key always put it.
+ * already ties the row to its slice. What follows is how the position has
+ * done — value, gain, return — and its share of the ring last, where the key
+ * always put it. The class heads each run of rows instead of taking a column.
  */
-const KEY_COLUMNS = "sm:grid-cols-[0.75rem_minmax(0,1fr)_4.75rem_4.75rem_4.5rem_4.25rem_3rem]";
+const KEY_COLUMNS = "sm:grid-cols-[0.625rem_minmax(0,1fr)_4.5rem_4.5rem_4.25rem_3rem]";
 
 function HoldingsKey({
   rows,
@@ -809,18 +808,34 @@ function HoldingsKey({
   pct: (v: number) => string;
   beside: boolean;
 }) {
+  /*
+   * Runs of one class, in the order the ring draws them. The class is a
+   * heading over its run rather than a column on every row: the list is
+   * grouped by class already, so a column repeated the same word down each
+   * group and took width the names needed.
+   */
+  const groups: { assetClass: string; rows: typeof rows; value: number }[] = [];
+  for (const r of rows) {
+    const last = groups[groups.length - 1];
+    if (last && last.assetClass === r.assetClass) {
+      last.rows.push(r);
+      last.value += r.value;
+    } else {
+      groups.push({ assetClass: r.assetClass, rows: [r], value: r.value });
+    }
+  }
+
   return (
     <div className={cn("min-w-0", beside ? "flex-1" : "mt-4")} role="table" aria-label="Holdings">
       <div
         role="row"
         className={cn(
           KEY_COLUMNS,
-          "hidden items-center gap-x-2.5 px-2 pb-2 text-[0.625rem] font-medium uppercase tracking-wider text-ink-faint sm:grid",
+          "hidden items-end gap-x-3 border-b border-line px-3 pb-2 text-[0.625rem] font-medium uppercase tracking-wider text-ink-faint sm:grid",
         )}
       >
         <span />
         <span role="columnheader">Asset</span>
-        <span role="columnheader">Class</span>
         <span role="columnheader" className="text-right">Value</span>
         <span
           role="columnheader"
@@ -838,100 +853,99 @@ function HoldingsKey({
         </span>
         <span role="columnheader" className="text-right">Share</span>
       </div>
-      <ul className="divide-y divide-line/50">
-        {rows.map((r) => {
-          const d = details[r.ticker];
-          const gainTone = d && d.gain >= 0 ? "text-positive" : "text-negative";
-          const ret =
-            d?.mwrr === null || d?.mwrr === undefined ? (
-              <span
-                className="text-ink-faint"
-                title="No trade history for this position — import trades or log them to measure a return"
-              >
-                —
-              </span>
-            ) : (
-              <Badge tone={d.mwrr >= 0 ? "positive" : "negative"}>
-                <span className="tabular-nums">{fmtPct(d.mwrr)}</span>
-              </Badge>
-            );
-          return (
-            <li
-              key={r.ticker}
-              role="row"
-              className={cn(
-                KEY_COLUMNS,
-                "grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 rounded-md px-2 py-1.5 transition-colors hover:bg-elevated/50",
-              )}
-            >
-              <span
-                className="h-3 w-3 rounded-full"
-                style={{ background: r.color }}
-                aria-hidden
-              />
-              {/*
-                * The name alone in its cell, so it sits on the row's centre line
-                * with the figures. The class used to ride underneath it, which
-                * lifted every name above the numbers beside it; from a tablet
-                * up it has a column of its own.
-                */}
-              <div role="cell" className="min-w-0">
-                <p className="line-clamp-2 text-[0.8125rem] font-semibold leading-tight text-ink" title={r.name}>
-                  {r.name || r.ticker}
-                </p>
-                {/* On a phone there is no room for the columns, so the class,
-                    gain and return ride under the name. */}
-                <p className="mt-0.5 flex items-center gap-2 text-[0.625rem] leading-4 text-ink-faint sm:hidden">
-                  <span className="rounded-full bg-elevated px-1.5">{r.assetClass}</span>
-                  {d && (
-                    <>
-                      <span className={cn("font-medium tabular-nums", gainTone)}>
-                        {fmtSignedCAD(d.gain)}
-                      </span>
-                      {ret}
-                    </>
+
+      {groups.map((g) => (
+        <div key={g.assetClass} role="rowgroup" className="pt-3 first:pt-2">
+          <div className="flex items-baseline justify-between px-3 pb-1">
+            <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-ink-dim">
+              {g.assetClass}
+            </span>
+            <span className="text-[0.625rem] tabular-nums text-ink-faint">{pct(g.value)}</span>
+          </div>
+          <ul>
+            {g.rows.map((r) => {
+              const d = details[r.ticker];
+              const gainTone = d && d.gain >= 0 ? "text-positive" : "text-negative";
+              const ret =
+                d?.mwrr === null || d?.mwrr === undefined ? (
+                  <span
+                    className="text-ink-faint"
+                    title="No trade history for this position — import trades or log them to measure a return"
+                  >
+                    —
+                  </span>
+                ) : (
+                  <Badge tone={d.mwrr >= 0 ? "positive" : "negative"}>
+                    <span className="tabular-nums">{fmtPct(d.mwrr)}</span>
+                  </Badge>
+                );
+              return (
+                <li
+                  key={r.ticker}
+                  role="row"
+                  className={cn(
+                    KEY_COLUMNS,
+                    "grid grid-cols-[0.625rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-lg px-3 py-2 transition-colors hover:bg-elevated/60",
                   )}
-                </p>
-              </div>
-              <div role="cell" className="hidden min-w-0 items-center sm:flex">
-                <span className="inline-block max-w-full truncate rounded-full bg-elevated px-1.5 text-[0.625rem] leading-4 text-ink-faint">
-                  {r.assetClass}
-                </span>
-              </div>
-              <div role="cell" className="text-right">
-                <span className="inline-flex items-center gap-1.5 text-[0.8125rem] font-semibold tabular-nums text-ink">
-                  {d?.stale && (
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-amber-400"
-                      title="Last known price — today's price could not be fetched yet"
-                      aria-label="Price not updated today"
-                    />
-                  )}
-                  {fmt ? fmt(r.value) : r.value}
-                </span>
-                <span className="block text-[0.6875rem] tabular-nums text-ink-faint sm:hidden">
-                  {pct(r.value)}
-                </span>
-              </div>
-              <div
-                role="cell"
-                className={cn("hidden text-right text-[0.8125rem] font-medium tabular-nums sm:block", gainTone)}
-              >
-                {d ? fmtSignedCAD(d.gain) : "—"}
-              </div>
-              <div role="cell" className="hidden text-right sm:block">
-                {ret}
-              </div>
-              <div
-                role="cell"
-                className="hidden text-right text-[0.8125rem] font-medium tabular-nums text-ink-dim sm:block"
-              >
-                {pct(r.value)}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+                >
+                  <span
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ background: r.color }}
+                    aria-hidden
+                  />
+                  <div role="cell" className="min-w-0">
+                    <p className="line-clamp-2 text-[0.8125rem] font-semibold leading-snug text-ink" title={r.name}>
+                      {r.name || r.ticker}
+                    </p>
+                    {/* On a phone the gain and return ride under the name. */}
+                    {d && (
+                      <p className="mt-1 flex items-center gap-2 text-[0.6875rem] sm:hidden">
+                        <span className={cn("font-medium tabular-nums", gainTone)}>
+                          {fmtSignedCAD(d.gain)}
+                        </span>
+                        {ret}
+                      </p>
+                    )}
+                  </div>
+                  <div role="cell" className="text-right">
+                    <span className="inline-flex items-center gap-1.5 text-[0.8125rem] font-semibold tabular-nums text-ink">
+                      {d?.stale && (
+                        <span
+                          className="h-1.5 w-1.5 rounded-full bg-amber-400"
+                          title="Last known price — today's price could not be fetched yet"
+                          aria-label="Price not updated today"
+                        />
+                      )}
+                      {fmt ? fmt(r.value) : r.value}
+                    </span>
+                    <span className="block text-[0.6875rem] tabular-nums text-ink-faint sm:hidden">
+                      {pct(r.value)}
+                    </span>
+                  </div>
+                  <div
+                    role="cell"
+                    className={cn(
+                      "hidden text-right text-[0.8125rem] font-medium tabular-nums sm:block",
+                      gainTone,
+                    )}
+                  >
+                    {d ? fmtSignedCAD(d.gain) : "—"}
+                  </div>
+                  <div role="cell" className="hidden text-right sm:block">
+                    {ret}
+                  </div>
+                  <div
+                    role="cell"
+                    className="hidden text-right text-[0.8125rem] tabular-nums text-ink-dim sm:block"
+                  >
+                    {pct(r.value)}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }
