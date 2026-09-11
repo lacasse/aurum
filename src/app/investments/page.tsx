@@ -86,15 +86,22 @@ const RANGE_OPTIONS: { value: RangeKey; label: string }[] = [
   { value: "ALL", label: "All" },
 ];
 
-/** Keep the last `n` entries; `Infinity` keeps them all. */
+/**
+ * Keep the last `n` months; `Infinity` keeps them all.
+ *
+ * n+1 month-ends, not n: a window of three months is the close it opened on
+ * and one per month after it. Slicing n points covered n-1 months of movement,
+ * so "3M" drew two months and said "2 months" in the label beside it.
+ */
 function windowed<T>(rows: T[], range: RangeKey): T[] {
   const n = RANGE_MONTHS[range];
-  return Number.isFinite(n) ? rows.slice(-n) : rows;
+  return Number.isFinite(n) ? rows.slice(-(n + 1)) : rows;
 }
 
 /** "since Feb 2022" for the full run, "last 6 months" for a window of it. */
 function rangeLabel(range: RangeKey, points: { label: string }[]): string {
-  if (range !== "ALL") return `last ${points.length} months`;
+  // Intervals, not points: the first month-end is where the window opens.
+  if (range !== "ALL") return `last ${Math.max(1, points.length - 1)} months`;
   return points.length > 0 ? `since ${points[0].label}` : "all time";
 }
 
@@ -198,6 +205,13 @@ function FactRow({
       </span>
     </div>
   );
+}
+
+/** "9 months", "1 year", "3.2 years" — a span in the unit that reads best. */
+function spanLabel(months: number): string {
+  if (months < 24) return `${months} month${months === 1 ? "" : "s"}`;
+  const years = months / 12;
+  return `${Number.isInteger(years) ? years : years.toFixed(1)} years`;
 }
 
 type HoldingView = "simple" | "detailed";
@@ -833,8 +847,6 @@ export default function InvestmentsPage() {
       // Intervals, not points: n months of prices give n-1 monthly returns,
       // and this is the same count the returns card above reports.
       months: windowedMonths.length - 1,
-      from: labelMonth(windowedMonths[0]),
-      through: labelMonth(windowedMonths[windowedMonths.length - 1]),
       name: benchmark.name,
       note: benchmark.note,
     };
@@ -1021,7 +1033,12 @@ export default function InvestmentsPage() {
                 ? `${Math.abs(twr.alpha).toFixed(1)}% ${twr.alpha >= 0 ? "ahead" : "behind"}`
                 : "—"
             }
-            deltaLabel={twr ? `${twr.from} – ${twr.through}` : "no market data yet"}
+            /*
+             * How long, not which months. The window follows the returns chart
+             * below, so the dates moved with it and told the reader less than
+             * the span does.
+             */
+            deltaLabel={twr ? `over ${spanLabel(twr.months)}` : "no market data yet"}
             tone={(twr?.alpha ?? 0) >= 0 ? "positive" : "negative"}
             icon={<TrendingUp size={16} />}
             footer={
