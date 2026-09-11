@@ -34,7 +34,8 @@ import {
   categoryColors,
 } from "@/components/charts";
 import { useFinance } from "@/lib/store";
-import { PageSkeleton, useReady } from "@/lib/hooks";
+import { PageSkeleton, useReady, useRemembered } from "@/lib/hooks";
+import { yearToDate } from "@/lib/spans";
 import {
   DEFAULT_SPEND_GROUPS,
   SPEND_GROUP_LABELS,
@@ -89,7 +90,11 @@ export default function ExpensesPage() {
 
   const [settings, setSettings] = useState<Settings>(EMPTY);
   const [month, setMonth] = useState<string | null>(null);
-  const [window, setWindow] = useState<12 | 24 | 60>(24);
+  const [window, setWindow] = useRemembered<"ytd" | "12" | "24" | "60">(
+    "aurum.span.expenses",
+    "24",
+    ["ytd", "12", "24", "60"],
+  );
   const [editing, setEditing] = useState<"groups" | "car" | null>(null);
   /* Which category's budget is being typed into, in the table below. */
   const [editingLimit, setEditingLimit] = useState<string | null>(null);
@@ -221,7 +226,11 @@ export default function ExpensesPage() {
     summary.rank === null ? null : summary.months - summary.rank;
   const pct = (now: number, then: number | null) =>
     then !== null && then !== 0 ? ((now - then) / Math.abs(then)) * 100 : undefined;
-  const trend = data.trend.slice(-window);
+  // Spending is a flow, so the year to date is this year's own months.
+  const trend =
+    window === "ytd"
+      ? yearToDate(data.trend, (m) => m.key, { withBase: false })
+      : data.trend.slice(-Number(window));
   const spark = data.trend.slice(-13);
 
   return (
@@ -400,12 +409,13 @@ export default function ExpensesPage() {
             action={
               <Segmented<string>
                 options={[
+                  { value: "ytd", label: "YTD" },
                   { value: "12", label: "1y" },
                   { value: "24", label: "2y" },
                   { value: "60", label: "5y" },
                 ]}
-                value={String(window)}
-                onChange={(v) => setWindow(Number(v) as 12 | 24 | 60)}
+                value={window}
+                onChange={(v) => setWindow(v as "ytd" | "12" | "24" | "60")}
               />
             }
           />
