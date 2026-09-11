@@ -595,15 +595,25 @@ export default function InvestmentsPage() {
     const winners = open.filter((r) => r.gain > 0).sort((a, b) => b.gain - a.gain);
     const gainTotal = winners.reduce((s, r) => s + r.gain, 0);
     let carried = 0;
-    let carriers = 0;
+    const carrying: typeof winners = [];
     for (const r of winners) {
       if (carried >= gainTotal * 0.8) break;
       carried += r.gain;
-      carriers += 1;
+      carrying.push(r);
     }
     const concentration =
       gainTotal > 0 && winners.length > 0
-        ? { carriers, of: winners.length, share: (carried / gainTotal) * 100 }
+        ? {
+            carriers: carrying.length,
+            of: winners.length,
+            share: (carried / gainTotal) * 100,
+            /*
+             * Named, because "3 holdings" invites the question and the answer
+             * is short. Tickers rather than names: the card is a tile, and the
+             * list below gives the full name of every one of them.
+             */
+            names: carrying.map((r) => r.ticker),
+          }
         : null;
 
     /*
@@ -947,7 +957,11 @@ export default function InvestmentsPage() {
             }
             deltaLabel={
               data.concentration
-                ? `out of ${data.concentration.of} in profit`
+                ? `${data.concentration.names.slice(0, 4).join(" · ")}${
+                    data.concentration.names.length > 4
+                      ? ` +${data.concentration.names.length - 4}`
+                      : ""
+                  } · of ${data.concentration.of} in profit`
                 : "nothing is in profit yet"
             }
             icon={<Layers size={16} />}
