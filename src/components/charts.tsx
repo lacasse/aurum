@@ -172,9 +172,9 @@ export function Sparkline({
    * Fit the line to its own range rather than to zero.
    *
    * Without an axis Recharts anchors the bottom at nothing, so a balance that
-   * moved between $480k and $516k was drawn as a flat line four fifths of the
-   * way up the box — the movement, which is the only thing a sparkline is for,
-   * was a rounding error against the distance to zero. A tenth of the range is
+   * moved by a few per cent was drawn as a flat line four fifths of the way up
+   * the box — the movement, which is the only thing a sparkline is for, was a
+   * rounding error against the distance to zero. A tenth of the range is
    * left as headroom so the peaks are not clipped to the edges, and a series
    * that never moves still draws a line through the middle rather than
    * dividing by nothing.
