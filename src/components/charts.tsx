@@ -793,7 +793,7 @@ export function ExposurePie({
  * done — value, gain, return — and its share of the ring last, where the key
  * always put it. The class heads each run of rows instead of taking a column.
  */
-const KEY_COLUMNS = "sm:grid-cols-[0.625rem_minmax(0,1fr)_4.5rem_4.5rem_4.25rem_3rem]";
+const KEY_COLUMNS = "sm:grid-cols-[0.625rem_minmax(0,1fr)_4.75rem_4.75rem_4.5rem]";
 
 function HoldingsKey({
   rows,
@@ -851,12 +851,12 @@ function HoldingsKey({
         >
           Return / yr
         </span>
-        <span role="columnheader" className="text-right">Share</span>
       </div>
 
       {groups.map((g) => (
         <div key={g.assetClass} role="rowgroup" className="pt-2 first:pt-1.5">
-          <div className="flex items-baseline justify-between px-3 pb-0.5">
+          {/* The class's share sits beside its name, as each position's does. */}
+          <div className="flex items-baseline gap-2 px-3 pb-0.5">
             <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-ink-dim">
               {g.assetClass}
             </span>
@@ -894,8 +894,22 @@ function HoldingsKey({
                     aria-hidden
                   />
                   <div role="cell" className="min-w-0">
-                    <p className="truncate text-[0.8125rem] font-semibold leading-snug text-ink" title={r.name}>
-                      {r.name || r.ticker}
+                    {/*
+                      * The share sits with the name rather than in a column of
+                      * its own: it says how big this position is, which is part
+                      * of what the position is, and the numbers to the right are
+                      * all about how it has done.
+                      */}
+                    <p className="flex items-baseline gap-2">
+                      <span
+                        className="truncate text-[0.8125rem] font-semibold leading-snug text-ink"
+                        title={r.name}
+                      >
+                        {r.name || r.ticker}
+                      </span>
+                      <span className="shrink-0 text-[0.6875rem] tabular-nums text-ink-faint">
+                        {pct(r.value)}
+                      </span>
                     </p>
                     {/* On a phone the gain and return ride under the name. */}
                     {d && (
@@ -918,9 +932,6 @@ function HoldingsKey({
                       )}
                       {fmt ? fmt(r.value) : r.value}
                     </span>
-                    <span className="block text-[0.6875rem] tabular-nums text-ink-faint sm:hidden">
-                      {pct(r.value)}
-                    </span>
                   </div>
                   <div
                     role="cell"
@@ -933,12 +944,6 @@ function HoldingsKey({
                   </div>
                   <div role="cell" className="hidden text-right sm:block">
                     {ret}
-                  </div>
-                  <div
-                    role="cell"
-                    className="hidden text-right text-[0.8125rem] tabular-nums text-ink-dim sm:block"
-                  >
-                    {pct(r.value)}
                   </div>
                 </li>
               );
