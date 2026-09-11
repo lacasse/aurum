@@ -5,7 +5,9 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronRight,
+  Coins,
   Flame,
+  Layers,
   Pencil,
   Plus,
   RefreshCw,
@@ -507,8 +509,8 @@ export default function InvestmentsPage() {
     const all = sortHoldingRows(holdingRows(holdings), sort.key, sort.dir);
     const closedCount = all.filter((r) => r.closed).length;
     const rows = showClosed ? all : all.filter((r) => !r.closed);
-    // Derived figures describe the live portfolio, so a closed position never
-    // becomes the "best performer" on the strength of old dividends.
+    // Derived figures describe the live portfolio, so a position closed years
+    // ago never decides what the portfolio is doing now.
     const open = all.filter((r) => !r.closed);
     const series = portfolioSeries(holdings, 18);
     const allocation = allocationByClass(holdings).sort((a, b) => b.value - a.value);
@@ -544,14 +546,53 @@ export default function InvestmentsPage() {
     const unrealized = open.reduce((s, r) => s + r.gain, 0);
     const realized = rows.reduce((s, r) => s + r.realizedGain, 0);
     const dividendsAll = rows.reduce((s, r) => s + r.totalDividends, 0);
-    // Only positions with a measurable return can be "best"; one entered by
-    // hand has no flows and therefore no MWRR at all.
-    const best = [...open]
-      .filter((r) => r.mwrr !== null)
-      .sort((a, b) => (b.mwrr ?? 0) - (a.mwrr ?? 0))[0];
+    /*
+     * How few positions carry the gain.
+     *
+     * A portfolio-level gain reads as though everything worked, and usually a
+     * handful did while the rest drifted. Counted against the positions that
+     * are up, not against every position: adding the losers in would net the
+     * total down and let one winner "carry" more than all of it, which is a
+     * true sentence nobody can act on.
+     */
+    const winners = open.filter((r) => r.gain > 0).sort((a, b) => b.gain - a.gain);
+    const gainTotal = winners.reduce((s, r) => s + r.gain, 0);
+    let carried = 0;
+    let carriers = 0;
+    for (const r of winners) {
+      if (carried >= gainTotal * 0.8) break;
+      carried += r.gain;
+      carriers += 1;
+    }
+    const concentration =
+      gainTotal > 0 && winners.length > 0
+        ? { carriers, of: winners.length, share: (carried / gainTotal) * 100 }
+        : null;
+
+    /*
+     * What the portfolio paid out over the last twelve months.
+     *
+     * A run-rate, not a total: all-time distributions grow for ever and say
+     * nothing about what the portfolio yields now. Measured on cost rather
+     * than on market value, because that is the money you put in and the
+     * figure that does not move when prices do.
+     */
+    const cutoff = new Date();
+    cutoff.setFullYear(cutoff.getFullYear() - 1);
+    const since = cutoff.toISOString().slice(0, 10);
+    const ttmDividends = holdings.reduce(
+      (sum, h) =>
+        sum +
+        (h.flows ?? [])
+          .filter((f) => f.kind === "dividend" && f.date >= since)
+          .reduce((a, f) => a + f.amount, 0),
+      0,
+    );
     return {
       rows,
       closedCount,
+      concentration,
+      ttmDividends,
       series,
       allocation,
       classColors,
@@ -562,7 +603,6 @@ export default function InvestmentsPage() {
       unrealized,
       realized,
       dividendsAll,
-      best,
     };
   }, [holdings, sort, showClosed]);
 
@@ -768,7 +808,7 @@ export default function InvestmentsPage() {
           </Card>
         )}
         <PendingRewards />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <StatCard
             label="Portfolio value"
             value={fmtCAD(data.totalValue)}
@@ -793,12 +833,46 @@ export default function InvestmentsPage() {
             deltaLabel="of cost basis"
             tone={unrealized >= 0 ? "positive" : "negative"}
           />
+          {/*
+            * Against the index, not against the best line inside the
+            * portfolio. "Best performer" named a ticker — usually a small
+            * position bought at a low — which judged nothing and could change
+            * no decision. This judges the portfolio, and most of the time the
+            * honest answer is "behind".
+            */}
           <StatCard
-            label="Best performer"
-            value={data.best ? data.best.ticker : "—"}
-            delta={data.best?.mwrr ?? undefined}
-            deltaLabel={data.best ? fmtSignedCAD(data.best.totalReturn) : "no holdings yet"}
+            label="Against the index"
+            value={twr ? fmtPct(twr.portfolioTwr) : "—"}
+            delta={twr?.alpha ?? undefined}
+            deltaLabel={
+              twr ? `points vs the index · ${twr.months} months` : "no benchmark yet"
+            }
+            tone={(twr?.alpha ?? 0) >= 0 ? "positive" : "negative"}
+          />
+          <StatCard
+            label="Carrying the gain"
+            value={
+              data.concentration
+                ? `${data.concentration.carriers} of ${data.concentration.of}`
+                : "—"
+            }
+            deltaValue={
+              data.concentration
+                ? `${data.concentration.share.toFixed(0)}% of it`
+                : undefined
+            }
+            deltaLabel={
+              data.concentration ? "positions hold the unrealized gain" : "nothing is up yet"
+            }
+            icon={<Layers size={16} />}
+          />
+          <StatCard
+            label="Dividends, last 12 months"
+            value={fmtCAD(data.ttmDividends)}
+            delta={data.totalCost > 0 ? (data.ttmDividends / data.totalCost) * 100 : undefined}
+            deltaLabel="yield on cost"
             tone="positive"
+            icon={<Coins size={16} />}
           />
         </div>
 
