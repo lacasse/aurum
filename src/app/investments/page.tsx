@@ -1,7 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
+  ChevronRight,
   Coins,
   Flame,
   Layers,
@@ -20,6 +23,7 @@ import {
   CardHeader,
   Input,
   Modal,
+  Progress,
   Segmented,
   cn,
 } from "@/components/ui";
@@ -101,11 +105,62 @@ interface BenchmarkData {
   series: { month: string; price: number }[];
 }
 
+/**
+ * A column header that sorts. The arrow only appears on the active column, so
+ * the header row stays quiet until it is being used.
+ */
+function SortHeader({
+  label,
+  unit,
+  sortKey,
+  sort,
+  onSort,
+  align = "left",
+  className,
+}: {
+  label: string;
+  unit?: string;
+  sortKey: SortKey;
+  sort: { key: SortKey; dir: "asc" | "desc" };
+  onSort: (key: SortKey) => void;
+  align?: "left" | "right";
+  className?: string;
+}) {
+  const active = sort.key === sortKey;
+  const Arrow = sort.dir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <th
+      className={cn("px-3 py-2.5 font-medium", align === "right" && "text-right", className)}
+      aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={cn(
+          "inline-flex items-center gap-1 uppercase tracking-wider transition-colors hover:text-ink",
+          active && "text-ink",
+        )}
+      >
+        <span>{label}</span>
+        {unit && <span className="text-muted font-normal normal-case">{unit}</span>}
+        <Arrow size={10} className={cn("shrink-0", !active && "invisible")} />
+      </button>
+    </th>
+  );
+}
+
 /*
  * The five columns of the holdings list, from a tablet up. Written out whole
  * because Tailwind only generates classes it can find literally in the source.
  */
 const HOLDING_COLUMNS = "md:grid-cols-[minmax(0,1fr)_8.5rem_7rem_7rem_5.5rem_2.25rem]";
+
+type HoldingView = "simple" | "detailed";
+const HOLDING_VIEWS: { value: HoldingView; label: string }[] = [
+  { value: "simple", label: "Simple" },
+  { value: "detailed", label: "Detailed" },
+];
+const HOLDING_VIEW_KEY = "aurum.holdings.view";
 
 /*
  * Class first — the shape of the portfolio rather than a ranking of positions
@@ -213,6 +268,15 @@ export default function InvestmentsPage() {
   const updateHolding = useFinance((s) => s.updateHolding);
 
 
+  /** Short label for the account a position sits in, e.g. "TFSA". */
+  const accountLabel = (id: string) => {
+    const account = accounts.find((a) => a.id === id);
+    if (!account) return "—";
+    return account.registration && account.registration !== "non-registered"
+      ? account.registration
+      : account.name;
+  };
+
   const [formOpen, setFormOpen] = useState(false);
   const [tradesOpen, setTradesOpen] = useState(false);
   const [editing, setEditing] = useState<Holding | null>(null);
@@ -241,6 +305,40 @@ export default function InvestmentsPage() {
     dir: "asc",
   });
 
+  const toggleSort = (key: SortKey) =>
+    setSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : // Text reads naturally A-Z; numbers are most useful largest-first.
+          { key, dir: key === "name" ? "asc" : "desc" },
+    );
+
+  /*
+   * Which holdings view is showing, remembered per browser. Simple is the
+   * default: the five figures actually read off the list. Detailed is the full
+   * table — shares, cost, price, dividends, weight and the per-account lots —
+   * for the times those are the question.
+   */
+  // Read once, on the client. The page shows a skeleton until it is ready, so
+  // a server render never draws the card this decides between.
+  const [holdingView, setHoldingView] = useState<HoldingView>(() => {
+    if (typeof window === "undefined") return "simple";
+    try {
+      const saved = window.localStorage.getItem(HOLDING_VIEW_KEY);
+      return saved === "detailed" ? "detailed" : "simple";
+    } catch {
+      return "simple";
+    }
+  });
+  const chooseHoldingView = (view: HoldingView) => {
+    setHoldingView(view);
+    try {
+      window.localStorage.setItem(HOLDING_VIEW_KEY, view);
+    } catch {
+      /* not remembered, still switched */
+    }
+  };
+
   /*
    * Fully-sold positions are hidden rather than deleted, so the cost basis and
    * dividends behind a realized gain survive for tax reporting.
@@ -249,6 +347,15 @@ export default function InvestmentsPage() {
   const [growthRange, setGrowthRange] = useState<RangeKey>("ALL");
   const [twrRange, setTwrRange] = useState<RangeKey>("ALL");
 
+  /* Tickers whose per-account lots are shown; only ever set for pooled rows. */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpanded = (ticker: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(ticker)) next.delete(ticker);
+      else next.add(ticker);
+      return next;
+    });
   const [quota, setQuota] = useState<{
     used: number;
     limit: number;
@@ -1233,12 +1340,20 @@ export default function InvestmentsPage() {
             subtitle={`${data.rows.filter((r) => !r.closed).length} positions`}
             action={
               <div className="flex flex-wrap items-center justify-end gap-2">
-                <Segmented<SortKey>
-                  options={HOLDING_SORTS}
-                  value={sort.key}
-                  onChange={(key) =>
-                    setSort({ key, dir: key === "assetClass" ? "asc" : "desc" })
-                  }
+                {/* The detailed table sorts from its own column headers. */}
+                {holdingView === "simple" && (
+                  <Segmented<SortKey>
+                    options={HOLDING_SORTS}
+                    value={sort.key}
+                    onChange={(key) =>
+                      setSort({ key, dir: key === "assetClass" ? "asc" : "desc" })
+                    }
+                  />
+                )}
+                <Segmented<HoldingView>
+                  options={HOLDING_VIEWS}
+                  value={holdingView}
+                  onChange={chooseHoldingView}
                 />
                 {data.closedCount > 0 && (
                   <button
@@ -1252,6 +1367,7 @@ export default function InvestmentsPage() {
               </div>
             }
           />
+          {holdingView === "simple" ? (
           <div className="px-2 pb-2" role="table" aria-label="Holdings">
             <div
               role="row"
@@ -1380,6 +1496,250 @@ export default function InvestmentsPage() {
               </p>
             )}
           </div>
+          ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-line text-left text-[0.625rem] uppercase tracking-wider text-ink-faint">
+                  <SortHeader label="Position" sortKey="name" sort={sort} onSort={toggleSort} />
+                  {/* Sorting by class falls through to value, so it reads as
+                      the classes in turn and, inside each, largest first. */}
+                  <SortHeader label="Class" sortKey="assetClass" sort={sort} onSort={toggleSort} className="hidden sm:table-cell" />
+                  <SortHeader label="Shares" sortKey="shares" sort={sort} onSort={toggleSort} align="right" className="hidden md:table-cell" />
+                  <SortHeader label="Avg cost" unit="(CAD)" sortKey="avgCostCAD" sort={sort} onSort={toggleSort} align="right" className="hidden md:table-cell" />
+                  <SortHeader label="Price" unit="(CAD)" sortKey="priceCAD" sort={sort} onSort={toggleSort} align="right" />
+                  <SortHeader label="Value" unit="(CAD)" sortKey="marketValue" sort={sort} onSort={toggleSort} align="right" />
+                  <SortHeader label="Dividends" sortKey="totalDividends" sort={sort} onSort={toggleSort} align="right" className="hidden lg:table-cell" />
+                  <SortHeader label="Gain" sortKey="totalReturn" sort={sort} onSort={toggleSort} align="right" />
+                  <SortHeader label="MWRR" sortKey="mwrr" sort={sort} onSort={toggleSort} align="right" />
+                  <SortHeader label="Weight" sortKey="weightPct" sort={sort} onSort={toggleSort} className="hidden xl:table-cell" />
+                  <th className="px-3 py-2.5 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.map((r) => {
+                  /*
+                   * A security held in several accounts keeps its sold-off lots
+                   * out of the breakdown on the same terms as the table itself:
+                   * hidden by default, shown when closed positions are shown.
+                   * The row's own totals still count them — a realized gain
+                   * pooled across accounts is the point of pooling — so this
+                   * hides the line, never the money.
+                   */
+                  const lots = showClosed ? r.lots : r.lots.filter((l) => l.shares > 0);
+                  // Counted after the filter, so a position left in one account
+                  // reads and behaves as the single holding it now is.
+                  const pooled = lots.length > 1;
+                  const open = expanded.has(r.ticker);
+                  return (
+                  <Fragment key={r.ticker}>
+                  <tr
+                    className={cn(
+                      "border-b border-line/50 transition-colors last:border-0 hover:bg-elevated/60",
+                      pooled && "cursor-pointer",
+                      r.closed && "opacity-60",
+                    )}
+                    onClick={pooled ? () => toggleExpanded(r.ticker) : undefined}
+                  >
+                    <td className="px-3 py-2.5">
+                      <span className="flex items-center gap-2">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-elevated text-[0.5625rem] font-bold tracking-wide text-brand">
+                          {r.ticker.slice(0, 3)}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="flex items-center gap-1 font-semibold text-ink">
+                            <span className="truncate">{r.name || r.ticker}</span>
+                            {pooled && (
+                              <ChevronRight
+                                size={12}
+                                className={cn(
+                                  "shrink-0 text-ink-faint transition-transform",
+                                  open && "rotate-90",
+                                )}
+                              />
+                            )}
+                          </span>
+                          <span className="flex items-center gap-1 text-ink-faint">
+                            <span className="truncate max-w-[100px]">{r.ticker}</span>
+                            {r.closed && (
+                              <span
+                                className="shrink-0 rounded bg-elevated px-1 py-px text-[0.5rem] font-medium text-ink-faint"
+                                title="Every share has been sold. Kept for the record of the realized gain and the dividends it paid."
+                              >
+                                CLOSED
+                              </span>
+                            )}
+                            {/* One tag per account the security sits in. */}
+                            {r.accountIds.map((id) => (
+                              <span
+                                key={id}
+                                className="shrink-0 rounded bg-elevated px-1 py-px text-[0.5rem] font-medium text-ink-faint"
+                              >
+                                {accountLabel(id)}
+                              </span>
+                            ))}
+                            {staleTickers.has(r.ticker) && (
+                              <span
+                                className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[0.5rem] font-medium text-amber-400"
+                                title="Last known price — the daily EODHD limit is used up, this updates automatically after 00:00 GMT"
+                              >
+                                STALE
+                              </span>
+                            )}
+                            {r.currency === "USD" && (
+                              /* Not amber: that is what STALE uses, and a
+                                 listing currency is a fact about the security,
+                                 not a warning about its price. */
+                              <span className="shrink-0 rounded bg-info/15 px-1 py-px text-[0.5rem] font-medium text-info">
+                                USD
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                      </span>
+                    </td>
+                    <td className="hidden px-3 py-2.5 sm:table-cell">
+                      <span className="flex items-center gap-1.5 whitespace-nowrap text-ink-dim">
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor:
+                              data.classColors[r.assetClass] ?? "var(--ink-faint)",
+                          }}
+                        />
+                        {r.assetClass}
+                      </span>
+                    </td>
+                    <td className="hidden px-3 py-2.5 text-right tabular-nums md:table-cell">
+                      {r.shares.toLocaleString("en-US")}
+                    </td>
+                    <td className="hidden px-3 py-2.5 text-right tabular-nums text-ink-dim md:table-cell">
+                      {fmtCAD(r.avgCostCAD, 2)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {fmtCAD(r.priceCAD, 2)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-semibold tabular-nums">
+                      {fmtCAD(r.marketValue)}
+                    </td>
+                    <td className="hidden px-3 py-2.5 text-right tabular-nums text-ink-dim lg:table-cell">
+                      {r.totalDividends > 0 ? (
+                        <span className="text-positive">{fmtCAD(r.totalDividends)}</span>
+                      ) : (
+                        <span className="text-ink-faint">—</span>
+                      )}
+                    </td>
+                    <td
+                      className={
+                        "px-3 py-2.5 text-right tabular-nums font-medium " +
+                        (r.totalReturn >= 0 ? "text-positive" : "text-negative")
+                      }
+                    >
+                      {fmtSignedCAD(r.totalReturn)}
+                    </td>
+                    <td
+                      className={cn(
+                        "px-3 py-2.5 text-right tabular-nums font-medium",
+                        r.mwrr === null
+                          ? "text-ink-faint"
+                          : r.mwrr >= 0
+                            ? "text-positive"
+                            : "text-negative",
+                      )}
+                    >
+                      {/* A dash, not a zero: no trade history means the return
+                          is unknown, which is not the same as no return. */}
+                      {r.mwrr === null ? (
+                        <span title="No trade history for this position — import trades or log them to measure a return">
+                          —
+                        </span>
+                      ) : (
+                        fmtPct(r.mwrr)
+                      )}
+                    </td>
+                    <td className="hidden px-3 py-2.5 xl:table-cell">
+                      <div className="flex items-center gap-2">
+                        <Progress value={r.weightPct} max={100} className="w-20" />
+                        <span className="w-10 text-right text-[0.6875rem] tabular-nums text-ink-faint">
+                          {r.weightPct.toFixed(1)}%
+                        </span>
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right">
+                      {/*
+                        * The pencil edits the security — ticker, name, asset
+                        * class — which is the same in every account holding it,
+                        * so a pooled row can be edited from here directly and
+                        * the change reaches all of its lots.
+                        */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Edit ${r.ticker}`}
+                        onClick={() => {
+                          setEditing(lots[0]);
+                          setFormOpen(true);
+                        }}
+                      >
+                        <Pencil size={14} />
+                      </Button>
+                    </td>
+                  </tr>
+                  {pooled &&
+                    open &&
+                    lots.map((lot) => (
+                      <tr key={lot.id} className="border-b border-line/50 bg-elevated/30 last:border-0">
+                        <td className="py-2 pl-12 pr-3">
+                          <span className="text-[0.6875rem] text-ink-dim">
+                            {accountLabel(lot.accountId)}
+                          </span>
+                          {lot.shares <= 0 && (
+                            <span className="ml-1 rounded bg-elevated px-1 py-px text-[0.5rem] font-medium text-ink-faint">
+                              CLOSED
+                            </span>
+                          )}
+                        </td>
+                        {/* The class belongs to the security, not the lot. */}
+                        <td className="hidden px-3 py-2 sm:table-cell" />
+                        <td className="hidden px-3 py-2 text-right tabular-nums text-ink-dim md:table-cell">
+                          {lot.shares.toLocaleString("en-US")}
+                        </td>
+                        <td className="hidden px-3 py-2 text-right tabular-nums text-ink-dim md:table-cell">
+                          {fmtCAD(lot.avgCostCAD ?? lot.avgCost, 2)}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
+                          {fmtCAD(lot.priceCAD ?? lot.price, 2)}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
+                          {fmtCAD(lot.shares * (lot.priceCAD ?? lot.price))}
+                        </td>
+                        <td className="hidden px-3 py-2 lg:table-cell" />
+                        <td className="px-3 py-2" />
+                        <td className="px-3 py-2" />
+                        <td className="hidden px-3 py-2 xl:table-cell" />
+                        {/*
+                          * No pencil per account. Everything the form edits is
+                          * a property of the security and saves to every
+                          * account at once, so a pencil here would promise a
+                          * per-account edit that does not exist.
+                          */}
+                        <td className="px-3 py-2" />
+                      </tr>
+                    ))}
+                  </Fragment>
+                  );
+                })}
+                {data.rows.length === 0 && (
+                  <tr>
+                    <td colSpan={11} className="py-12 text-center text-xs text-ink-faint">
+                      No holdings yet — use Log trades above to record your first.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          )}
         </Card>
       </div>
 
