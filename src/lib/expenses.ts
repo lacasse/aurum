@@ -76,8 +76,8 @@ export const DEFAULT_SPEND_GROUPS: Record<string, SpendGroup> = {
    * Paying down a loan is not consumption. The money leaves the chequing
    * account and lands on the other side of the balance sheet as debt that no
    * longer exists, so counting it as an expense both overstates what living
-   * costs and understates what was saved — on this record it is what turned
-   * 2024 into a year that apparently spent [figure redacted] and saved nothing.
+   * costs and understates what was saved — on this record it is what turned a
+   * year of ordinary spending into one that apparently saved nothing.
    */
   [DEBT_CATEGORY]: "excluded",
 };

@@ -13,6 +13,7 @@ export function StatCard({
   deltaLabel,
   icon,
   tone = "neutral",
+  footer,
   spark,
   sparkKey,
   sparkColor = "#8b5cf6",
@@ -34,6 +35,12 @@ export function StatCard({
   deltaLabel?: string;
   icon?: ReactNode;
   tone?: "neutral" | "positive" | "negative";
+  /**
+   * A second fact the headline is incomplete without — what a value cost, how
+   * a total divides — under a hairline rule. It carries its own layout, so the
+   * tile stays one shape whatever is put there.
+   */
+  footer?: ReactNode;
   spark?: Record<string, unknown>[];
   sparkKey?: string;
   sparkColor?: string;
@@ -73,6 +80,9 @@ export function StatCard({
           <span className="text-[0.6875rem] text-ink-faint">{deltaLabel}</span>
         ) : null}
       </div>
+      {footer ? (
+        <div className="mt-4 border-t border-line pt-3">{footer}</div>
+      ) : null}
       {spark && spark.length > 1 && sparkKey ? (
         <div className="mt-3 -mb-1 opacity-80">
           <Sparkline data={spark} dataKey={sparkKey} color={sparkColor} height={64} />
