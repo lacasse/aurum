@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Coins,
   Layers,
+  Wallet,
   Pencil,
   Plus,
   RefreshCw,
@@ -980,7 +981,7 @@ export default function InvestmentsPage() {
             delta={monthDelta}
             deltaValue={fmtSignedCAD(monthDeltaCAD)}
             deltaLabel="vs last month"
-            icon={<TrendingUp size={16} />}
+            icon={<Wallet size={16} />}
             footer={
               <div>
                 <div
