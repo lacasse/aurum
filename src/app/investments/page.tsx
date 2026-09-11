@@ -6,7 +6,6 @@ import {
   ArrowUp,
   ChevronRight,
   Coins,
-  Flame,
   Layers,
   Pencil,
   Plus,
@@ -806,6 +805,17 @@ export default function InvestmentsPage() {
   const prev = data.series[data.series.length - 2] ?? last;
   const monthDelta = prev.value !== 0 ? ((last.value - prev.value) / prev.value) * 100 : 0;
   const monthDeltaCAD = last.value - prev.value;
+  /*
+   * What the positions are worth above what they cost, and the share of the
+   * bar that cost takes. Above cost the bar is cost then gain; below it, the
+   * whole bar is the loss against a full-width cost.
+   */
+  const above = data.totalValue - data.totalCost;
+  const largest = Math.max(data.totalValue, data.totalCost);
+  // The bar is drawn against the larger of the two, so the tail is the gap
+  // between them either way: gain above cost, shortfall below it.
+  const costShare =
+    largest > 0 ? (Math.min(data.totalValue, data.totalCost) / largest) * 100 : 100;
 
   return (
     <Shell
@@ -887,7 +897,14 @@ export default function InvestmentsPage() {
           </Card>
         )}
         <PendingRewards />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {/*
+            * Value and cost in one tile. They were two, and the second said
+            * only what the first already implies — the interesting figure is
+            * the distance between them, which neither card drew. The bar is
+            * that distance: the filled part is what the positions cost, the
+            * rest is what they have gained.
+            */}
           <StatCard
             label="Portfolio value"
             value={fmtCAD(data.totalValue)}
@@ -895,15 +912,36 @@ export default function InvestmentsPage() {
             deltaValue={fmtSignedCAD(monthDeltaCAD)}
             deltaLabel="vs last month"
             icon={<TrendingUp size={16} />}
-            spark={data.series.map((p) => ({ v: p.value }))}
-            sparkKey="v"
-            sparkColor="#22d3ee"
-          />
-          <StatCard
-            label="Cost basis"
-            value={fmtCAD(data.totalCost)}
-            deltaLabel={`across ${data.rows.length} positions`}
-            icon={<Flame size={16} />}
+            footer={
+              <div>
+                <div
+                  className="flex h-1.5 overflow-hidden rounded-full bg-elevated"
+                  role="img"
+                  aria-label={`${fmtCAD(data.totalCost)} invested, now worth ${fmtCAD(data.totalValue)}`}
+                >
+                  <span
+                    className="bg-ink-faint/60"
+                    style={{ width: `${Math.min(100, costShare)}%` }}
+                  />
+                  <span
+                    className={above >= 0 ? "bg-positive" : "bg-negative"}
+                    style={{ width: `${Math.max(0, 100 - costShare)}%` }}
+                  />
+                </div>
+                <p className="mt-2 flex flex-wrap items-baseline gap-x-2 text-[0.6875rem] text-ink-faint">
+                  <span className="tabular-nums text-ink-dim">{fmtCAD(data.totalCost)}</span>
+                  <span>invested in {data.rows.length} positions</span>
+                  <span
+                    className={cn(
+                      "ml-auto font-medium tabular-nums",
+                      above >= 0 ? "text-positive" : "text-negative",
+                    )}
+                  >
+                    {fmtSignedCAD(above)}
+                  </span>
+                </p>
+              </div>
+            }
           />
           {/*
             * Against the index, not against the best line inside the
