@@ -840,38 +840,56 @@ export default function InvestmentsPage() {
             * no decision. This judges the portfolio, and most of the time the
             * honest answer is "behind".
             */}
+          {/*
+            * Each card leads with the answer in words a person would use, and
+            * puts the working underneath. The first version led with the
+            * working — a return, then a gap in "points", then a caption — so
+            * the reader had to assemble the claim themselves.
+            */}
           <StatCard
-            label="Against the index"
-            value={twr ? fmtPct(twr.portfolioTwr) : "—"}
-            delta={twr?.alpha ?? undefined}
-            deltaLabel={
-              twr ? `points vs the index · ${twr.months} months` : "no benchmark yet"
+            label="You vs the market"
+            value={
+              twr
+                ? `${Math.abs(twr.alpha).toFixed(1)}% ${twr.alpha >= 0 ? "ahead" : "behind"}`
+                : "—"
             }
+            deltaValue={
+              twr
+                ? `You ${fmtPct(twr.portfolioTwr)} · market ${fmtPct(twr.benchmarkTwr)}`
+                : undefined
+            }
+            deltaLabel={twr ? `last ${twr.months} months` : "no market data yet"}
             tone={(twr?.alpha ?? 0) >= 0 ? "positive" : "negative"}
+            icon={<TrendingUp size={16} />}
           />
           <StatCard
-            label="Carrying the gain"
+            label="Where your gains come from"
             value={
               data.concentration
-                ? `${data.concentration.carriers} of ${data.concentration.of}`
+                ? `${data.concentration.carriers} holding${data.concentration.carriers === 1 ? "" : "s"}`
                 : "—"
             }
             deltaValue={
               data.concentration
-                ? `${data.concentration.share.toFixed(0)}% of it`
+                ? `${data.concentration.share.toFixed(0)}% of your gains`
                 : undefined
             }
             deltaLabel={
-              data.concentration ? "positions hold the unrealized gain" : "nothing is up yet"
+              data.concentration
+                ? `out of ${data.concentration.of} in profit`
+                : "nothing is in profit yet"
             }
             icon={<Layers size={16} />}
           />
           <StatCard
-            label="Dividends, last 12 months"
-            value={fmtCAD(data.ttmDividends)}
-            delta={data.totalCost > 0 ? (data.ttmDividends / data.totalCost) * 100 : undefined}
-            deltaLabel="yield on cost"
-            tone="positive"
+            label="Dividend income"
+            value={`${fmtCAD(data.ttmDividends)} / yr`}
+            deltaValue={
+              data.totalCost > 0
+                ? `${((data.ttmDividends / data.totalCost) * 100).toFixed(1)}% of what you invested`
+                : undefined
+            }
+            deltaLabel="paid in the last 12 months"
             icon={<Coins size={16} />}
           />
         </div>
