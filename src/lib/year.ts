@@ -10,6 +10,7 @@ import { Transaction } from "./types";
 import { fromCents, roundMoney, toCents } from "./money";
 import { PENSION_CATEGORY } from "./pension";
 import {
+  DEBT_CATEGORY,
   SPEND_GROUP_LABELS,
   groupOf,
   type SpendGroup,
@@ -103,6 +104,11 @@ export function yearRows(
   portfolio: readonly PortfolioPoint[],
   flowsByMonth: Readonly<Record<string, number>>,
   today = new Date().toISOString().slice(0, 10),
+  /*
+   * Read rather than assumed, because the Expenses page lets the split be
+   * reassigned and two pages must not answer this differently.
+   */
+  spendGroup: (category: string) => SpendGroup = (c) => groupOf(c),
 ): YearRow[] {
   const months = netWorth.map((p) => p.key);
   const nwByMonth = new Map(netWorth.map((p) => [p.key, p]));
@@ -130,7 +136,14 @@ export function yearRows(
       slot.income += amount;
       if (!NON_SPENDABLE_INCOME.has(t.category)) slot.spendable += amount;
       if (within) early.income += amount;
-    } else if (t.type === "expense") {
+    } else if (t.type === "expense" && spendGroup(t.category) !== "excluded") {
+      /*
+       * Paying down a loan is not spending, and the page used to count it as
+       * spending while the Expenses page did not. Money borrowed is already
+       * kept out of income; counting its repayment as an expense books the
+       * same money twice — once when it was spent, again when the debt it
+       * funded was cleared — and reads as a year that saved nothing.
+       */
       slot.expenses += amount;
       if (within) early.expenses += amount;
     }
@@ -901,6 +914,8 @@ const BORROWED = "Borrowed";
 const RETURNED = "Refunds";
 /** What an invested account took in and has no purchases to account for. */
 const UNITEMISED = "Not itemised";
+/** The plain name for repayments, drawn opposite "Borrowed". */
+const DEBT_REPAID = "Debt repaid";
 
 /**
  * What arrived in a spendable account and was neither spent nor moved on.
@@ -953,6 +968,7 @@ const LEAF_ROLE: Record<string, FlowNode["role"]> = {
   [SPEND_GROUP_LABELS.necessity]: "necessity",
   [SPEND_GROUP_LABELS.discretionary]: "discretionary",
   [SPEND_GROUP_LABELS.excluded]: "debt",
+  [DEBT_REPAID]: "debt",
   /* Money still there at the end is not something the year spent. */
   [CLOSING]: "kept",
 };
@@ -1071,6 +1087,34 @@ export function yearFlow(
   const note = (m: Map<string, number>, k: string, v: number) =>
     m.set(k, (m.get(k) ?? 0) + v);
 
+  /*
+   * What the band of things that are not consumption should be called.
+   *
+   * "Not consumption" says what the money is not, which is a poor name for the
+   * one band that answers the year's other question: with "Borrowed" drawn
+   * plainly on the left, what was repaid deserves to be drawn plainly on the
+   * right. The group can hold whatever the Expenses page assigns to it, so the
+   * specific name is used only when nothing else is in it.
+   */
+  const excludedCategories = new Set(
+    transactions
+      .filter(
+        (t) =>
+          t.date.slice(0, 4) === year &&
+          t.type === "expense" &&
+          spendGroup(t.category) === "excluded",
+      )
+      .map((t) => t.category),
+  );
+  const onlyDebt =
+    excludedCategories.size > 0 &&
+    [...excludedCategories].every((c) => c === DEBT_CATEGORY);
+  const spendBand = (category: string) => {
+    const group = spendGroup(category);
+    if (group === "excluded" && onlyDebt) return DEBT_REPAID;
+    return SPEND_GROUP_LABELS[group];
+  };
+
   for (const t of transactions) {
     if (t.date.slice(0, 4) !== year) continue;
     const cents = toCents(t.amount);
@@ -1113,7 +1157,7 @@ export function yearFlow(
       rows.push({ from: band, to: hub, cents, stage: 1 });
     } else if (t.type === "expense") {
       const hub = hubOf(t.sourceAccountId);
-      note(spendTotals, SPEND_GROUP_LABELS[spendGroup(t.category)], cents);
+      note(spendTotals, spendBand(t.category), cents);
       note(hubTotals, hub, cents);
       /*
        * A fee or a tax charged inside an investment account is spending, and it
@@ -1134,7 +1178,7 @@ export function yearFlow(
        */
       rows.push({
         from: hub,
-        to: SPEND_GROUP_LABELS[spendGroup(t.category)],
+        to: spendBand(t.category),
         cents,
         stage: 2,
         group: hub === INVESTMENTS ? DIRECT : SPENDING,
