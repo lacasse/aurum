@@ -170,10 +170,11 @@ input[type="number"] {
     display: none;
   }
   /*
-   * No padding of its own, so the disc sits in the same column as the link
-   * icons below it — which is also where the wordmark's own disc lands, so it
-   * barely moves when the rail opens. The row's fixed height keeps it from
-   * moving up or down, and keeps the links below it still.
+   * No padding of its own, and the lockup is drawn at full width in both
+   * states: collapsed, the rail clips the wordmark off just past the disc, so
+   * opening the rail wipes the name into view instead of swapping drawings.
+   * The disc is never redrawn, so it cannot move — and it lands in the same
+   * column as the link icons below it.
    */
   .nav-rail .nav-brand {
     padding-inline: 0;
@@ -201,11 +202,6 @@ input[type="number"] {
   .nav-rail:hover .nav-label,
   .nav-rail:focus-within .nav-label {
     display: revert;
-  }
-  html[data-nav="expanded"] .nav-mark,
-  .nav-rail:hover .nav-mark,
-  .nav-rail:focus-within .nav-mark {
-    display: none;
   }
 }
 

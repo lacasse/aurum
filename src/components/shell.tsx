@@ -77,28 +77,6 @@ const SHOW_UNRELEASED =
 
 const VISIBLE_NAV = NAV.filter((item) => SHOW_UNRELEASED || !("unreleased" in item));
 
-/** Just the disc, for the collapsed rail. Same gradient, no wordmark. */
-function AurumMark() {
-  return (
-    <svg
-      viewBox="0 0 48 48"
-      className="nav-mark h-10 w-10"
-      role="img"
-      aria-label="Aurum"
-    >
-      <defs>
-        <linearGradient id="aurum-mark-small" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#f6cb6e" />
-          <stop offset="0.34" stopColor="#e3aec4" />
-          <stop offset="0.66" stopColor="#a877e2" />
-          <stop offset="1" stopColor="#7c30e6" />
-        </linearGradient>
-      </defs>
-      <circle cx="24" cy="24" r="24" fill="url(#aurum-mark-small)" />
-    </svg>
-  );
-}
-
 /**
  * The whole lockup, drawn rather than loaded.
  *
@@ -124,8 +102,13 @@ function AurumLogo() {
        * looks exactly like the artwork. On the light card that same cream is
        * 1.5:1 against the cream ground — a watermark rather than a name — so
        * there the wordmark takes the theme's ink. The mark never changes.
+       *
+       * Drawn at full width whatever the rail is doing. Collapsed, the rail
+       * simply clips the wordmark off after the disc, so opening it wipes the
+       * name into view rather than swapping one drawing for another — and the
+       * disc, never redrawn, cannot move.
        */
-      className="nav-label h-auto w-[10.5rem] text-ink dark:text-[#e2caba]"
+      className="h-auto w-[10.5rem] shrink-0 text-ink dark:text-[#e2caba]"
       role="img"
       aria-label="Aurum · Personal Finance"
     >
@@ -286,34 +269,8 @@ function useNavCollapsed(): [boolean, () => void] {
   return [collapsed, toggle];
 }
 
-/**
- * The header's copy of the toggle.
- *
- * A control that hides the menu cannot live only inside the menu, so this one
- * sits in the page header, in the slot the mobile menu button occupies at
- * narrow widths. The rail carries its own copy for when it is open.
- */
+/** The toggle, at the foot of the rail beside Sign out. */
 function CollapseToggle() {
-  const mounted = useMounted();
-  const [collapsed, toggle] = useNavCollapsed();
-  const label = collapsed ? "Expand menu" : "Collapse menu";
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="hidden lg:inline-flex"
-      onClick={toggle}
-      title={label}
-      aria-label={label}
-      aria-pressed={mounted ? collapsed : undefined}
-    >
-      {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-    </Button>
-  );
-}
-
-/** The rail's own copy, sitting with Sign out at its foot. */
-function CollapseRow() {
   const mounted = useMounted();
   const [collapsed, toggle] = useNavCollapsed();
   const label = collapsed ? "Expand menu" : "Collapse menu";
@@ -354,17 +311,16 @@ function SidebarContent({
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col">
       <Link
         href="/"
         onClick={onNavigate}
         className="nav-brand flex h-[3.25rem] shrink-0 items-center"
       >
-        {collapsible ? <AurumMark /> : null}
         <AurumLogo />
       </Link>
 
-      <nav className="mt-6 flex-1 space-y-1">
+      <nav className="mt-6 min-h-0 flex-1 space-y-1 overflow-y-auto">
         {VISIBLE_NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname === href;
           return (
@@ -387,7 +343,7 @@ function SidebarContent({
         })}
       </nav>
 
-      <div className="space-y-1 border-t border-line pt-3">
+      <div className="shrink-0 space-y-1 border-t border-line pt-3">
         <div className="flex items-center justify-between px-1 pb-1">
           <span className="nav-label pl-2 text-[0.6875rem] uppercase tracking-wider text-ink-faint">
             Theme
@@ -402,7 +358,7 @@ function SidebarContent({
           <LogOut size={14} className="shrink-0" />
           <span className="nav-label">Sign out</span>
         </button>
-        {collapsible ? <CollapseRow /> : null}
+        {collapsible ? <CollapseToggle /> : null}
       </div>
     </div>
   );
@@ -423,7 +379,7 @@ export function Shell({
   return (
     <div className="min-h-dvh lg:flex">
       {/* Desktop sidebar */}
-      <aside className="nav-rail fixed inset-y-0 left-0 z-30 hidden border-r border-line bg-surface p-3 lg:block">
+      <aside className="nav-rail fixed inset-y-0 left-0 z-30 hidden overflow-hidden border-r border-line bg-surface p-3 lg:block">
         <SidebarContent collapsible />
       </aside>
 
@@ -456,7 +412,6 @@ export function Shell({
             >
               <Menu size={18} />
             </Button>
-            <CollapseToggle />
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-lg font-semibold tracking-tight">
                 {title}
