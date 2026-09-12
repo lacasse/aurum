@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeftRight,
   BookOpen,
@@ -13,13 +13,14 @@ import {
   LayoutDashboard,
   Palette,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   Moon,
   Receipt,
   ReceiptText,
   Sun,
   Trash2,
   TrendingUp,
-  Upload,
   X,
   LogOut,
 } from "lucide-react";
@@ -47,7 +48,6 @@ const NAV = [
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/year", label: "Year", icon: CalendarRange },
   { href: "/tax", label: "Tax", icon: Receipt, unreleased: true },
-  { href: "/import", label: "Import", icon: Upload },
   { href: "/guide", label: "Guide", icon: BookOpen, unreleased: true },
   /* Temporary: the colour-picking bench. Delete this line with the page. */
   { href: "/colours", label: "Colours", icon: Palette, unreleased: true },
@@ -100,8 +100,13 @@ function AurumLogo() {
        * looks exactly like the artwork. On the light card that same cream is
        * 1.5:1 against the cream ground — a watermark rather than a name — so
        * there the wordmark takes the theme's ink. The mark never changes.
+       *
+       * Drawn at full width whatever the rail is doing. Collapsed, the rail
+       * simply clips the wordmark off after the disc, so opening it wipes the
+       * name into view rather than swapping one drawing for another — and the
+       * disc, never redrawn, cannot move.
        */
-      className="h-auto w-[11.5rem] text-ink dark:text-[#e2caba]"
+      className="h-auto w-[10.5rem] shrink-0 text-ink dark:text-[#e2caba]"
       role="img"
       aria-label="Aurum · Personal Finance"
     >
@@ -190,10 +195,10 @@ function DeleteDemo() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
+        className="flex h-7 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
       >
-        <Trash2 size={14} />
-        Delete demo data
+        <Trash2 size={14} className="shrink-0" />
+        <span className="nav-label whitespace-nowrap">Delete demo data</span>
       </button>
       <Modal open={open} onClose={close} title="Delete demo data">
         <p className="text-sm text-ink-dim">
@@ -215,7 +220,85 @@ function DeleteDemo() {
   );
 }
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+/**
+ * The collapsed/expanded state, and the one way to change it.
+ *
+ * The width itself is the stylesheet's, keyed off `data-nav` on <html> so it
+ * is settled before the first paint; this only flips the attribute and writes
+ * the preference down. Reading it back on load is the inline script in the
+ * root layout.
+ */
+const navListeners = new Set<() => void>();
+
+function useNavCollapsed(): [boolean, () => void] {
+  /*
+   * Collapsed is the default, so this starts true and the effect corrects it
+   * for anyone who has expanded the rail. The value only decides which icon
+   * and label a button shows — the rail's width is already right, drawn from
+   * the attribute the inline script set.
+   *
+   * There are two of these buttons and they must agree, so each subscribes to
+   * the other: the attribute on <html> is the state, and this is how a change
+   * to it is heard.
+   */
+  const [collapsed, setCollapsed] = useState(true);
+
+  useEffect(() => {
+    const read = () =>
+      setCollapsed(document.documentElement.dataset.nav !== "expanded");
+    read();
+    navListeners.add(read);
+    return () => {
+      navListeners.delete(read);
+    };
+  }, []);
+
+  const toggle = () => {
+    const next = !collapsed;
+    document.documentElement.dataset.nav = next ? "collapsed" : "expanded";
+    try {
+      window.localStorage.setItem("aurum.nav", next ? "collapsed" : "expanded");
+    } catch {
+      /* Storage blocked: still switched, just not remembered. */
+    }
+    navListeners.forEach((fn) => fn());
+  };
+
+  return [collapsed, toggle];
+}
+
+/** The toggle, at the foot of the rail beside Sign out. */
+function CollapseToggle() {
+  const mounted = useMounted();
+  const [collapsed, toggle] = useNavCollapsed();
+  const label = collapsed ? "Expand menu" : "Collapse menu";
+  return (
+    <button
+      onClick={toggle}
+      title={label}
+      aria-label={label}
+      aria-pressed={mounted ? collapsed : undefined}
+      className="flex h-7 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
+    >
+      {collapsed ? (
+        <PanelLeftOpen size={14} className="shrink-0" />
+      ) : (
+        <PanelLeftClose size={14} className="shrink-0" />
+      )}
+      <span className="nav-label whitespace-nowrap">{label}</span>
+    </button>
+  );
+}
+
+function SidebarContent({
+  onNavigate,
+  collapsible,
+}: {
+  onNavigate?: () => void;
+  /* The drawer is never collapsed, so the mark belongs to the desktop rail
+     alone. */
+  collapsible?: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -230,12 +313,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <Link
         href="/"
         onClick={onNavigate}
-        className="block px-3 py-1"
+        className="nav-brand flex h-[3.25rem] shrink-0 items-center"
       >
         <AurumLogo />
       </Link>
 
-      <nav className="mt-6 flex-1 space-y-1">
+      <nav className="mt-6 min-h-0 flex-1 space-y-1 overflow-y-auto">
         {VISIBLE_NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname === href;
           return (
@@ -243,23 +326,24 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               key={href}
               href={href}
               onClick={onNavigate}
+              title={label}
               className={cn(
-                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                "flex h-8 items-center gap-2.5 rounded-lg px-3 text-sm font-medium transition-colors",
                 active
                   ? "bg-brand/10 text-brand"
                   : "text-ink-dim hover:bg-elevated hover:text-ink",
               )}
             >
-              <Icon size={16} />
-              {label}
+              <Icon size={16} className="shrink-0" />
+              <span className="nav-label whitespace-nowrap">{label}</span>
             </Link>
           );
         })}
       </nav>
 
-      <div className="space-y-1 border-t border-line pt-3">
-        <div className="flex items-center justify-between px-3 pb-1">
-          <span className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+      <div className="shrink-0 space-y-1 border-t border-line pt-3">
+        <div className="flex items-center justify-between px-1 pb-1">
+          <span className="nav-label whitespace-nowrap pl-2 text-[0.6875rem] uppercase tracking-wider text-ink-faint">
             Theme
           </span>
           <ThemeToggle />
@@ -267,11 +351,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <DeleteDemo />
         <button
           onClick={logout}
-          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
+          className="flex h-7 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
         >
-          <LogOut size={14} />
-          Sign out
+          <LogOut size={14} className="shrink-0" />
+          <span className="nav-label whitespace-nowrap">Sign out</span>
         </button>
+        {collapsible ? <CollapseToggle /> : null}
       </div>
     </div>
   );
@@ -292,8 +377,8 @@ export function Shell({
   return (
     <div className="min-h-dvh lg:flex">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-line bg-surface p-4 lg:block">
-        <SidebarContent />
+      <aside className="nav-rail fixed inset-y-0 left-0 z-30 hidden overflow-hidden border-r border-line bg-surface p-3 lg:block">
+        <SidebarContent collapsible />
       </aside>
 
       {/* Mobile drawer */}
@@ -308,7 +393,7 @@ export function Shell({
         </div>
       ) : null}
 
-      <div className="flex min-w-0 flex-1 flex-col lg:ml-60">
+      <div className="nav-content flex min-w-0 flex-1 flex-col">
         {/*
           * Scrolls away with the page. It was pinned to the top, which kept a
           * title and two buttons over every screen of content below it — a

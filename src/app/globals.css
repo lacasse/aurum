@@ -36,6 +36,10 @@
   /* Neutral-informational, for tags that state a fact rather than warn. Dark
      enough to read on the cream card, where a mid-blue washes out. */
   --info: #1d4ed8;
+  /* The sidebar's two widths. Narrower than it was: the labels never needed
+     that much room, and the pages did. */
+  --nav-width: 13rem;
+  --nav-width-collapsed: 4rem;
   color-scheme: light;
 }
 
@@ -140,4 +144,69 @@ input[type="number"] {
 .recharts-surface:focus,
 .recharts-wrapper:focus {
   outline: none;
+}
+
+/*
+ * The sidebar, and how wide it is.
+ *
+ * Collapsed is the default; expanding is a preference, so it has to be known
+ * before the first paint or the page visibly jumps from one width to the other
+ * on every load. The inline script in the root layout reads it from this
+ * browser's storage and stamps `data-nav="expanded"` on <html>; these rules do
+ * the rest, which keeps React out of a decision that is really just a width.
+ *
+ * Only above the `lg` breakpoint: below it the rail is hidden entirely and the
+ * drawer is always its full width.
+ */
+@media (min-width: 64rem) {
+  .nav-rail {
+    width: var(--nav-width-collapsed);
+    transition: width 0.18s ease;
+  }
+  .nav-content {
+    margin-left: var(--nav-width-collapsed);
+  }
+  .nav-label {
+    display: none;
+  }
+  /*
+   * No padding of its own, and the lockup is drawn at full width in both
+   * states: collapsed, the rail clips the wordmark off just past the disc, so
+   * opening the rail wipes the name into view instead of swapping drawings.
+   * The disc is never redrawn, so it cannot move — and it lands in the same
+   * column as the link icons below it.
+   */
+  .nav-rail .nav-brand {
+    padding-inline: 0;
+  }
+
+  /*
+   * Hovering the collapsed rail reads it without reopening it: it widens over
+   * the page rather than pushing it, because the point of collapsing was the
+   * width the page got back. `focus-within` does the same for the keyboard, so
+   * tabbing through the links is not tabbing through unlabelled icons.
+   */
+  html:not([data-nav="expanded"]) .nav-rail:hover,
+  html:not([data-nav="expanded"]) .nav-rail:focus-within {
+    width: var(--nav-width);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+  }
+
+  html[data-nav="expanded"] .nav-rail {
+    width: var(--nav-width);
+  }
+  html[data-nav="expanded"] .nav-content {
+    margin-left: var(--nav-width);
+  }
+  html[data-nav="expanded"] .nav-label,
+  .nav-rail:hover .nav-label,
+  .nav-rail:focus-within .nav-label {
+    display: revert;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-rail {
+    transition: none;
+  }
 }
