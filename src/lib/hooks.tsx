@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useFinance } from "./store";
 import type { AssetClass, Currency } from "./types";
+import type { SpendGroup } from "./expenses";
 
 const emptySubscribe = () => () => {};
 
@@ -64,6 +65,33 @@ export function useRemembered<T extends string>(
     }
   };
   return [value, remember];
+}
+
+/**
+ * How the owner has classified their spending categories.
+ *
+ * Lives beside the expense settings because that is where it is edited; this
+ * only reads it. Anything the request cannot answer falls back to the built-in
+ * defaults, which is what `groupOf` does with an empty override map, so a page
+ * that asks is never left without an answer.
+ */
+export function useSpendGroups(): Record<string, SpendGroup> {
+  const [groups, setGroups] = useState<Record<string, SpendGroup>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/expense-settings", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((s: { groups?: Record<string, SpendGroup> }) => {
+        if (!cancelled) setGroups(s.groups ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return groups;
 }
 
 export function PageSkeleton() {
