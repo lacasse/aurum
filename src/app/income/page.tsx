@@ -295,7 +295,7 @@ export default function IncomePage() {
             * in at all.
             */}
           <StatCard
-            label="Free each month"
+            label="Net cash flow"
             value={fmtCAD(data.avg.uncommittedLiquid)}
             tone={data.avg.uncommittedLiquid >= 0 ? "positive" : "negative"}
             deltaLabel={`averaged over ${data.avg.months} month${
@@ -339,12 +339,12 @@ export default function IncomePage() {
             * months to happen in.
             */}
           <StatCard
-            label={`${data.yoy.now.year} so far, per month`}
+            label="Income, year over year"
             value={fmtCAD(data.yoy.now.average)}
             delta={data.yoy.change === null ? undefined : data.yoy.change * 100}
-            deltaLabel={`vs the same ${data.yoy.months} month${
-              data.yoy.months === 1 ? "" : "s"
-            } of ${data.yoy.before.year}`}
+            deltaLabel={`${data.yoy.now.year} so far · vs the same ${
+              data.yoy.months
+            } month${data.yoy.months === 1 ? "" : "s"} of ${data.yoy.before.year}`}
             icon={<CalendarRange size={16} />}
             footer={
               <div className="space-y-2 text-xs">
