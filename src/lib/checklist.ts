@@ -12,7 +12,7 @@ import type { Transaction } from "./types";
  * What the monthly checklist knows that the general importer does not: it is
  * closing one particular month.
  *
- * The /import page exists to take whatever you have, including years of it.
+ * The import flow exists to take whatever you have, including years of it.
  * The checklist is a ritual performed once a month, on the month that has just
  * finished — so a statement that spans a quarter, or one downloaded mid-month
  * and carrying a week of the current one, is mostly noise here. Trimming it to

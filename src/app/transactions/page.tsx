@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   ArrowDownRight,
@@ -20,11 +19,13 @@ import {
   Card,
   EmptyState,
   Input,
+  Modal,
   Select,
   cn,
 } from "@/components/ui";
 import { GroupedBars } from "@/components/charts";
 import { ConfirmDelete, TradeForm, TransactionForm } from "@/components/forms";
+import { ImportFlow } from "@/components/import-flow";
 import { allTrades, holdingAfterFlowEdit, type TradeRecord } from "@/lib/flows";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady } from "@/lib/hooks";
@@ -79,6 +80,7 @@ export default function TransactionsPage() {
   const [month, setMonth] = useState("all");
 
   const [formOpen, setFormOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState<Transaction | null>(null);
   const [editingTrade, setEditingTrade] = useState<TradeRecord | null>(null);
@@ -237,11 +239,9 @@ export default function TransactionsPage() {
         <div className="flex items-center gap-2">
           {/* Importing a statement is adding transactions, so it belongs
               beside the button that adds one rather than in the sidebar. */}
-          <Link href="/import">
-            <Button variant="secondary">
-              <Upload size={15} /> Import
-            </Button>
-          </Link>
+          <Button variant="secondary" onClick={() => setImportOpen(true)}>
+            <Upload size={15} /> Import
+          </Button>
           <Button
             onClick={() => {
               setEditing(null);
@@ -436,6 +436,18 @@ export default function TransactionsPage() {
         </Card>
       </div>
 
+      {/*
+        * Mounted only while open, so closing the dialog discards a half-done
+        * import rather than leaving it waiting behind a button.
+        */}
+      <Modal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        title="Import"
+        size="2xl"
+      >
+        <ImportFlow />
+      </Modal>
       <TransactionForm
         open={formOpen}
         initial={editing}
