@@ -250,8 +250,8 @@ export default function GuidePage() {
               source="Your card statement and activity export"
               where={
                 <>
-                  <Link href="/import" className="text-brand hover:underline">
-                    Import
+                  <Link href="/transactions" className="text-brand hover:underline">
+                    Import, on Transactions
                   </Link>{" "}
                   — both files, duplicates ignored
                 </>
@@ -407,8 +407,8 @@ export default function GuidePage() {
           </p>
           <p>
             For anything older, use{" "}
-            <Link href="/import" className="text-brand hover:underline">
-              Import
+            <Link href="/transactions" className="text-brand hover:underline">
+              Import, on Transactions
             </Link>
             , which takes whatever you have and does not care what month it is
             from.

@@ -441,8 +441,11 @@ function ImportStep({
           <p className="text-[0.6875rem] text-ink-faint">
             Whichever way your bank signs its amounts, the sign is worked out
             from the file. For anything older than {label}, use{" "}
-            <Link href="/import" className="text-brand underline-offset-2 hover:underline">
-              Import
+            <Link
+              href="/transactions"
+              className="text-brand underline-offset-2 hover:underline"
+            >
+              Import, on Transactions
             </Link>
             .
           </p>
