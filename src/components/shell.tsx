@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeftRight,
   BookOpen,
@@ -13,6 +13,8 @@ import {
   LayoutDashboard,
   Palette,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   Moon,
   Receipt,
   ReceiptText,
@@ -75,6 +77,28 @@ const SHOW_UNRELEASED =
 
 const VISIBLE_NAV = NAV.filter((item) => SHOW_UNRELEASED || !("unreleased" in item));
 
+/** Just the disc, for the collapsed rail. Same gradient, no wordmark. */
+function AurumMark() {
+  return (
+    <svg
+      viewBox="0 0 48 48"
+      className="nav-mark h-8 w-8"
+      role="img"
+      aria-label="Aurum"
+    >
+      <defs>
+        <linearGradient id="aurum-mark-small" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#f6cb6e" />
+          <stop offset="0.34" stopColor="#e3aec4" />
+          <stop offset="0.66" stopColor="#a877e2" />
+          <stop offset="1" stopColor="#7c30e6" />
+        </linearGradient>
+      </defs>
+      <circle cx="24" cy="24" r="24" fill="url(#aurum-mark-small)" />
+    </svg>
+  );
+}
+
 /**
  * The whole lockup, drawn rather than loaded.
  *
@@ -101,7 +125,7 @@ function AurumLogo() {
        * 1.5:1 against the cream ground — a watermark rather than a name — so
        * there the wordmark takes the theme's ink. The mark never changes.
        */
-      className="h-auto w-[11.5rem] text-ink dark:text-[#e2caba]"
+      className="nav-label h-auto w-[10.5rem] text-ink dark:text-[#e2caba]"
       role="img"
       aria-label="Aurum · Personal Finance"
     >
@@ -192,8 +216,8 @@ function DeleteDemo() {
         onClick={() => setOpen(true)}
         className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
       >
-        <Trash2 size={14} />
-        Delete demo data
+        <Trash2 size={14} className="shrink-0" />
+        <span className="nav-label">Delete demo data</span>
       </button>
       <Modal open={open} onClose={close} title="Delete demo data">
         <p className="text-sm text-ink-dim">
@@ -215,7 +239,62 @@ function DeleteDemo() {
   );
 }
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+/**
+ * Collapses the rail to its icons, and remembers the choice.
+ *
+ * The width itself is the stylesheet's, keyed off `data-nav` on <html> so it
+ * is settled before the first paint; this only flips the attribute and writes
+ * the preference down. Reading it back on load is the inline script in the
+ * root layout.
+ */
+function CollapseToggle() {
+  const mounted = useMounted();
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCollapsed(document.documentElement.dataset.nav === "collapsed");
+  }, []);
+
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    if (next) document.documentElement.dataset.nav = "collapsed";
+    else delete document.documentElement.dataset.nav;
+    try {
+      window.localStorage.setItem("aurum.nav", next ? "collapsed" : "expanded");
+    } catch {
+      /* Storage blocked: still collapsed, just not remembered. */
+    }
+  };
+
+  return (
+    <button
+      onClick={toggle}
+      title={collapsed ? "Expand menu" : "Collapse menu"}
+      aria-label={collapsed ? "Expand menu" : "Collapse menu"}
+      aria-pressed={mounted ? collapsed : undefined}
+      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
+    >
+      {collapsed ? (
+        <PanelLeftOpen size={14} className="shrink-0" />
+      ) : (
+        <PanelLeftClose size={14} className="shrink-0" />
+      )}
+      <span className="nav-label">{collapsed ? "Expand menu" : "Collapse menu"}</span>
+    </button>
+  );
+}
+
+function SidebarContent({
+  onNavigate,
+  collapsible,
+}: {
+  onNavigate?: () => void;
+  /* The drawer is never collapsed, so the toggle and the mark belong to the
+     desktop rail alone. */
+  collapsible?: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -226,12 +305,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col overflow-hidden">
       <Link
         href="/"
         onClick={onNavigate}
-        className="block px-3 py-1"
+        className="block px-2 py-1"
       >
+        {collapsible ? <AurumMark /> : null}
         <AurumLogo />
       </Link>
 
@@ -243,6 +323,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               key={href}
               href={href}
               onClick={onNavigate}
+              title={label}
               className={cn(
                 "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                 active
@@ -250,16 +331,16 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                   : "text-ink-dim hover:bg-elevated hover:text-ink",
               )}
             >
-              <Icon size={16} />
-              {label}
+              <Icon size={16} className="shrink-0" />
+              <span className="nav-label whitespace-nowrap">{label}</span>
             </Link>
           );
         })}
       </nav>
 
       <div className="space-y-1 border-t border-line pt-3">
-        <div className="flex items-center justify-between px-3 pb-1">
-          <span className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+        <div className="flex items-center justify-between px-1 pb-1">
+          <span className="nav-label pl-2 text-[0.6875rem] uppercase tracking-wider text-ink-faint">
             Theme
           </span>
           <ThemeToggle />
@@ -269,9 +350,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           onClick={logout}
           className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
         >
-          <LogOut size={14} />
-          Sign out
+          <LogOut size={14} className="shrink-0" />
+          <span className="nav-label">Sign out</span>
         </button>
+        {collapsible ? <CollapseToggle /> : null}
       </div>
     </div>
   );
@@ -292,8 +374,8 @@ export function Shell({
   return (
     <div className="min-h-dvh lg:flex">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-line bg-surface p-4 lg:block">
-        <SidebarContent />
+      <aside className="nav-rail fixed inset-y-0 left-0 z-30 hidden border-r border-line bg-surface p-3 lg:block">
+        <SidebarContent collapsible />
       </aside>
 
       {/* Mobile drawer */}
@@ -308,7 +390,7 @@ export function Shell({
         </div>
       ) : null}
 
-      <div className="flex min-w-0 flex-1 flex-col lg:ml-60">
+      <div className="nav-content flex min-w-0 flex-1 flex-col">
         {/*
           * Scrolls away with the page. It was pinned to the top, which kept a
           * title and two buttons over every screen of content below it — a

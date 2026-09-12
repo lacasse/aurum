@@ -36,6 +36,10 @@
   /* Neutral-informational, for tags that state a fact rather than warn. Dark
      enough to read on the cream card, where a mid-blue washes out. */
   --info: #1d4ed8;
+  /* The sidebar's two widths. Narrower than it was: the labels never needed
+     that much room, and the pages did. */
+  --nav-width: 13rem;
+  --nav-width-collapsed: 4rem;
   color-scheme: light;
 }
 
@@ -140,4 +144,68 @@ input[type="number"] {
 .recharts-surface:focus,
 .recharts-wrapper:focus {
   outline: none;
+}
+
+/*
+ * The sidebar, and how wide it is.
+ *
+ * Collapsing is a preference, so it has to be known before the first paint or
+ * the page visibly jumps from one width to the other on every load. The
+ * inline script in the root layout reads it from this browser's storage and
+ * stamps `data-nav` on <html>; these rules do the rest, which keeps React out
+ * of a decision that is really just a width.
+ *
+ * Only above the `lg` breakpoint: below it the rail is hidden entirely and the
+ * drawer is always its full width.
+ */
+@media (min-width: 64rem) {
+  .nav-rail {
+    width: var(--nav-width);
+    transition: width 0.18s ease;
+  }
+  .nav-content {
+    margin-left: var(--nav-width);
+  }
+  .nav-mark {
+    display: none;
+  }
+
+  html[data-nav="collapsed"] .nav-rail {
+    width: var(--nav-width-collapsed);
+  }
+  html[data-nav="collapsed"] .nav-content {
+    margin-left: var(--nav-width-collapsed);
+  }
+  html[data-nav="collapsed"] .nav-rail .nav-label {
+    display: none;
+  }
+  html[data-nav="collapsed"] .nav-rail .nav-mark {
+    display: block;
+  }
+
+  /*
+   * Hovering the rail reads it without reopening it: it widens over the page
+   * rather than pushing it, because the point of collapsing was the width the
+   * page got back. `focus-within` does the same for the keyboard, so tabbing
+   * through the links is not tabbing through unlabelled icons.
+   */
+  html[data-nav="collapsed"] .nav-rail:hover,
+  html[data-nav="collapsed"] .nav-rail:focus-within {
+    width: var(--nav-width);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+  }
+  html[data-nav="collapsed"] .nav-rail:hover .nav-label,
+  html[data-nav="collapsed"] .nav-rail:focus-within .nav-label {
+    display: revert;
+  }
+  html[data-nav="collapsed"] .nav-rail:hover .nav-mark,
+  html[data-nav="collapsed"] .nav-rail:focus-within .nav-mark {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-rail {
+    transition: none;
+  }
 }
