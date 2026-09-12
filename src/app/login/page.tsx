@@ -4,9 +4,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { Lock } from "lucide-react";
 import { Button, Input, Field } from "@/components/ui";
+import { useFinance } from "@/lib/store";
 
 function LoginForm() {
   const router = useRouter();
+  const loadFromServer = useFinance((s) => s.loadFromServer);
   const searchParams = useSearchParams();
   const rawNext = searchParams.get("next") || "/";
 
@@ -39,6 +41,22 @@ function LoginForm() {
         setError(data.error || "Invalid credentials");
         return;
       }
+      /*
+       * Read the record before leaving this page.
+       *
+       * The store is loaded once, when the app mounts — which on this page
+       * happened before there was a session, so the request came back 401 and
+       * left an empty store behind it. Signing in is a client-side navigation,
+       * so nothing mounts again and nothing asks a second time: every page
+       * then draws its charts from that empty store, which is zeros presented
+       * as the answer. The only way out was the "Sign in again" link on the
+       * failure banner, and only because a plain link is a full page load.
+       *
+       * So the new session is used here, before the navigation, and the
+       * failure banner clears with it. If this request fails the banner says
+       * so, which is the correct outcome rather than a silent one.
+       */
+      await loadFromServer();
       router.push(next);
       router.refresh();
     } catch {
