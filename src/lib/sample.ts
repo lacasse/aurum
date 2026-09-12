@@ -638,14 +638,14 @@ export function generateSampleData(): FinanceData {
      * single lump. Three different-looking gauges say more about what the card
      * is for than three identical ones.
      */
-    move(m, 3, 500, "acc-checking", "acc-tfsa", "[redacted]");
+    move(m, 3, 500, "acc-checking", "acc-tfsa", "Monthly TFSA contribution");
     if (chance(rng, 0.5)) {
-      move(m, randInt(rng, 8, 20), rand(rng, 400, 1600), "acc-checking", "acc-rrsp", "[redacted]");
+      move(m, randInt(rng, 8, 20), rand(rng, 400, 1600), "acc-checking", "acc-rrsp", "RRSP contribution");
     }
     // Late in the series, so the lump lands in the year the card opens on
     // rather than in one the reader has to go looking for.
     if (mi === months.length - 5) {
-      move(m, 12, 4000, "acc-checking", "acc-fhsa", "[redacted]");
+      move(m, 12, 4000, "acc-checking", "acc-fhsa", "FHSA contribution");
     }
     if (chance(rng, 0.4)) {
       move(m, randInt(rng, 18, 26), rand(rng, 300, 1200), "acc-checking", "acc-nonreg", "To brokerage");
