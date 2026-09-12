@@ -13,14 +13,14 @@ import {
 } from "@/components/charts";
 import { accent } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
-import { PageSkeleton, useReady, useRemembered, useSpendGroups } from "@/lib/hooks";
+import { PageSkeleton, useReady, useRemembered } from "@/lib/hooks";
 import { monthsToDate } from "@/lib/spans";
 import {
   incomeBySource,
   incomeYearOverYear,
+  monthlyAverages,
   PASSIVE_INCOME_CATEGORIES,
 } from "@/lib/analytics";
-import { latestExpenseMonth, recurringFloor } from "@/lib/expenses";
 import {
   fmtCAD,
   fmtCompact,
@@ -99,7 +99,6 @@ const WINDOWS: Window[] = ["ytd", "12", "24", "60"];
 export default function IncomePage() {
   const ready = useReady();
   const transactions = useFinance((s) => s.transactions);
-  const spendGroups = useSpendGroups();
   const [window, setWindow] = useRemembered<Window>("aurum.span.income", "12", WINDOWS);
 
   /*
@@ -127,9 +126,6 @@ export default function IncomePage() {
       ]),
     );
 
-    const spendable = breakdown.sources
-      .filter((s) => s.spendable)
-      .reduce((sum, s) => sum + s.average, 0);
     /*
      * Dividends and interest, month by month.
      *
@@ -163,19 +159,16 @@ export default function IncomePage() {
     const active = breakdown.average - passive;
 
     /*
-     * What a month costs before anything is decided — the same figure the
-     * expenses page calls the floor, read from the same function rather than
-     * worked out again here. Twelve months whatever the window above is set
-     * to: a commitment is a commitment at the rate it is charged now, and
-     * averaging five years of rent would answer about a flat nobody lives in.
+     * What lands and stays, over the same window as everything else here.
+     *
+     * `monthlyAverages` already answers this, and the three figures are taken
+     * from the one call so they subtract to each other exactly. Every expense
+     * counts, not the recurring ones: a month's dining and travel are as spent
+     * as its rent, and treating them as still available is a large monthly
+     * overstatement — the mistake that figure's own comment records.
      */
-    const floor = recurringFloor(
-      transactions,
-      spendGroups,
-      12,
-      latestExpenseMonth(transactions) ?? undefined,
-    );
-    const uncommitted = spendable - floor.total;
+    const avg = monthlyAverages(transactions, months, through);
+    const liquidIn = avg.uncommittedLiquid + avg.expenses;
 
     const yoy = incomeYearOverYear(transactions, through);
 
@@ -183,17 +176,16 @@ export default function IncomePage() {
       breakdown,
       colors,
       series,
-      spendable,
       passive,
       active,
-      floor,
-      uncommitted,
+      avg,
+      liquidIn,
       yoy,
       passiveSources,
       passiveMonths,
       passiveBest,
     };
-  }, [transactions, months, through, spendGroups]);
+  }, [transactions, months, through]);
 
   if (!ready) return <PageSkeleton />;
 
@@ -247,7 +239,9 @@ export default function IncomePage() {
             label="Total income"
             value={fmtCAD(breakdown.total)}
             deltaValue={`${fmtCAD(breakdown.average)} a month`}
-            deltaLabel={`over ${breakdown.windowMonths} months`}
+            deltaLabel={`over ${breakdown.windowMonths} month${
+              breakdown.windowMonths === 1 ? "" : "s"
+            }`}
             icon={<Banknote size={16} />}
             footer={
               <div className="space-y-2">
@@ -295,30 +289,28 @@ export default function IncomePage() {
           {/*
             * The money that is actually free.
             *
-            * Income you can draw on, less what a month costs before anything
-            * is decided. It is the only figure here that says what could be
-            * saved or spent on something new, which is usually the reason for
-            * asking what came in at all.
+            * Income you can draw on, less everything that went out. It is the
+            * only figure here that says what could be saved or spent on
+            * something new, which is usually the reason for asking what came
+            * in at all.
             */}
           <StatCard
             label="Free each month"
-            value={fmtCAD(data.uncommitted)}
-            tone={data.uncommitted >= 0 ? "positive" : "negative"}
-            deltaLabel="after the bills that arrive on their own"
+            value={fmtCAD(data.avg.uncommittedLiquid)}
+            tone={data.avg.uncommittedLiquid >= 0 ? "positive" : "negative"}
+            deltaLabel={`averaged over ${data.avg.months} month${
+              data.avg.months === 1 ? "" : "s"
+            }`}
             icon={<Wallet size={16} />}
             footer={
               <div className="space-y-2 text-xs">
                 <FactRow
                   label="Reaches an account you can spend from"
-                  value={fmtCAD(data.spendable)}
+                  value={fmtCAD(data.liquidIn)}
                 />
                 <FactRow
-                  label={`Committed each month${
-                    data.floor.items.length > 0
-                      ? ` · ${data.floor.items.length} recurring`
-                      : ""
-                  }`}
-                  value={`−${fmtCAD(data.floor.total)}`}
+                  label="Expenses"
+                  value={`−${fmtCAD(data.avg.expenses)}`}
                   dim
                 />
                 <div className="flex items-baseline justify-between gap-3 border-t border-line pt-2">
@@ -326,10 +318,12 @@ export default function IncomePage() {
                   <span
                     className={cn(
                       "font-medium tabular-nums",
-                      data.uncommitted >= 0 ? "text-positive" : "text-negative",
+                      data.avg.uncommittedLiquid >= 0
+                        ? "text-positive"
+                        : "text-negative",
                     )}
                   >
-                    {fmtCAD(data.uncommitted)}
+                    {fmtCAD(data.avg.uncommittedLiquid)}
                   </span>
                 </div>
               </div>
