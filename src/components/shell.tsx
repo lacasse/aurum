@@ -242,6 +242,11 @@ function DeleteDemo() {
 /**
  * Collapses the rail to its icons, and remembers the choice.
  *
+ * It sits in the page header rather than inside the rail, in the slot the
+ * mobile menu button occupies at narrow widths: a control that hides the menu
+ * cannot live only inside the menu, and buried at the foot of the sidebar it
+ * was a control nobody found.
+ *
  * The width itself is the stylesheet's, keyed off `data-nav` on <html> so it
  * is settled before the first paint; this only flips the attribute and writes
  * the preference down. Reading it back on load is the inline script in the
@@ -269,20 +274,17 @@ function CollapseToggle() {
   };
 
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon"
+      className="hidden lg:inline-flex"
       onClick={toggle}
       title={collapsed ? "Expand menu" : "Collapse menu"}
       aria-label={collapsed ? "Expand menu" : "Collapse menu"}
       aria-pressed={mounted ? collapsed : undefined}
-      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
     >
-      {collapsed ? (
-        <PanelLeftOpen size={14} className="shrink-0" />
-      ) : (
-        <PanelLeftClose size={14} className="shrink-0" />
-      )}
-      <span className="nav-label">{collapsed ? "Expand menu" : "Collapse menu"}</span>
-    </button>
+      {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+    </Button>
   );
 }
 
@@ -291,8 +293,8 @@ function SidebarContent({
   collapsible,
 }: {
   onNavigate?: () => void;
-  /* The drawer is never collapsed, so the toggle and the mark belong to the
-     desktop rail alone. */
+  /* The drawer is never collapsed, so the mark belongs to the desktop rail
+     alone. */
   collapsible?: boolean;
 }) {
   const pathname = usePathname();
@@ -353,7 +355,6 @@ function SidebarContent({
           <LogOut size={14} className="shrink-0" />
           <span className="nav-label">Sign out</span>
         </button>
-        {collapsible ? <CollapseToggle /> : null}
       </div>
     </div>
   );
@@ -407,6 +408,7 @@ export function Shell({
             >
               <Menu size={18} />
             </Button>
+            <CollapseToggle />
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-lg font-semibold tracking-tight">
                 {title}
