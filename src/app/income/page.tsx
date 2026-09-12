@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Banknote, Coins, HandCoins } from "lucide-react";
+import { Banknote, CalendarRange, HandCoins, Wallet } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardHeader, EmptyState, Segmented, cn } from "@/components/ui";
@@ -15,7 +15,12 @@ import { accent } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady, useRemembered } from "@/lib/hooks";
 import { monthsToDate } from "@/lib/spans";
-import { incomeBySource, PASSIVE_INCOME_CATEGORIES } from "@/lib/analytics";
+import {
+  incomeBySource,
+  incomeYearOverYear,
+  monthlyAverages,
+  PASSIVE_INCOME_CATEGORIES,
+} from "@/lib/analytics";
 import {
   fmtCAD,
   fmtCompact,
@@ -23,6 +28,70 @@ import {
   labelMonth,
   lastCompleteMonthKey,
 } from "@/lib/format";
+
+/** A label and a figure on one line, the way the tiles state a second fact. */
+function FactRow({
+  label,
+  value,
+  dim,
+}: {
+  label: string;
+  value: string;
+  dim?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="min-w-0 truncate text-ink-dim">{label}</span>
+      <span
+        className={cn(
+          "shrink-0 tabular-nums",
+          dim ? "text-ink-faint" : "text-ink",
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Worked for against arrived on its own, as one bar.
+ *
+ * Passive income is a percent or two of most records, which is a sliver — and
+ * a sliver is the honest drawing. It keeps a visible minimum width so the bar
+ * says "there is some" rather than "there is none", which are different
+ * answers.
+ */
+function SplitBar({
+  active,
+  passive,
+  passiveColor,
+}: {
+  active: number;
+  passive: number;
+  passiveColor: string;
+}) {
+  const total = active + passive;
+  const share = total > 0 ? (passive / total) * 100 : 0;
+  const width = passive > 0 ? Math.max(share, 1.5) : 0;
+  return (
+    <div className="flex h-1.5 gap-0.5 overflow-hidden rounded-full bg-elevated">
+      <div
+        className="h-full rounded-full"
+        style={{
+          width: `${100 - width}%`,
+          backgroundColor: accent("positive"),
+        }}
+      />
+      {width > 0 ? (
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${width}%`, backgroundColor: passiveColor }}
+        />
+      ) : null}
+    </div>
+  );
+}
 
 type Window = "ytd" | "12" | "24" | "60";
 const WINDOWS: Window[] = ["ytd", "12", "24", "60"];
@@ -57,9 +126,6 @@ export default function IncomePage() {
       ]),
     );
 
-    const spendable = breakdown.sources
-      .filter((s) => s.spendable)
-      .reduce((sum, s) => sum + s.average, 0);
     /*
      * Dividends and interest, month by month.
      *
@@ -90,12 +156,31 @@ export default function IncomePage() {
       0,
     );
 
+    const active = breakdown.average - passive;
+
+    /*
+     * What lands and stays, over the same window as everything else here.
+     *
+     * `monthlyAverages` already answers this, and the three figures are taken
+     * from the one call so they subtract to each other exactly. Every expense
+     * counts, not the recurring ones: a month's dining and travel are as spent
+     * as its rent, and treating them as still available is a large monthly
+     * overstatement — the mistake that figure's own comment records.
+     */
+    const avg = monthlyAverages(transactions, months, through);
+    const liquidIn = avg.uncommittedLiquid + avg.expenses;
+
+    const yoy = incomeYearOverYear(transactions, through);
+
     return {
       breakdown,
       colors,
       series,
-      spendable,
       passive,
+      active,
+      avg,
+      liquidIn,
+      yoy,
       passiveSources,
       passiveMonths,
       passiveBest,
@@ -105,6 +190,11 @@ export default function IncomePage() {
   if (!ready) return <PageSkeleton />;
 
   const { breakdown, colors, series } = data;
+  /* The colour passive income wears everywhere on this page. */
+  const passiveColor =
+    data.passiveSources.length > 0
+      ? colors[data.passiveSources[0].category]
+      : spectrumAt(0, 1);
 
   if (breakdown.sources.length === 0) {
     return (
@@ -136,66 +226,145 @@ export default function IncomePage() {
       }
     >
       <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {/*
+            * What came in, and what it was made of.
+            *
+            * Total first, because that is the question the page is asked, with
+            * the monthly rate beside it. The split underneath answers the next
+            * one: how much of this arrived because you went to work, and how
+            * much arrived on its own.
+            */}
           <StatCard
-            label="Income per month"
-            value={fmtCAD(breakdown.average)}
-            deltaValue={fmtCAD(breakdown.total)}
-            deltaLabel={`over ${breakdown.windowMonths} months`}
+            label="Total income"
+            value={fmtCAD(breakdown.total)}
+            deltaValue={`${fmtCAD(breakdown.average)} a month`}
+            deltaLabel={`over ${breakdown.windowMonths} month${
+              breakdown.windowMonths === 1 ? "" : "s"
+            }`}
             icon={<Banknote size={16} />}
-            spark={breakdown.months.map((m) => ({
-              v: breakdown.sources.reduce(
-                (sum, s) => sum + Number(m[s.category] ?? 0),
-                0,
-              ),
-            }))}
-            sparkKey="v"
-            /*
-             * Green: the app's colour for money arriving, wherever it is
-             * drawn. This is the total of every source rather than any one of
-             * them, so it has no slot on the spectrum to take — that ramp
-             * says *which* source, and the answer here is all of them.
-             */
-            sparkColor={accent("positive")}
-          />
-          <StatCard
-            label="Spendable income per month"
-            value={fmtCAD(data.spendable)}
-            deltaValue={
-              breakdown.average > 0
-                ? `${Math.round((data.spendable / breakdown.average) * 100)}%`
-                : undefined
+            footer={
+              <div className="space-y-2">
+                <SplitBar
+                  active={data.active}
+                  passive={data.passive}
+                  passiveColor={passiveColor}
+                />
+                <div className="flex items-baseline justify-between gap-3 text-xs">
+                  <span className="flex items-center gap-1.5 text-ink-dim">
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: accent("positive") }}
+                    />
+                    Worked for
+                  </span>
+                  <span className="tabular-nums text-ink">
+                    {fmtCAD(data.active)}
+                    <span className="text-ink-faint"> a month</span>
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between gap-3 text-xs">
+                  <span className="flex items-center gap-1.5 text-ink-dim">
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: passiveColor }}
+                    />
+                    Arrived on its own
+                  </span>
+                  <span className="tabular-nums text-ink">
+                    {fmtCAD(data.passive)}
+                    <span className="text-ink-faint">
+                      {" "}
+                      a month
+                      {breakdown.average > 0
+                        ? ` · ${((data.passive / breakdown.average) * 100).toFixed(1)}%`
+                        : ""}
+                    </span>
+                  </span>
+                </div>
+              </div>
             }
-            deltaLabel="reaches an account you can draw on"
-            icon={<HandCoins size={16} />}
           />
+
+          {/*
+            * The money that is actually free.
+            *
+            * Income you can draw on, less everything that went out. It is the
+            * only figure here that says what could be saved or spent on
+            * something new, which is usually the reason for asking what came
+            * in at all.
+            */}
           <StatCard
-            label="Passive income per month"
-            value={fmtCAD(data.passive)}
-            deltaValue={
-              breakdown.average > 0
-                ? `${((data.passive / breakdown.average) * 100).toFixed(1)}%`
-                : undefined
+            label="Free cash flow"
+            value={fmtCAD(data.avg.uncommittedLiquid)}
+            tone={data.avg.uncommittedLiquid >= 0 ? "positive" : "negative"}
+            deltaLabel={`averaged over ${data.avg.months} month${
+              data.avg.months === 1 ? "" : "s"
+            }`}
+            icon={<Wallet size={16} />}
+            footer={
+              <div className="space-y-2 text-xs">
+                <FactRow
+                  label="Reaches an account you can spend from"
+                  value={fmtCAD(data.liquidIn)}
+                />
+                <FactRow
+                  label="Expenses"
+                  value={`−${fmtCAD(data.avg.expenses)}`}
+                  dim
+                />
+                <div className="flex items-baseline justify-between gap-3 border-t border-line pt-2">
+                  <span className="text-ink-dim">Left over</span>
+                  <span
+                    className={cn(
+                      "font-medium tabular-nums",
+                      data.avg.uncommittedLiquid >= 0
+                        ? "text-positive"
+                        : "text-negative",
+                    )}
+                  >
+                    {fmtCAD(data.avg.uncommittedLiquid)}
+                  </span>
+                </div>
+              </div>
             }
-            /*
-             * A decimal: passive income is a small share of a large number,
-             * and "1%" rounded from 1.4 hides the only movement there is to
-             * see in it.
-             */
-            deltaLabel="of all income"
-            icon={<Coins size={16} />}
-            spark={data.passiveMonths.map((m) => ({
-              v: data.passiveSources.reduce(
-                (sum, s) => sum + Number(m[s.category] ?? 0),
-                0,
-              ),
-            }))}
-            sparkKey="v"
-            /* The colour the same figures wear in the chart below. */
-            sparkColor={
-              data.passiveSources.length > 0
-                ? colors[data.passiveSources[0].category]
-                : spectrumAt(0, 1)
+          />
+
+          {/*
+            * This year against last, over the same months of each.
+            *
+            * Fixed to the calendar rather than following the window above,
+            * because "this year" is not a length of time you choose — and the
+            * comparison is only fair if both sides have had the same number of
+            * months to happen in.
+            */}
+          <StatCard
+            label="Income, year over year"
+            value={fmtCAD(data.yoy.now.average)}
+            delta={data.yoy.change === null ? undefined : data.yoy.change * 100}
+            deltaLabel={`${data.yoy.now.year} so far · vs the same ${
+              data.yoy.months
+            } month${data.yoy.months === 1 ? "" : "s"} of ${data.yoy.before.year}`}
+            icon={<CalendarRange size={16} />}
+            footer={
+              <div className="space-y-2 text-xs">
+                <FactRow
+                  label={`${data.yoy.now.year} · ${fmtCAD(data.yoy.now.total)} in total`}
+                  value={`${fmtCAD(data.yoy.now.average)} a month`}
+                />
+                <FactRow
+                  label={`${data.yoy.before.year} · ${fmtCAD(data.yoy.before.total)} in total`}
+                  value={`${fmtCAD(data.yoy.before.average)} a month`}
+                  dim
+                />
+                <p className="pt-1 text-[0.6875rem] leading-relaxed text-ink-faint">
+                  {data.yoy.change === null
+                    ? `Nothing recorded in ${data.yoy.before.year} to compare against.`
+                    : `${
+                        data.yoy.change >= 0 ? "Up" : "Down"
+                      } ${fmtCAD(Math.abs(data.yoy.now.average - data.yoy.before.average))} a month on the same stretch of last year.`}
+                </p>
+              </div>
             }
           />
         </div>

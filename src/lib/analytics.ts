@@ -438,6 +438,93 @@ export function incomeBySource(
   };
 }
 
+export interface IncomeYear {
+  /** The calendar year, as it is written. */
+  year: string;
+  total: number;
+  average: number;
+  active: number;
+  passive: number;
+}
+
+export interface IncomeYearOverYear {
+  /** Complete months counted in each year — the same number in both. */
+  months: number;
+  now: IncomeYear;
+  before: IncomeYear;
+  /** Fractional change in the monthly average, or null with nothing to compare. */
+  change: number | null;
+}
+
+/**
+ * This year's monthly average against last year's, over the same months.
+ *
+ * Like for like, which here means the first N months of each year rather than
+ * the whole of one against part of the other. A year two months in is not
+ * earning a sixth of what it earned last year; it has had two months to do it
+ * in. Comparing the same stretch of the calendar answers the question actually
+ * being asked, and has the side effect of cancelling out whatever is seasonal
+ * about the months either window happens to hold.
+ *
+ * Whole months only: a month in progress against a whole one reads as a
+ * collapse in earnings, which would be a fact about the calendar.
+ */
+export function incomeYearOverYear(
+  transactions: Transaction[],
+  through = lastCompleteMonthKey(),
+): IncomeYearOverYear {
+  const year = Number(through.slice(0, 4));
+  const months = Number(through.slice(5, 7));
+
+  const blank = (y: number): IncomeYear => ({
+    year: String(y),
+    total: 0,
+    average: 0,
+    active: 0,
+    passive: 0,
+  });
+
+  const cents = new Map<number, { active: number; passive: number }>([
+    [year, { active: 0, passive: 0 }],
+    [year - 1, { active: 0, passive: 0 }],
+  ]);
+
+  for (const t of transactions) {
+    if (!isIncome(t)) continue;
+    const key = monthKeyOf(t.date);
+    const y = Number(key.slice(0, 4));
+    const slot = cents.get(y);
+    // The same stretch of each year: month 1 through the last complete one.
+    if (!slot || Number(key.slice(5, 7)) > months) continue;
+    const amount = toCents(t.amount);
+    if (PASSIVE_INCOME_CATEGORIES.has(t.category)) slot.passive += amount;
+    else slot.active += amount;
+  }
+
+  const read = (y: number): IncomeYear => {
+    const slot = cents.get(y);
+    if (!slot) return blank(y);
+    const total = fromCents(slot.active + slot.passive);
+    return {
+      year: String(y),
+      total,
+      average: months > 0 ? roundMoney(total / months) : 0,
+      active: fromCents(slot.active),
+      passive: fromCents(slot.passive),
+    };
+  };
+
+  const now = read(year);
+  const before = read(year - 1);
+  return {
+    months,
+    now,
+    before,
+    change:
+      before.average > 0 ? (now.average - before.average) / before.average : null,
+  };
+}
+
 /** Monthly totals for each of the given categories (top-N spending). */
 export function stackedSpend(
   transactions: Transaction[],

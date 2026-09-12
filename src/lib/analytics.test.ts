@@ -4,6 +4,7 @@ import {
   allTimeSeries,
   budgetRows,
   incomeBySource,
+  incomeYearOverYear,
   chainedReturns,
   netExternalFlows,
   annualized,
@@ -1848,6 +1849,52 @@ describe("borrowed money is not income", () => {
     // The mirror image is a repayment, which is an expense and stays one.
     const rows = [txn({ amount: 500, type: "expense", category: "Debt Repayment", date: DAY })];
     assert.equal(monthTotals(rows, MONTH).expenses, 500);
+  });
+});
+
+describe("incomeYearOverYear", () => {
+  const pay = (date: string, amount: number, category = "Salary") =>
+    txn({ date, amount, type: "income" as const, category });
+
+  test("compares the same stretch of each year, not a part year with a whole one", () => {
+    // INVENTED: three months of each year at the same rate, plus a fourth
+    // month last year that this year has not reached.
+    const rows = [
+      pay("2026-01-31", 3000),
+      pay("2026-02-28", 3000),
+      pay("2026-03-31", 3000),
+      pay("2025-01-31", 2000),
+      pay("2025-02-28", 2000),
+      pay("2025-03-31", 2000),
+      pay("2025-11-30", 9000),
+    ];
+    const y = incomeYearOverYear(rows, "2026-03");
+    assert.equal(y.months, 3);
+    assert.equal(y.now.average, 3000);
+    assert.equal(y.before.average, 2000);
+    assert.equal(y.change, 0.5);
+  });
+
+  test("splits each year into what was worked for and what arrived on its own", () => {
+    const rows = [pay("2026-02-28", 4000), pay("2026-02-28", 100, "Dividends")];
+    const y = incomeYearOverYear(rows, "2026-02");
+    assert.equal(y.now.active, 4000);
+    assert.equal(y.now.passive, 100);
+    assert.equal(y.now.total, 4100);
+  });
+
+  test("borrowing is not earning here either", () => {
+    const rows = [
+      pay("2026-01-31", 1000),
+      txn({ date: "2026-01-31", amount: 5000, type: "income", category: "Loan Proceeds" }),
+    ];
+    assert.equal(incomeYearOverYear(rows, "2026-01").now.total, 1000);
+  });
+
+  test("with nothing in the year before, there is no change rather than a rise", () => {
+    const y = incomeYearOverYear([pay("2026-01-31", 1000)], "2026-01");
+    assert.equal(y.change, null);
+    assert.equal(y.before.total, 0);
   });
 });
 
