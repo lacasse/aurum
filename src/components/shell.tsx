@@ -198,7 +198,7 @@ function DeleteDemo() {
         className="flex h-7 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
       >
         <Trash2 size={14} className="shrink-0" />
-        <span className="nav-label">Delete demo data</span>
+        <span className="nav-label whitespace-nowrap">Delete demo data</span>
       </button>
       <Modal open={open} onClose={close} title="Delete demo data">
         <p className="text-sm text-ink-dim">
@@ -343,7 +343,7 @@ function SidebarContent({
 
       <div className="shrink-0 space-y-1 border-t border-line pt-3">
         <div className="flex items-center justify-between px-1 pb-1">
-          <span className="nav-label pl-2 text-[0.6875rem] uppercase tracking-wider text-ink-faint">
+          <span className="nav-label whitespace-nowrap pl-2 text-[0.6875rem] uppercase tracking-wider text-ink-faint">
             Theme
           </span>
           <ThemeToggle />
@@ -354,7 +354,7 @@ function SidebarContent({
           className="flex h-7 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
         >
           <LogOut size={14} className="shrink-0" />
-          <span className="nav-label">Sign out</span>
+          <span className="nav-label whitespace-nowrap">Sign out</span>
         </button>
         {collapsible ? <CollapseToggle /> : null}
       </div>
