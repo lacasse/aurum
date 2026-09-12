@@ -295,7 +295,7 @@ export default function IncomePage() {
             * in at all.
             */}
           <StatCard
-            label="Net cash flow"
+            label="Free cash flow"
             value={fmtCAD(data.avg.uncommittedLiquid)}
             tone={data.avg.uncommittedLiquid >= 0 ? "positive" : "negative"}
             deltaLabel={`averaged over ${data.avg.months} month${
