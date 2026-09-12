@@ -19,6 +19,8 @@
     "test:smoke": "node scripts/smoke.mjs",
     "check:figures": "./scripts/check-no-personal-figures.sh",
     "check:context": "./scripts/check-no-personal-figures.sh --build-context",
+    "check:text": "./scripts/check-no-personal-figures.sh --text",
+    "audit:published": "./scripts/audit-published.sh",
     "refresh:terms": "./scripts/refresh-private-terms.sh",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "dev:seed": "tsx scripts/seed-dev.ts"

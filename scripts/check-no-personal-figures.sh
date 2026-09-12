@@ -189,6 +189,33 @@ elif [ "${1:-}" = "--build-context" ]; then
     done
   fi
 
+elif [ "${1:-}" = "--text" ]; then
+  # Text about to leave this machine that git will never see: a pull request
+  # title or body, a release note, a repository description, an issue, a review
+  # comment.
+  #
+  # This mode exists because both of the leaks found in the September 2026
+  # audit were in exactly that text. A release note said "on a real import that
+  # invented $<amount> of cost base", and a pull request body quoted two real
+  # figures as *examples* of the shapes the guard used to miss. The commit-msg
+  # hook had been guarding commit messages for weeks; nothing guarded the
+  # pages GitHub renders beside them, and those are the ones with a public URL.
+  #
+  # Same rules as a commit message, which is to say no allowance at all:
+  # published prose never needs an amount in it.
+  txt="${2:-}"
+  [ -n "$txt" ] && [ -f "$txt" ] || { echo "usage: --text <file>" >&2; exit 2; }
+  while IFS= read -r line; do
+    case "$line" in *INVENTED*) continue ;; esac
+    if printf '%s' "$line" | grep -Eq "$MONEY|$SHORT|$BARE"; then
+      report "published text [amount]: $(printf '%s' "$line" | cut -c1-110)"
+    elif printf '%s' "$line" | grep -Eq "$SPELLED"; then
+      report "published text [quantity in words]: $(printf '%s' "$line" | cut -c1-110)"
+    elif [ -n "$TERMS_RE" ] && printf '%s' "$line" | grep -Eq "$TERMS_RE"; then
+      report "published text [private term]: $(printf '%s' "$line" | cut -c1-110)"
+    fi
+  done < "$txt"
+
 elif [ "${1:-}" = "--message" ]; then
   # The message, with no allowance at all. Prose explaining a change never
   # needs an amount in it -- naming the mechanism says more and cannot leak.

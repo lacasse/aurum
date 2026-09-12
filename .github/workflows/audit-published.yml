@@ -1,0 +1,41 @@
+# What is published, checked from the outside, on a schedule.
+#
+# The CI job in ci.yml scans the working tree of a pull request. That is the
+# wrong surface for this question: it cannot see a release note, a pull request
+# body, or the version of a file that a later commit cleaned up. Both leaks
+# found in the September 2026 audit were invisible to it — one in a release
+# body, one in a pull request body, both with public URLs, both written by a
+# tool that no hook runs against.
+#
+# So this clones the remote as a stranger would and scans everything that is
+# actually published, including the GitHub pages beside the code. Weekly,
+# because a leak that lands on a Monday should not wait for someone to
+# remember; and on demand, because "before publishing, audit" is a rule people
+# only follow when it is one command.
+#
+# It cannot run the private deny-list — that file lives outside the repository
+# by design, and putting it in a secret would publish it to every workflow log
+# that echoed it. The generic checks still run here; the deny-list runs on the
+# owner's machine via `npm run audit:published`.
+name: Audit what is published
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: Clone the remote and scan everything published
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npm run audit:published

@@ -56,6 +56,21 @@ jobs:
       - name: No real financial figures
         run: npm run check:figures
 
+      # The tree is not the only thing published. A release note and a pull
+      # request body are pages with public URLs, written by `gh` with no hook
+      # in front of them, and that is where the September 2026 audit found two
+      # live leaks. `npm run check:text <file>` is the check to run before
+      # writing either; this step is here so the mode cannot rot unnoticed.
+      - name: The published-text guard still works
+        run: |
+          printf 'A note that says the mechanism, not the amount.\n' > /tmp/clean.txt
+          npm run check:text /tmp/clean.txt
+          printf 'it restated a cost base of $1,234.56 overnight\n' > /tmp/dirty.txt  # INVENTED
+          if npm run check:text /tmp/dirty.txt >/dev/null 2>&1; then
+            echo "the published-text guard let an amount through" >&2
+            exit 1
+          fi
+
       # git is not the only way out of the directory: the Docker builder copies
       # the working tree and never consults .gitignore, which is how a script
       # holding real figures was shipped inside an image.

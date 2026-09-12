@@ -46,13 +46,29 @@ file cleared as safe for git has not been cleared for anything else.
 
 **4. Check by running the check, not by reading the diff.** Reading it is what
 failed five times. `npm run check:figures` and
-`scripts/check-no-personal-figures.sh --build-context` before any commit,
-image build, or published text.
+`scripts/check-no-personal-figures.sh --build-context` before any commit or
+image build — and `npm run check:text <file>` before any text that goes to
+GitHub, which is its own rule below because that is the one nothing enforced.
 
 **5. Never weaken, bypass or narrow a guard to make something pass.** Not
 `--no-verify`, not deleting a term from the deny-list, not adding a file to
 ALLOWED because it is inconvenient. If the guard fires it is right. Rewrite the
 text.
+
+**5a. A pull request body and a release note are published pages, not notes
+to yourself.** They have public URLs, GitHub renders them beside the code, and
+no hook runs in front of `gh`. Write the file, run `npm run check:text` on it,
+then publish it — every time, including when you are certain, because being
+certain is the state in which all six of these were written. The same goes for
+a PR title, an issue, a review comment and the repository description.
+
+**5b. A real figure used as an example is a leak with a justification
+attached.** Six incidents, and the last two were a release note saying "on a
+real import that invented $<amount> of cost base" and a pull request body
+quoting two of the owner's own figures as *examples of the shapes the guard
+used to miss*. Both were written while fixing a leak. There is no version of
+"illustrative" that makes somebody's balance safe to publish: invent the
+number, or name the shape without one.
 
 **6. Keep the deny-list derived, never hand-maintained.**
 `scripts/refresh-private-terms.sh` rebuilds it from the database, because a
@@ -171,14 +187,30 @@ in the guard is a backstop for this, not the primary defence.
 
 ## Before publishing, audit — do not grep the working tree
 
-A working-tree grep is what let this survive four times.
+A working-tree grep is what let this survive four times. It is now one command:
 
-1. `git clone --mirror` the remote, then also fetch `+refs/pull/*/head:refs/pull/*/head`.
-2. Dump every blob once, scan that for amounts, export rows, private terms,
-   secrets, names, hostnames and IPs.
-3. Scan commit messages separately — a blob scan misses them.
-4. Check the GitHub side: PR titles and bodies, review comments, issues, release
-   notes, repo description, and the author/committer identity on every commit.
+```bash
+npm run audit:published
+```
+
+`scripts/audit-published.sh` clones the remote as a stranger would, fetches the
+pull-request refs, and scans every blob on branches and tags, every blob
+reachable only from `refs/pull/*`, every commit and tag message, the commit
+identities, and the GitHub side — descriptions, PR titles and bodies, issues,
+review comments, release notes. A weekly workflow runs it too, because a rule
+that depends on somebody remembering is a rule with a failure rate.
+
+It separates what can be fixed from what cannot. A hit under **clone** or
+**published** is in what anyone downloads and needs a history rewrite. A hit
+under **github** is a page with a public URL — `gh api -X PATCH`, not a
+rewrite. A hit under **refs/pull** is permanent and does not fail the run,
+because a check that is always red is a check nobody reads.
+
+**Remediation is not finished until the audit is green.** The September 2026
+rewrite replaced amounts and left every private term in place — real payee
+names, an account name — sitting in the history of three files, because
+nobody ran the other half of the scan afterwards. Rewrite, then audit, then
+believe it.
 
 **GitHub pull-request refs are permanent.** `refs/pull/N/head` is read-only and
 survives any force-push, so a PR pins the commits it was opened from forever.
