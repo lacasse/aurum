@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   ArrowDownRight,
@@ -10,6 +11,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { Shell } from "@/components/shell";
 import {
@@ -232,14 +234,23 @@ export default function TransactionsPage() {
           : ""
       }`}
       action={
-        <Button
-          onClick={() => {
-            setEditing(null);
-            setFormOpen(true);
-          }}
-        >
-          <Plus size={15} /> Add
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Importing a statement is adding transactions, so it belongs
+              beside the button that adds one rather than in the sidebar. */}
+          <Link href="/import">
+            <Button variant="secondary">
+              <Upload size={15} /> Import
+            </Button>
+          </Link>
+          <Button
+            onClick={() => {
+              setEditing(null);
+              setFormOpen(true);
+            }}
+          >
+            <Plus size={15} /> Add
+          </Button>
+        </div>
       }
     >
       <div className="space-y-4">

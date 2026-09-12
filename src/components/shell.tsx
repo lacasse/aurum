@@ -21,7 +21,6 @@ import {
   Sun,
   Trash2,
   TrendingUp,
-  Upload,
   X,
   LogOut,
 } from "lucide-react";
@@ -49,7 +48,6 @@ const NAV = [
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/year", label: "Year", icon: CalendarRange },
   { href: "/tax", label: "Tax", icon: Receipt, unreleased: true },
-  { href: "/import", label: "Import", icon: Upload },
   { href: "/guide", label: "Guide", icon: BookOpen, unreleased: true },
   /* Temporary: the colour-picking bench. Delete this line with the page. */
   { href: "/colours", label: "Colours", icon: Palette, unreleased: true },
@@ -197,7 +195,7 @@ function DeleteDemo() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex h-8 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
+        className="flex h-7 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
       >
         <Trash2 size={14} className="shrink-0" />
         <span className="nav-label">Delete demo data</span>
@@ -280,7 +278,7 @@ function CollapseToggle() {
       title={label}
       aria-label={label}
       aria-pressed={mounted ? collapsed : undefined}
-      className="flex h-8 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
+      className="flex h-7 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
     >
       {collapsed ? (
         <PanelLeftOpen size={14} className="shrink-0" />
@@ -330,7 +328,7 @@ function SidebarContent({
               onClick={onNavigate}
               title={label}
               className={cn(
-                "flex h-9 items-center gap-2.5 rounded-lg px-3 text-sm font-medium transition-colors",
+                "flex h-8 items-center gap-2.5 rounded-lg px-3 text-sm font-medium transition-colors",
                 active
                   ? "bg-brand/10 text-brand"
                   : "text-ink-dim hover:bg-elevated hover:text-ink",
@@ -353,7 +351,7 @@ function SidebarContent({
         <DeleteDemo />
         <button
           onClick={logout}
-          className="flex h-8 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
+          className="flex h-7 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
         >
           <LogOut size={14} className="shrink-0" />
           <span className="nav-label">Sign out</span>
