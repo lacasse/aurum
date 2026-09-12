@@ -82,7 +82,7 @@ function AurumMark() {
   return (
     <svg
       viewBox="0 0 48 48"
-      className="nav-mark h-8 w-8"
+      className="nav-mark h-10 w-10"
       role="img"
       aria-label="Aurum"
     >
@@ -240,51 +240,98 @@ function DeleteDemo() {
 }
 
 /**
- * Collapses the rail to its icons, and remembers the choice.
- *
- * It sits in the page header rather than inside the rail, in the slot the
- * mobile menu button occupies at narrow widths: a control that hides the menu
- * cannot live only inside the menu, and buried at the foot of the sidebar it
- * was a control nobody found.
+ * The collapsed/expanded state, and the one way to change it.
  *
  * The width itself is the stylesheet's, keyed off `data-nav` on <html> so it
  * is settled before the first paint; this only flips the attribute and writes
  * the preference down. Reading it back on load is the inline script in the
  * root layout.
  */
-function CollapseToggle() {
-  const mounted = useMounted();
-  const [collapsed, setCollapsed] = useState(false);
+const navListeners = new Set<() => void>();
+
+function useNavCollapsed(): [boolean, () => void] {
+  /*
+   * Collapsed is the default, so this starts true and the effect corrects it
+   * for anyone who has expanded the rail. The value only decides which icon
+   * and label a button shows — the rail's width is already right, drawn from
+   * the attribute the inline script set.
+   *
+   * There are two of these buttons and they must agree, so each subscribes to
+   * the other: the attribute on <html> is the state, and this is how a change
+   * to it is heard.
+   */
+  const [collapsed, setCollapsed] = useState(true);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCollapsed(document.documentElement.dataset.nav === "collapsed");
+    const read = () =>
+      setCollapsed(document.documentElement.dataset.nav !== "expanded");
+    read();
+    navListeners.add(read);
+    return () => {
+      navListeners.delete(read);
+    };
   }, []);
 
   const toggle = () => {
     const next = !collapsed;
-    setCollapsed(next);
-    if (next) document.documentElement.dataset.nav = "collapsed";
-    else delete document.documentElement.dataset.nav;
+    document.documentElement.dataset.nav = next ? "collapsed" : "expanded";
     try {
       window.localStorage.setItem("aurum.nav", next ? "collapsed" : "expanded");
     } catch {
-      /* Storage blocked: still collapsed, just not remembered. */
+      /* Storage blocked: still switched, just not remembered. */
     }
+    navListeners.forEach((fn) => fn());
   };
 
+  return [collapsed, toggle];
+}
+
+/**
+ * The header's copy of the toggle.
+ *
+ * A control that hides the menu cannot live only inside the menu, so this one
+ * sits in the page header, in the slot the mobile menu button occupies at
+ * narrow widths. The rail carries its own copy for when it is open.
+ */
+function CollapseToggle() {
+  const mounted = useMounted();
+  const [collapsed, toggle] = useNavCollapsed();
+  const label = collapsed ? "Expand menu" : "Collapse menu";
   return (
     <Button
       variant="ghost"
       size="icon"
       className="hidden lg:inline-flex"
       onClick={toggle}
-      title={collapsed ? "Expand menu" : "Collapse menu"}
-      aria-label={collapsed ? "Expand menu" : "Collapse menu"}
+      title={label}
+      aria-label={label}
       aria-pressed={mounted ? collapsed : undefined}
     >
       {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
     </Button>
+  );
+}
+
+/** The rail's own copy, sitting with Sign out at its foot. */
+function CollapseRow() {
+  const mounted = useMounted();
+  const [collapsed, toggle] = useNavCollapsed();
+  const label = collapsed ? "Expand menu" : "Collapse menu";
+  return (
+    <button
+      onClick={toggle}
+      title={label}
+      aria-label={label}
+      aria-pressed={mounted ? collapsed : undefined}
+      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
+    >
+      {collapsed ? (
+        <PanelLeftOpen size={14} className="shrink-0" />
+      ) : (
+        <PanelLeftClose size={14} className="shrink-0" />
+      )}
+      <span className="nav-label whitespace-nowrap">{label}</span>
+    </button>
   );
 }
 
@@ -311,7 +358,7 @@ function SidebarContent({
       <Link
         href="/"
         onClick={onNavigate}
-        className="block px-2 py-1"
+        className="nav-brand flex h-[3.25rem] shrink-0 items-center"
       >
         {collapsible ? <AurumMark /> : null}
         <AurumLogo />
@@ -355,6 +402,7 @@ function SidebarContent({
           <LogOut size={14} className="shrink-0" />
           <span className="nav-label">Sign out</span>
         </button>
+        {collapsible ? <CollapseRow /> : null}
       </div>
     </div>
   );

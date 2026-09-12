@@ -36,17 +36,19 @@ export default function RootLayout({
     >
       <head>
         {/*
-          * Whether the sidebar is collapsed, applied before the first paint.
+          * Whether the sidebar has been expanded, applied before the first
+          * paint.
           *
           * The preference lives in this browser's storage, which the server
-          * cannot see, so a React state read after hydration would draw the
-          * wide rail first and snap it narrow — on every page, every load.
-          * Stamping <html> here means the stylesheet already knows.
+          * cannot see, so a React state read after hydration would draw one
+          * width and snap to the other — on every page, every load. Stamping
+          * <html> here means the stylesheet already knows. Collapsed is the
+          * default, so an absent preference needs no stamp.
           */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "try{if(localStorage.getItem('aurum.nav')==='collapsed')document.documentElement.dataset.nav='collapsed'}catch(e){}",
+              "try{if(localStorage.getItem('aurum.nav')==='expanded')document.documentElement.dataset.nav='expanded'}catch(e){}",
           }}
         />
       </head>

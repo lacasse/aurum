@@ -149,57 +149,62 @@ input[type="number"] {
 /*
  * The sidebar, and how wide it is.
  *
- * Collapsing is a preference, so it has to be known before the first paint or
- * the page visibly jumps from one width to the other on every load. The
- * inline script in the root layout reads it from this browser's storage and
- * stamps `data-nav` on <html>; these rules do the rest, which keeps React out
- * of a decision that is really just a width.
+ * Collapsed is the default; expanding is a preference, so it has to be known
+ * before the first paint or the page visibly jumps from one width to the other
+ * on every load. The inline script in the root layout reads it from this
+ * browser's storage and stamps `data-nav="expanded"` on <html>; these rules do
+ * the rest, which keeps React out of a decision that is really just a width.
  *
  * Only above the `lg` breakpoint: below it the rail is hidden entirely and the
  * drawer is always its full width.
  */
 @media (min-width: 64rem) {
   .nav-rail {
-    width: var(--nav-width);
+    width: var(--nav-width-collapsed);
     transition: width 0.18s ease;
   }
   .nav-content {
-    margin-left: var(--nav-width);
-  }
-  .nav-mark {
-    display: none;
-  }
-
-  html[data-nav="collapsed"] .nav-rail {
-    width: var(--nav-width-collapsed);
-  }
-  html[data-nav="collapsed"] .nav-content {
     margin-left: var(--nav-width-collapsed);
   }
-  html[data-nav="collapsed"] .nav-rail .nav-label {
+  .nav-label {
     display: none;
   }
-  html[data-nav="collapsed"] .nav-rail .nav-mark {
-    display: block;
+  /*
+   * No padding of its own, so the disc sits in the same column as the link
+   * icons below it — which is also where the wordmark's own disc lands, so it
+   * barely moves when the rail opens. The row's fixed height keeps it from
+   * moving up or down, and keeps the links below it still.
+   */
+  .nav-rail .nav-brand {
+    padding-inline: 0;
   }
 
   /*
-   * Hovering the rail reads it without reopening it: it widens over the page
-   * rather than pushing it, because the point of collapsing was the width the
-   * page got back. `focus-within` does the same for the keyboard, so tabbing
-   * through the links is not tabbing through unlabelled icons.
+   * Hovering the collapsed rail reads it without reopening it: it widens over
+   * the page rather than pushing it, because the point of collapsing was the
+   * width the page got back. `focus-within` does the same for the keyboard, so
+   * tabbing through the links is not tabbing through unlabelled icons.
    */
-  html[data-nav="collapsed"] .nav-rail:hover,
-  html[data-nav="collapsed"] .nav-rail:focus-within {
+  html:not([data-nav="expanded"]) .nav-rail:hover,
+  html:not([data-nav="expanded"]) .nav-rail:focus-within {
     width: var(--nav-width);
     box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
   }
-  html[data-nav="collapsed"] .nav-rail:hover .nav-label,
-  html[data-nav="collapsed"] .nav-rail:focus-within .nav-label {
+
+  html[data-nav="expanded"] .nav-rail {
+    width: var(--nav-width);
+  }
+  html[data-nav="expanded"] .nav-content {
+    margin-left: var(--nav-width);
+  }
+  html[data-nav="expanded"] .nav-label,
+  .nav-rail:hover .nav-label,
+  .nav-rail:focus-within .nav-label {
     display: revert;
   }
-  html[data-nav="collapsed"] .nav-rail:hover .nav-mark,
-  html[data-nav="collapsed"] .nav-rail:focus-within .nav-mark {
+  html[data-nav="expanded"] .nav-mark,
+  .nav-rail:hover .nav-mark,
+  .nav-rail:focus-within .nav-mark {
     display: none;
   }
 }
