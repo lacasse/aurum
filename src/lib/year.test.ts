@@ -9,6 +9,8 @@ import {
   yearFlow,
   unearnedShare,
   milestones,
+  periodShape,
+  spendableCashAt,
   yearRows,
   yearShapes,
   yearWaterfall,
@@ -1694,5 +1696,102 @@ describe("a band too thin to see is pooled, whatever kind of band it is", () => 
   test("one thin band on its own still says what it is", () => {
     const f = yearFlow([at(100000, "Salary"), at(36, "Refund"), spend], "2026", { accounts });
     assert.ok(sources(f).includes("Refunds"), "renaming it would save nothing");
+  });
+});
+
+describe("a window that is not a calendar year", () => {
+  // INVENTED: round figures across two years, with a repayment that a year
+  // does not count as spending.
+  const netWorth = [
+    nw("2025-06", 10000),
+    nw("2025-12", 20000),
+    nw("2026-03", 25000),
+    nw("2026-06", 40000),
+    nw("2026-12", 55000),
+  ];
+  const all = [
+    txn("2025-09-30", "income", 3000, "Salary"),
+    txn("2026-01-31", "income", 60000, "Salary"),
+    txn("2026-02-28", "expense", 20000, "Housing"),
+    txn("2026-04-30", "expense", 5000, "Debt Repayment"),
+    txn("2026-05-31", "income", 1000, "Dividends"),
+  ];
+  const filled = Array.from({ length: 19 }, (_, i) => {
+    const y = 2025 + Math.floor((5 + i) / 12);
+    const m = ((5 + i) % 12) + 1;
+    const key = `${y}-${String(m).padStart(2, "0")}`;
+    const known = netWorth.find((p) => p.key === key);
+    const prior = [...netWorth].reverse().find((p) => p.key <= key);
+    return known ?? nw(key, prior?.net ?? 0);
+  });
+
+  test("a calendar year read as a window gives that year's roll-forward to the cent", () => {
+    const rows = yearRows(all, filled, [], {}, "2027-02-01");
+    const [shape] = yearShapes(rows, []).filter((sh) => sh.year === "2026");
+    const period = periodShape(all, filled, "2026-01", "2026-12");
+    assert.ok(period);
+    assert.equal(period.income, shape.income);
+    assert.equal(period.expenses, shape.expenses);
+    assert.equal(period.openingNetWorth, shape.openingNetWorth);
+    assert.equal(period.netWorth, shape.netWorth);
+    assert.equal(period.revaluation, shape.revaluation);
+    assert.deepEqual(yearWaterfall(period), yearWaterfall(shape));
+  });
+
+  test("a repayment is not spending here either", () => {
+    const period = periodShape(all, filled, "2026-04", "2026-04");
+    assert.ok(period);
+    assert.equal(period.expenses, 0);
+  });
+
+  test("it opens on the close of the month before it, and says how long it ran", () => {
+    const period = periodShape(all, filled, "2026-04", "2026-06");
+    assert.ok(period);
+    assert.equal(period.openingNetWorth, 25000);
+    assert.equal(period.netWorth, 40000);
+    assert.equal(period.months, 3);
+    assert.equal(period.passive, 1000, "dividends are the passive part of income");
+  });
+
+  test("it cannot open before there is a net worth to open on", () => {
+    const period = periodShape(all, filled, "2024-01", "2026-12");
+    assert.ok(period);
+    assert.equal(period.from, "2025-07", "the first month with a close before it");
+    assert.equal(period.income, 64000, "income before the record is not counted");
+  });
+
+  test("with nothing on record there is no shape rather than a zero one", () => {
+    assert.equal(periodShape(all, [], "2026-01", "2026-12"), null);
+    assert.equal(periodShape(all, filled, "2030-01", "2030-12"), null);
+  });
+
+  test("the flow chart draws a year and the same year as a window identically", () => {
+    assert.deepEqual(
+      yearFlow(all, "2026"),
+      yearFlow(all, { from: "2026-01", through: "2026-12", label: "2026" }),
+    );
+  });
+
+  test("and a window across a new year counts both sides of it", () => {
+    const f = yearFlow(all, { from: "2025-07", through: "2026-06", label: "Twelve months" });
+    const into = f.links
+      .filter((l) => f.nodes[l.target].name === "Twelve months")
+      .reduce((a, l) => a + l.value, 0);
+    assert.equal(Math.round(into), 64000);
+  });
+});
+
+describe("spendableCashAt", () => {
+  test("a card is owed against the cash beside it, and a portfolio is not cash", () => {
+    const account = (id: string, kind: string, balance: number) =>
+      ({ id, name: id, kind, balance, history: [], currency: "CAD" }) as unknown as Parameters<
+        typeof spendableCashAt
+      >[0][number];
+    const accounts = [
+      account("chq", "checking", 5000),
+      account("card", "credit", 1200),
+      account("brokerage", "investment", 90000),
+    ];
+    assert.equal(spendableCashAt(accounts, "2026-06"), 3800);
   });
 });
