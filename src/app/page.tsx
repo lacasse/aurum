@@ -437,7 +437,7 @@ export default function OverviewPage() {
               title="From where you started to where you are"
               subtitle="What came in, what went out, and what everything else did"
             />
-            <div className="min-h-[300px] flex-1 px-3 pb-4">
+            <div className="min-h-[380px] flex-1 px-3 pb-4">
               <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} height="100%" />
             </div>
           </Card>
