@@ -1480,7 +1480,7 @@ export function Waterfall({
         <ComposedChart
           data={rows}
           margin={{ ...WATERFALL_MARGIN, bottom: WATERFALL_MARGIN.bottom + WATERFALL_UNDER }}
-          barCategoryGap="30%"
+          barCategoryGap="16%"
         >
           {/*
             * No y-axis. Every column carries its own figure, so an axis would
@@ -1528,12 +1528,13 @@ export function Waterfall({
           <Bar
             dataKey="range"
             /*
-             * Wide enough to be a column rather than a rule. Five steps in a
-             * card two thirds of the page wide left thin bars stranded in
-             * air, and the staircase — the thing the chart is — read as five
-             * unrelated marks.
+             * Sized from the slot, not capped small. A waterfall is one shape
+             * — each step begins where the last one finished — and columns
+             * held narrow in a wide card left more air than column between
+             * them, so the hand-off had to be taken on trust across the gap.
+             * The cap only stops a very wide card drawing slabs.
              */
-            maxBarSize={56}
+            maxBarSize={110}
             /*
              * A step small beside the totals still has to be visible. Without a
              * floor a rounding-error year is drawn as nothing at all, which
