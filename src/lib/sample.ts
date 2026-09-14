@@ -99,7 +99,11 @@ function walk(
 /** INVENTED: the demo's rent before and after its lease renewed. */
 const RENT = 2150;
 const RENT_RENEWED = 2600;
-/** How far back the renewal sits: the start of the overview's window. */
+/**
+ * How far back the renewal sits: the start of the overview's window. The
+ * demo's months end on the one in progress and the overview's on the last
+ * complete one, hence one more.
+ */
 const WINDOW_MONTHS = 12;
 
 export function generateSampleData(): FinanceData {
@@ -556,7 +560,7 @@ export function generateSampleData(): FinanceData {
      * spending past the threshold against the year before, and it pushes
      * Housing over its budget, so the expenses page tells the same story.
      */
-    add(m, 1, "expense", mi >= n - WINDOW_MONTHS ? RENT_RENEWED : RENT, "Housing", "acc-checking", "Skyline Property Mgmt");
+    add(m, 1, "expense", mi >= n - 1 - WINDOW_MONTHS ? RENT_RENEWED : RENT, "Housing", "acc-checking", "Skyline Property Mgmt");
     add(m, 15, "income", 3850, "Salary", "acc-checking", "Northwind Labs");
     add(m, dim, "income", 3850, "Salary", "acc-checking", "Northwind Labs");
     add(m, 3, "expense", 45, "Subscriptions", "acc-credit", "Iron Temple Gym");
