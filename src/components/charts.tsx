@@ -1410,7 +1410,7 @@ export function Waterfall({
    * with the columns, and the plot clips what it draws: at the data's own
    * maximum the two highest figures fell off the top edge.
    */
-  const ceiling = high + span * 0.14;
+  const ceiling = high + span * 0.24;
 
   const rows = steps.map((s) => ({
     label: s.label,
@@ -1536,7 +1536,7 @@ export function Waterfall({
              * column the same width, balances included: they are all the same
              * kind of mark, measured on the same scale.
              */
-            maxBarSize={80}
+            maxBarSize={96}
             minPointSize={3}
             isAnimationActive={false}
             shape={(props: unknown) => {

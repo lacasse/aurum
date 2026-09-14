@@ -9,8 +9,8 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { Shell } from "@/components/shell";
-import { StatCard } from "@/components/stat-card";
 import {
+  Badge,
   Button,
   Card,
   CardHeader,
@@ -47,6 +47,7 @@ import {
   previousMonthKey,
 } from "@/lib/format";
 import { snapshotGaps } from "@/lib/checklist";
+import { accent } from "@/lib/palette";
 import { roundMoney } from "@/lib/money";
 
 /**
@@ -117,6 +118,67 @@ function Holding({ label, value, tone }: { label: string; value: string; tone?: 
       >
         {value}
       </p>
+    </div>
+  );
+}
+
+/**
+ * One figure of an average month, against the same figure a year earlier.
+ *
+ * The bar under it is the comparison drawn: this year filled, last year a
+ * tick on the same scale, so a rise and a fall read before the badge is.
+ * The scale is the row's own — income and spending are an order of magnitude
+ * apart from what is saved, and one shared scale would flatten the smallest
+ * row into a line.
+ */
+function MonthRow({
+  label,
+  note,
+  now,
+  before,
+  good,
+  colour,
+}: {
+  label: string;
+  note?: string;
+  now: number;
+  before: number | null;
+  good: "up" | "down";
+  colour: string;
+}) {
+  const move = against(now, before, good);
+  const scale = Math.max(Math.abs(now), Math.abs(before ?? 0)) * 1.08 || 1;
+  const width = (n: number) => `${Math.max(0, Math.min(100, (Math.max(n, 0) / scale) * 100))}%`;
+  return (
+    <div className="py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-ink-dim">{label}</p>
+          {note ? <p className="text-[0.6875rem] text-ink-faint">{note}</p> : null}
+        </div>
+        <div className="flex shrink-0 items-baseline gap-2">
+          <span className="text-xl font-semibold tracking-tight">{fmtCAD(now)}</span>
+          {move.deltaValue && move.deltaDir ? (
+            <Badge tone={move.tone === "neutral" ? "neutral" : move.tone}>
+              {move.deltaDir === "up" ? "▲" : "▼"}{" "}
+              <span className="tabular-nums">{move.deltaValue}</span>
+            </Badge>
+          ) : null}
+        </div>
+      </div>
+      <div className="relative mt-2 h-1.5 rounded-full bg-elevated">
+        <div
+          className="absolute inset-y-0 left-0 rounded-full"
+          style={{ width: width(now), background: colour }}
+        />
+        {before !== null && (
+          <div
+            className="absolute -inset-y-1 w-0.5 rounded-full bg-ink-faint"
+            style={{ left: width(before) }}
+            title={`The year before: ${fmtCAD(before)}`}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -362,8 +424,15 @@ export default function OverviewPage() {
           * and spending bars are twelve months of the three figures on the
           * right, so the chart is the total and the tiles are the rate.
           */}
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Card className="flex h-full flex-col lg:col-span-2">
+        {/*
+          * Half and half. The roll-forward is five columns, and across two
+          * thirds of the page they were either stranded in air or swollen
+          * into slabs; at half it is the width five columns want. The months
+          * that make up its bars take the other half as one card rather than
+          * three tiles, since they are one set of figures read together.
+          */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card className="flex h-full flex-col">
             <CardHeader
               title="From where you started to where you are"
               subtitle="What came in, what went out, and what everything else did"
@@ -372,30 +441,40 @@ export default function OverviewPage() {
               <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} height="100%" />
             </div>
           </Card>
-          <div className="grid gap-4">
-            <StatCard
-              label="Income, a month"
-              value={fmtCAD(income)}
-              deltaLabel={incomeBefore === null ? undefined : "vs the year before"}
-              {...against(income, incomeBefore, "up")}
-            />
-            <StatCard
-              label="Spending, a month"
-              value={fmtCAD(spending)}
-              deltaLabel={spendingBefore === null ? undefined : "vs the year before"}
-              {...against(spending, spendingBefore, "down")}
-            />
-            <StatCard
-              label="Saved, a month"
-              value={fmtCAD(saved)}
-              deltaLabel={
-                rateNow === null
-                  ? undefined
-                  : `${rateNow.toFixed(1)}% of income${savedBefore === null ? "" : " · vs the year before"}`
+          <Card className="flex h-full flex-col">
+            <CardHeader
+              title="A typical month"
+              subtitle={
+                before
+                  ? "These twelve months, against the twelve before"
+                  : "These twelve months"
               }
-              {...against(saved, savedBefore, "up")}
             />
-          </div>
+            <div className="flex flex-1 flex-col justify-around divide-y divide-line px-5 pb-2">
+              <MonthRow
+                label="Income"
+                now={income}
+                before={incomeBefore}
+                good="up"
+                colour={accent("positive")}
+              />
+              <MonthRow
+                label="Spending"
+                now={spending}
+                before={spendingBefore}
+                good="down"
+                colour={accent("negative")}
+              />
+              <MonthRow
+                label="Saved"
+                note={rateNow === null ? undefined : `${rateNow.toFixed(1)}% of income`}
+                now={saved}
+                before={savedBefore}
+                good="up"
+                colour={accent("brand")}
+              />
+            </div>
+          </Card>
         </div>
 
         {data.flow && data.flow.links.length > 0 && (
