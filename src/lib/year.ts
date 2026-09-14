@@ -503,6 +503,13 @@ export interface WaterfallStep {
   base: number;
   top: number;
   kind: "total" | "up" | "down";
+  /**
+   * What the step is, for its colour: money earned, money spent, or what the
+   * markets and everything else did. Up and down say which way a step went;
+   * this says why, and the two are different questions — a market fall and a
+   * month's rent both go down.
+   */
+  role?: "balance" | "income" | "spending" | "market";
 }
 
 /**
@@ -526,9 +533,10 @@ export function yearWaterfall(
     base: 0,
     top: shape.openingNetWorth,
     kind: "total",
+    role: "balance",
   });
 
-  const add = (label: string, delta: number) => {
+  const add = (label: string, delta: number, role: WaterfallStep["role"]) => {
     const from = running;
     running += delta;
     steps.push({
@@ -537,14 +545,22 @@ export function yearWaterfall(
       base: Math.min(from, running),
       top: Math.max(from, running),
       kind: delta >= 0 ? "up" : "down",
+      role,
     });
   };
 
-  add("Income", shape.income);
-  add("Spending", -shape.expenses);
-  add(shape.revaluation >= 0 ? "Growth" : "Decline", shape.revaluation);
+  add("Income", shape.income, "income");
+  add("Spending", -shape.expenses, "spending");
+  add(shape.revaluation >= 0 ? "Growth" : "Decline", shape.revaluation, "market");
 
-  steps.push({ label: "Closed at", delta: 0, base: 0, top: shape.netWorth, kind: "total" });
+  steps.push({
+    label: "Closed at",
+    delta: 0,
+    base: 0,
+    top: shape.netWorth,
+    kind: "total",
+    role: "balance",
+  });
   return steps;
 }
 

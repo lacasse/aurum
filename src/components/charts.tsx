@@ -1355,14 +1355,25 @@ export function RoomGauge({
  * anywhere but zero.
  */
 /** One definition, so the connector maths below cannot drift from the plot. */
-const WATERFALL_MARGIN = { top: 28, right: 4, left: 4, bottom: 0 };
+const WATERFALL_MARGIN = { top: 30, right: 8, left: 8, bottom: 4 };
+/** Room under the lowest column for a falling step's figure. */
+const WATERFALL_UNDER = 22;
+
+type WaterfallRole = "balance" | "income" | "spending" | "market";
 
 export function Waterfall({
   steps,
   format,
   height = 300,
 }: {
-  steps: { label: string; delta: number; base: number; top: number; kind: "total" | "up" | "down" }[];
+  steps: {
+    label: string;
+    delta: number;
+    base: number;
+    top: number;
+    kind: "total" | "up" | "down";
+    role?: WaterfallRole;
+  }[];
   format: (n: number) => string;
   /** A percentage fills whatever box the card gives it. See SeriesChart. */
   height?: number | `${number}%`;
@@ -1394,6 +1405,12 @@ export function Waterfall({
    */
   const floor = low >= 0 && raw < 0 ? 0 : raw;
   const truncated = floor !== 0;
+  /*
+   * Headroom over the tallest column, inside the plot. The figures are drawn
+   * with the columns, and the plot clips what it draws: at the data's own
+   * maximum the two highest figures fell off the top edge.
+   */
+  const ceiling = high + span * 0.14;
 
   const rows = steps.map((s) => ({
     label: s.label,
@@ -1403,34 +1420,45 @@ export function Waterfall({
      * The first version lifted each column with a transparent bar beneath it,
      * which cannot express a column below the axis: the visible part came out
      * as a negative height and was clamped to nothing, so anyone whose net
-     * worth was under water — a student loan against a small balance, which is
-     * where a lot of records start — got an empty chart.
+     * worth was under water — a loan against a small balance, which is where a
+     * lot of records start — got an empty chart.
      */
     range:
       s.kind === "total"
         ? ([Math.min(floor, s.top), Math.max(floor, s.top)] as [number, number])
         : ([Math.min(s.base, s.top), Math.max(s.base, s.top)] as [number, number]),
     kind: s.kind,
+    role: s.role ?? (s.kind === "total" ? "balance" : s.kind === "up" ? "income" : "spending"),
     delta: s.delta,
     top: s.top,
-    /** What the label above the column says: a total states itself, a step its change. */
-    shown: s.kind === "total" ? s.top : s.delta,
   }));
 
   /*
-   * The two totals are told apart from each other, not just from the steps
-   * between them. They are the same kind of quantity a year apart, and giving
-   * them one colour makes the chart read as three categories when it is really
-   * two endpoints and a path between them.
+   * Colour says what a step is; its position says which way it went.
+   *
+   * Earned in the app's green and spent in its red, as on every other page.
+   * What markets and everything else did takes the market colour whichever
+   * way it moved — a fall in the portfolio is not spending, and painting it
+   * the colour of rent claimed that it was.
+   *
+   * The two balances are the same kind of quantity a year apart, so they
+   * share one treatment: the brand violet as a quiet wash with a solid edge
+   * at the level. They are the frame the steps move between, and drawing them
+   * as the two loudest blocks on the chart made the frame the subject.
+   *
+   * Every column also carries its signed figure, so no step is told apart
+   * by colour alone.
    */
-  const colourFor = (kind: string, i: number) =>
-    kind === "total"
-      ? i === 0
-        ? accent("market")
-        : accent("brand")
-      : kind === "up"
-        ? accent("positive")
-        : accent("negative");
+  const colourFor = (role: WaterfallRole) =>
+    role === "income"
+      ? accent("positive")
+      : role === "spending"
+        ? accent("negative")
+        : role === "market"
+          ? accent("market")
+          : accent("brand");
+
+  const signed = (n: number) => (n > 0 ? "+" : n < 0 ? "\u2212" : "") + format(Math.abs(n));
 
   /*
    * A percentage height has to be passed down, not just set.
@@ -1451,45 +1479,46 @@ export function Waterfall({
       <ResponsiveContainer>
         <ComposedChart
           data={rows}
-          margin={WATERFALL_MARGIN}
-          /*
-           * All but touching.
-           *
-           * A waterfall is one shape: each step begins at the height the last
-           * one reached, and a real gap hides that hand-off — the eye has to
-           * carry the level across empty space and take it on trust. A hairline
-           * keeps the path readable while stopping the columns from fusing into
-           * one block, which is what butting them fully together did.
-           */
-          barCategoryGap={3}
+          margin={{ ...WATERFALL_MARGIN, bottom: WATERFALL_MARGIN.bottom + WATERFALL_UNDER }}
+          barCategoryGap="30%"
         >
           {/*
-            * No y-axis and no grid. Every column already carries its own figure
-            * above it, so an axis repeats in a coarser form what the labels say
-            * exactly — and the space it takes is the space the columns need to
-            * be worth reading.
+            * No y-axis. Every column carries its own figure, so an axis would
+            * repeat in a coarser form what the labels say exactly. A few
+            * hairlines stay, recessive, so a level can be carried across the
+            * gaps between columns by eye.
             */}
+          <CartesianGrid vertical={false} stroke="var(--line)" strokeOpacity={0.5} />
           <XAxis
             dataKey="label"
-            tick={{ fill: "var(--ink-dim)", fontSize: 11 }}
+            tick={{ fill: "var(--ink-faint)", fontSize: 11 }}
             axisLine={{ stroke: "var(--line)" }}
             tickLine={false}
+            tickMargin={10}
             interval={0}
           />
-          <YAxis hide domain={[floor, "dataMax"]} allowDataOverflow />
+          <YAxis hide domain={[floor, ceiling]} allowDataOverflow />
           <Tooltip
-            cursor={{ fill: "var(--line)", opacity: 0.2 }}
+            cursor={{ fill: "var(--elevated)", opacity: 0.5 }}
             content={({ active, payload }) => {
               if (!active || !payload?.length) return null;
               const r = payload[0]?.payload as (typeof rows)[number] | undefined;
               if (!r) return null;
               return (
                 <div className="rounded-xl border border-line bg-surface px-3 py-2 shadow-xl">
-                  <p className="mb-1 text-[0.6875rem] font-medium text-ink-faint">{r.label}</p>
-                  <p className="text-xs font-medium tabular-nums text-ink">{format(r.shown)}</p>
+                  <p className="mb-1 flex items-center gap-1.5 text-[0.6875rem] font-medium text-ink-faint">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ background: colourFor(r.role) }}
+                    />
+                    {r.label}
+                  </p>
+                  <p className="text-xs font-medium tabular-nums text-ink">
+                    {r.kind === "total" ? format(r.top) : signed(r.delta)}
+                  </p>
                   {r.kind !== "total" && (
                     <p className="mt-0.5 text-[0.6875rem] tabular-nums text-ink-faint">
-                      Running {format(r.top)}
+                      Leaves net worth at {format(r.top)}
                     </p>
                   )}
                 </div>
@@ -1498,14 +1527,13 @@ export function Waterfall({
           />
           <Bar
             dataKey="range"
-            radius={[2, 2, 0, 0]}
             /*
-             * The same width every other bar on a page gets. Left to fill its
-             * slot, a five-step waterfall in a narrow card drew columns twice
-             * the width of the bars beside it, which read as a different kind
-             * of chart rather than a smaller one.
+             * Wide enough to be a column rather than a rule. Five steps in a
+             * card two thirds of the page wide left thin bars stranded in
+             * air, and the staircase — the thing the chart is — read as five
+             * unrelated marks.
              */
-            maxBarSize={32}
+            maxBarSize={56}
             /*
              * A step small beside the totals still has to be visible. Without a
              * floor a rounding-error year is drawn as nothing at all, which
@@ -1513,46 +1541,47 @@ export function Waterfall({
              */
             minPointSize={3}
             isAnimationActive={false}
-            /*
-             * A line from where one step ends to where the next begins.
-             *
-             * Narrowing the columns took away what carried the hand-off: they
-             * were all but touching, so the eye followed the level across. With
-             * air between them the staircase reads as five separate columns,
-             * and the connector puts the path back — it is the level itself,
-             * drawn, which is what a waterfall is claiming.
-             *
-             * An up step hands over at its top edge and a down step at its
-             * bottom, since that is where the running balance stands when the
-             * step is done.
-             */
             shape={(props: unknown) => {
-              const { x, y, width, height, index, fill, parentViewBox } = props as {
+              const { x, y, width, height, index, parentViewBox } = props as {
                 x: number; y: number; width: number; height: number;
-                index: number; fill: string;
+                index: number;
                 parentViewBox?: { width: number };
               };
               const r = rows[index];
-              const handOff = r?.kind === "down" ? y + height : y;
+              if (!r) return <g />;
+              const colour = colourFor(r.role);
+              const balance = r.kind === "total";
               /*
-               * Where the next column starts. Every step gets the same slice of
-               * the plot and sits in the middle of it, so one pitch to the right
-               * of this column's left edge is the next column's left edge.
+               * The running level after this step: the top of a rise, the
+               * bottom of a fall, the top of a balance.
                */
+              const handOff = r.kind === "down" ? y + height : y;
               const plot = parentViewBox
                 ? parentViewBox.width - WATERFALL_MARGIN.left - WATERFALL_MARGIN.right
                 : null;
               const next = plot !== null ? x + plot / rows.length : null;
               return (
                 <Layer>
-                  <Rectangle
-                    x={x}
-                    y={y}
-                    width={width}
-                    height={height}
-                    radius={[2, 2, 0, 0]}
-                    fill={fill}
-                  />
+                  {balance ? (
+                    <>
+                      <Rectangle
+                        x={x}
+                        y={y}
+                        width={width}
+                        height={height}
+                        radius={[4, 4, 0, 0]}
+                        fill={colour}
+                        fillOpacity={0.32}
+                      />
+                      <Rectangle x={x} y={y} width={width} height={3} radius={[4, 4, 0, 0]} fill={colour} />
+                    </>
+                  ) : (
+                    <Rectangle x={x} y={y} width={width} height={height} radius={4} fill={colour} />
+                  )}
+                  {/*
+                    * The level, carried to the next column. Solid and faint:
+                    * it is a guide to read by, not a mark to read.
+                    */}
                   {next !== null && index < rows.length - 1 && (
                     <line
                       x1={x + width}
@@ -1560,43 +1589,32 @@ export function Waterfall({
                       x2={next}
                       y2={handOff}
                       stroke="var(--ink-faint)"
+                      strokeOpacity={0.55}
                       strokeWidth={1}
-                      strokeDasharray="2 2"
                     />
                   )}
+                  {/*
+                    * The figure, in ink rather than the column's colour, above
+                    * a column that rose and below one that fell — where the
+                    * eye already is when it follows the step.
+                    */}
+                  <text
+                    x={x + width / 2}
+                    y={r.kind === "down" ? y + height + 16 : y - 9}
+                    textAnchor="middle"
+                    fontSize={balance ? 12 : 11}
+                    fontWeight={balance ? 600 : 500}
+                    fill={balance ? "var(--ink)" : "var(--ink-dim)"}
+                    style={{ fontVariantNumeric: "tabular-nums" }}
+                  >
+                    {balance ? format(r.top) : signed(r.delta)}
+                  </text>
                 </Layer>
               );
             }}
-            label={{
-              position: "top",
-              offset: 8,
-              content: (props: unknown) => {
-                const { x, y, width, index } = props as {
-                  x: number;
-                  y: number;
-                  width: number;
-                  index: number;
-                };
-                const r = rows[index];
-                if (!r) return null;
-                const negative = r.shown < 0;
-                return (
-                  <text
-                    x={x + width / 2}
-                    y={y - 8}
-                    textAnchor="middle"
-                    fontSize={11}
-                    fontWeight={500}
-                    fill={negative ? accent("negative") : "var(--ink)"}
-                  >
-                    {format(r.shown)}
-                  </text>
-                );
-              },
-            }}
           >
             {rows.map((r, i) => (
-              <Cell key={i} fill={colourFor(r.kind, i)} />
+              <Cell key={i} fill={colourFor(r.role)} />
             ))}
           </Bar>
         </ComposedChart>
@@ -1608,9 +1626,9 @@ export function Waterfall({
          * convention people either know or misread, and the sentence costs one
          * line.
          */
-        <p className="px-1 text-[0.625rem] text-ink-faint">
-          The scale starts at {format(floor)}, not zero, so the year&rsquo;s
-          movements are readable against a much larger balance.
+        <p className="px-2 pt-1 text-[0.625rem] text-ink-faint">
+          The scale starts at {format(floor)}, not zero, so the movements are
+          readable against a much larger balance.
         </p>
       )}
     </div>
