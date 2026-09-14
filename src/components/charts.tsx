@@ -1442,9 +1442,7 @@ export function Waterfall({
    * the colour of rent claimed that it was.
    *
    * The two balances are the same kind of quantity a year apart, so they
-   * share one treatment: the brand violet as a quiet wash with a solid edge
-   * at the level. They are the frame the steps move between, and drawing them
-   * as the two loudest blocks on the chart made the frame the subject.
+   * share one colour, the brand violet, drawn as solidly as the steps.
    *
    * Every column also carries its signed figure, so no step is told apart
    * by colour alone.
@@ -1561,18 +1559,14 @@ export function Waterfall({
               return (
                 <Layer>
                   {balance ? (
-                    <>
-                      <Rectangle
-                        x={x}
-                        y={y}
-                        width={width}
-                        height={height}
-                        radius={[4, 4, 0, 0]}
-                        fill={colour}
-                        fillOpacity={0.32}
-                      />
-                      <Rectangle x={x} y={y} width={width} height={3} radius={[4, 4, 0, 0]} fill={colour} />
-                    </>
+                    <Rectangle
+                      x={x}
+                      y={y}
+                      width={width}
+                      height={height}
+                      radius={[4, 4, 0, 0]}
+                      fill={colour}
+                    />
                   ) : (
                     <Rectangle x={x} y={y} width={width} height={height} radius={4} fill={colour} />
                   )}
