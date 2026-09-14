@@ -1356,6 +1356,8 @@ export function RoomGauge({
  */
 /** One definition, so the connector maths below cannot drift from the plot. */
 const WATERFALL_MARGIN = { top: 30, right: 8, left: 8, bottom: 4 };
+/** How much of its slot a balance post takes, against a step's full column. */
+const POST_SHARE = 0.34;
 /** Room under the lowest column for a falling step's figure. */
 const WATERFALL_UNDER = 22;
 
@@ -1480,7 +1482,7 @@ export function Waterfall({
         <ComposedChart
           data={rows}
           margin={{ ...WATERFALL_MARGIN, bottom: WATERFALL_MARGIN.bottom + WATERFALL_UNDER }}
-          barCategoryGap="16%"
+          barCategoryGap="22%"
         >
           {/*
             * No y-axis. Every column carries its own figure, so an axis would
@@ -1534,7 +1536,7 @@ export function Waterfall({
              * them, so the hand-off had to be taken on trust across the gap.
              * The cap only stops a very wide card drawing slabs.
              */
-            maxBarSize={110}
+            maxBarSize={88}
             /*
              * A step small beside the totals still has to be visible. Without a
              * floor a rounding-error year is drawn as nothing at all, which
@@ -1561,21 +1563,35 @@ export function Waterfall({
                 ? parentViewBox.width - WATERFALL_MARGIN.left - WATERFALL_MARGIN.right
                 : null;
               const next = plot !== null ? x + plot / rows.length : null;
+              /*
+               * A balance is a post, a step is a column.
+               *
+               * The two balances are the frame the year moves between, and at
+               * full width they were the two heaviest shapes on the chart —
+               * which is most of what made the columns read as too thick.
+               * Drawn as slim posts they mark the levels exactly and leave the
+               * width to the steps, which are what the chart is about. Every
+               * column keeps its slot, so the steps stay close together.
+               */
+              const inset = (w: number) => (w * (1 - POST_SHARE)) / 2;
+              const left = balance ? x + inset(width) : x;
+              const right = balance ? x + width - inset(width) : x + width;
+              /* The next column's left edge, which is inset too if it is a post. */
+              const nextRow = rows[index + 1];
+              const nextLeft =
+                next === null ? null : nextRow?.kind === "total" ? next + inset(width) : next;
               return (
                 <Layer>
                   {balance ? (
-                    <>
-                      <Rectangle
-                        x={x}
-                        y={y}
-                        width={width}
-                        height={height}
-                        radius={[4, 4, 0, 0]}
-                        fill={colour}
-                        fillOpacity={0.32}
-                      />
-                      <Rectangle x={x} y={y} width={width} height={3} radius={[4, 4, 0, 0]} fill={colour} />
-                    </>
+                    <Rectangle
+                      x={left}
+                      y={y}
+                      width={right - left}
+                      height={height}
+                      radius={[4, 4, 0, 0]}
+                      fill={colour}
+                      fillOpacity={0.85}
+                    />
                   ) : (
                     <Rectangle x={x} y={y} width={width} height={height} radius={4} fill={colour} />
                   )}
@@ -1583,11 +1599,11 @@ export function Waterfall({
                     * The level, carried to the next column. Solid and faint:
                     * it is a guide to read by, not a mark to read.
                     */}
-                  {next !== null && index < rows.length - 1 && (
+                  {nextLeft !== null && index < rows.length - 1 && (
                     <line
-                      x1={x + width}
+                      x1={right}
                       y1={handOff}
-                      x2={next}
+                      x2={nextLeft}
                       y2={handOff}
                       stroke="var(--ink-faint)"
                       strokeOpacity={0.55}
