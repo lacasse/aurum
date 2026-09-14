@@ -40,7 +40,7 @@ import { cn } from "./ui";
  * one is a thing you do a few times a month, the other a thing you read once.
  */
 const NAV = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/income", label: "Income", icon: HandCoins },
   { href: "/expenses", label: "Expenses", icon: ReceiptText },
   { href: "/investments", label: "Investments", icon: TrendingUp },
