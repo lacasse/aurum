@@ -1480,7 +1480,7 @@ export function Waterfall({
         <ComposedChart
           data={rows}
           margin={{ ...WATERFALL_MARGIN, bottom: WATERFALL_MARGIN.bottom + WATERFALL_UNDER }}
-          barCategoryGap="16%"
+          barCategoryGap="22%"
         >
           {/*
             * No y-axis. Every column carries its own figure, so an axis would
@@ -1528,18 +1528,15 @@ export function Waterfall({
           <Bar
             dataKey="range"
             /*
-             * Sized from the slot, not capped small. A waterfall is one shape
-             * — each step begins where the last one finished — and columns
-             * held narrow in a wide card left more air than column between
-             * them, so the hand-off had to be taken on trust across the gap.
-             * The cap only stops a very wide card drawing slabs.
+             * About as wide as the gap beside it. Capped narrow in a wide card
+             * the columns left twice their own width of air between them and
+             * read as five unrelated marks; sized from the slot they read as
+             * slabs. Column and gap roughly equal is where a staircase still
+             * reads as one shape and each step still reads as a column. Every
+             * column the same width, balances included: they are all the same
+             * kind of mark, measured on the same scale.
              */
-            maxBarSize={110}
-            /*
-             * A step small beside the totals still has to be visible. Without a
-             * floor a rounding-error year is drawn as nothing at all, which
-             * reads as "this did not happen" rather than "this was small".
-             */
+            maxBarSize={80}
             minPointSize={3}
             isAnimationActive={false}
             shape={(props: unknown) => {
