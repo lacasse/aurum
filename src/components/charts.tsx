@@ -1480,7 +1480,7 @@ export function Waterfall({
         <ComposedChart
           data={rows}
           margin={{ ...WATERFALL_MARGIN, bottom: WATERFALL_MARGIN.bottom + WATERFALL_UNDER }}
-          barCategoryGap="16%"
+          barCategoryGap="30%"
         >
           {/*
             * No y-axis. Every column carries its own figure, so an axis would
@@ -1528,25 +1528,27 @@ export function Waterfall({
           <Bar
             dataKey="range"
             /*
-             * Sized from the slot, not capped small. A waterfall is one shape
-             * — each step begins where the last one finished — and columns
-             * held narrow in a wide card left more air than column between
-             * them, so the hand-off had to be taken on trust across the gap.
-             * The cap only stops a very wide card drawing slabs.
+             * Slim, and joined by the ground beneath them rather than by
+             * width. Narrow columns in a wide card left more air than column
+             * between them; wide ones read as slabs. The silhouette drawn in
+             * the shape below is what makes five columns one staircase, so
+             * the columns can stay the width of every other bar in the app.
              */
-            maxBarSize={110}
+            maxBarSize={44}
             /*
-             * A step small beside the totals still has to be visible. Without a
-             * floor a rounding-error year is drawn as nothing at all, which
-             * reads as "this did not happen" rather than "this was small".
+             * Asked for so the shape learns where the plot's floor is: the
+             * background band spans the full height of the plot, and its
+             * bottom edge is the baseline the silhouette stands on.
              */
+            background={{ fill: "transparent" }}
             minPointSize={3}
             isAnimationActive={false}
             shape={(props: unknown) => {
-              const { x, y, width, height, index, parentViewBox } = props as {
+              const { x, y, width, height, index, parentViewBox, background } = props as {
                 x: number; y: number; width: number; height: number;
                 index: number;
                 parentViewBox?: { width: number };
+                background?: { y: number; height: number };
               };
               const r = rows[index];
               if (!r) return <g />;
@@ -1561,8 +1563,52 @@ export function Waterfall({
                 ? parentViewBox.width - WATERFALL_MARGIN.left - WATERFALL_MARGIN.right
                 : null;
               const next = plot !== null ? x + plot / rows.length : null;
+              const ground = background ? background.y + background.height : null;
+              const brand = accent("brand");
               return (
                 <Layer>
+                  {/*
+                    * Net worth, as ground.
+                    *
+                    * A faint violet silhouette of the running balance runs
+                    * under the whole chart: beneath each step, and across to
+                    * the next one at the level the step left it. The steps are
+                    * cut into its top edge, and the two balances are simply
+                    * where it is measured. Read that way the gaps are not
+                    * empty — they are the balance, standing still between one
+                    * change and the next.
+                    */}
+                  {ground !== null && !balance && (
+                    <rect
+                      x={x}
+                      y={y + height}
+                      width={width}
+                      height={Math.max(0, ground - (y + height))}
+                      fill={brand}
+                      fillOpacity={0.1}
+                    />
+                  )}
+                  {ground !== null && next !== null && index < rows.length - 1 && (
+                    <>
+                      <rect
+                        x={x + width}
+                        y={handOff}
+                        width={Math.max(0, next - (x + width))}
+                        height={Math.max(0, ground - handOff)}
+                        fill={brand}
+                        fillOpacity={0.1}
+                      />
+                      <line
+                        x1={x + width}
+                        y1={handOff}
+                        x2={next}
+                        y2={handOff}
+                        stroke={brand}
+                        strokeOpacity={0.45}
+                        strokeWidth={1}
+                      />
+                    </>
+                  )}
                   {balance ? (
                     <>
                       <Rectangle
@@ -1578,21 +1624,6 @@ export function Waterfall({
                     </>
                   ) : (
                     <Rectangle x={x} y={y} width={width} height={height} radius={4} fill={colour} />
-                  )}
-                  {/*
-                    * The level, carried to the next column. Solid and faint:
-                    * it is a guide to read by, not a mark to read.
-                    */}
-                  {next !== null && index < rows.length - 1 && (
-                    <line
-                      x1={x + width}
-                      y1={handOff}
-                      x2={next}
-                      y2={handOff}
-                      stroke="var(--ink-faint)"
-                      strokeOpacity={0.55}
-                      strokeWidth={1}
-                    />
                   )}
                   {/*
                     * The figure, in ink rather than the column's colour, above
