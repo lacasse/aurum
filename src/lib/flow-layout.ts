@@ -189,14 +189,42 @@ export function seatColumns(graph: FlowGraph, passes = 8): number[] {
   const start = graph.nodes.map((_, i) => i);
   let best = group(start, at);
   let fewest = cost(best.flat());
-  let cols = best;
-  for (let pass = 0; pass < passes && fewest[0] > 0; pass++) {
-    cols = sweep(cols, before, true);
-    cols = sweep(cols, after, false);
-    const n = cost(cols.flat());
-    if (better(n, fewest)) {
-      fewest = n;
-      best = cols.map((c) => [...c]);
+
+  /*
+   * Settle from several starting orders, not one.
+   *
+   * Averaging heights walks downhill from wherever it begins and stops at the
+   * first arrangement it cannot improve one node at a time. Which arrangement
+   * that is depends entirely on the order the data arrived in, and on a real
+   * year it stopped one swap short: a band into the middle column crossed a
+   * band into the bar beside it, and no single node could move to fix it
+   * because both had to. Beginning again from the reverse, and from the widest
+   * bands first, costs a handful of sweeps over tens of nodes and gets past it.
+   */
+  const widest = new Map<number, number>();
+  for (const l of graph.links) {
+    const w = l.value ?? 1;
+    widest.set(l.source, (widest.get(l.source) ?? 0) + w);
+    widest.set(l.target, (widest.get(l.target) ?? 0) + w);
+  }
+  const starts: number[][][] = [
+    group(start, at),
+    group([...start].reverse(), at),
+    group(
+      [...start].sort((a, b) => (widest.get(b) ?? 0) - (widest.get(a) ?? 0) || a - b),
+      at,
+    ),
+  ];
+  for (const from of starts) {
+    let cols = from;
+    for (let pass = 0; pass < passes && fewest[0] > 0; pass++) {
+      cols = sweep(cols, before, true);
+      cols = sweep(cols, after, false);
+      const n = cost(cols.flat());
+      if (better(n, fewest)) {
+        fewest = n;
+        best = cols.map((c) => [...c]);
+      }
     }
   }
 
@@ -210,20 +238,64 @@ export function seatColumns(graph: FlowGraph, passes = 8): number[] {
    * it is slower, but a year's chart is tens of nodes, not thousands, and it
    * is the difference between "nearly untangled" and untangled.
    */
-  let improved = true;
-  for (let round = 0; improved && round < passes && fewest[0] > 0; round++) {
-    improved = false;
-    for (const col of best) {
-      for (let i = 0; i + 1 < col.length; i++) {
-        [col[i], col[i + 1]] = [col[i + 1], col[i]];
-        const n = cost(best.flat());
-        if (better(n, fewest)) {
-          fewest = n;
-          improved = true;
-        } else {
+  /* Improving swaps only, from wherever it is put down. */
+  const settle = (cols: number[][]): [number[][], [number, number]] => {
+    const out = cols.map((c) => [...c]);
+    let at = cost(out.flat());
+    let moved = true;
+    for (let round = 0; moved && round < passes; round++) {
+      moved = false;
+      for (const col of out) {
+        for (let i = 0; i + 1 < col.length; i++) {
           [col[i], col[i + 1]] = [col[i + 1], col[i]];
+          const n = cost(out.flat());
+          if (better(n, at)) {
+            at = n;
+            moved = true;
+          } else {
+            [col[i], col[i + 1]] = [col[i + 1], col[i]];
+          }
         }
       }
+    }
+    return [out, at];
+  };
+
+  /*
+   * Then shake it and let it settle again, keeping the best it ever saw.
+   *
+   * Some tangles cost more before they cost less. On a real year a band into a
+   * reserved slot crossed the band into the bar beside it, and clearing it
+   * meant swapping a pair in the source column *and* the pair they lead to in
+   * the next one — either swap alone makes the chart worse, so a search that
+   * only ever improves will not take the first step. Disturbing a settled
+   * arrangement by a swap or two and settling it again does take it. The
+   * disturbance is drawn from a fixed seed, so the same record always draws
+   * the same chart; a chart that rearranged itself between two loads of the
+   * same page would be worse than one that crosses.
+   */
+  let seed = 0x9e3779b9;
+  const random = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const settled = settle(best);
+  best = settled[0];
+  fewest = better(settled[1], fewest) ? settled[1] : fewest;
+  for (let shake = 0; shake < passes * 4 && fewest[0] > 0; shake++) {
+    const trial = best.map((c) => [...c]);
+    for (let k = 0; k <= shake % 3; k++) {
+      const col = trial[Math.floor(random() * trial.length)];
+      if (!col || col.length < 2) continue;
+      const i = Math.floor(random() * (col.length - 1));
+      [col[i], col[i + 1]] = [col[i + 1], col[i]];
+    }
+    const [order, at2] = settle(trial);
+    if (better(at2, fewest)) {
+      fewest = at2;
+      best = order;
     }
   }
   return best.flat();

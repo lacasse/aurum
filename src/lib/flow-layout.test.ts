@@ -101,6 +101,29 @@ describe("the shapes that kept coming back", () => {
     assert.equal(seated(g), 0);
   });
 
+  test("a tangle that needs two columns to move at once", () => {
+    /*
+     * A band into a reserved slot crossing the band into the bar beside it.
+     * Swapping the pair in either column alone leaves the crossing exactly
+     * where it was, so a search that only takes improvements stops one step
+     * short: the first move has to be free before the second can be good.
+     */
+    const g = {
+      nodes: Array.from({ length: 8 }, (_, i) => ({ name: `n${i}` })),
+      links: [
+        { source: 0, target: 3, value: 21 },
+        { source: 0, target: 5, value: 11 },
+        { source: 1, target: 4, value: 19 },
+        { source: 2, target: 5, value: 93 },
+        { source: 3, target: 6, value: 21 },
+        { source: 4, target: 6, value: 19 },
+        { source: 5, target: 7, value: 104 },
+      ],
+    };
+    assert.equal(crossingsIn(g), 1, "as given");
+    assert.equal(crossingsIn(g, seatColumns(g)), 0, "as seated");
+  });
+
   test("a band that skips the column between its ends", () => {
     const g = graph(5, [[0, 1], [1, 2], [2, 3], [1, 4]]);
     assert.equal(seated(g), 0);
