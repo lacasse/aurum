@@ -528,7 +528,7 @@ export function yearWaterfall(
   let running = shape.openingNetWorth;
 
   steps.push({
-    label: "Opened at",
+    label: "Opening",
     delta: 0,
     base: 0,
     top: shape.openingNetWorth,
@@ -550,11 +550,11 @@ export function yearWaterfall(
   };
 
   add("Income", shape.income, "income");
-  add("Spending", -shape.expenses, "spending");
-  add(shape.revaluation >= 0 ? "Growth" : "Decline", shape.revaluation, "market");
+  add("Expenses", -shape.expenses, "spending");
+  add("Revaluation", shape.revaluation, "market");
 
   steps.push({
-    label: "Closed at",
+    label: "Closing",
     delta: 0,
     base: 0,
     top: shape.netWorth,
@@ -996,7 +996,7 @@ const OTHER_INCOME = "Other income";
  */
 const MIN_SOURCE_SHARE = 0.01;
 
-const SPENDING = "Spending";
+const SPENDING = "Expenses";
 /**
  * A purchase, which needs no node of its own.
  *

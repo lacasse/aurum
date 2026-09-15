@@ -1619,8 +1619,9 @@ export function Waterfall({
          * line.
          */
         <p className="px-2 pt-1 text-[0.625rem] text-ink-faint">
-          The scale starts at {format(floor)}, not zero, so the movements are
-          readable against a much larger balance.
+          Axis starts at {format(floor)} rather than zero, so the period&rsquo;s
+          movements stay legible against the balance. Revaluation covers markets,
+          pension accrual and exchange rates.
         </p>
       )}
     </div>

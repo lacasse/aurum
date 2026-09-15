@@ -30,14 +30,14 @@ describe("driverPhrase", () => {
   test("says a rise came from saving", () => {
     assert.equal(
       driverPhrase({ saved: 20000, revaluation: 2000, openingNetWorth: 100000, netWorth: 122000 }),
-      "mostly from what you saved",
+      "driven mainly by net savings",
     );
   });
 
   test("says a fall came from markets", () => {
     assert.equal(
       driverPhrase({ saved: 2000, revaluation: -30000, openingNetWorth: 100000, netWorth: 72000 }),
-      "mostly from markets",
+      "driven mainly by negative revaluation",
     );
   });
 

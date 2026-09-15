@@ -49,15 +49,15 @@ export function driverPhrase(
   if (driver === "saving") {
     return shape.saved >= 0
       ? rose
-        ? "mostly from what you saved"
-        : "despite what you saved"
-      : "mostly from spending more than came in";
+        ? "driven mainly by net savings"
+        : "despite positive net savings"
+      : "driven mainly by a savings shortfall";
   }
   return shape.revaluation >= 0
     ? rose
-      ? "mostly from markets"
-      : "despite markets"
-    : "mostly from markets";
+      ? "driven mainly by revaluation"
+      : "despite positive revaluation"
+    : "driven mainly by negative revaluation";
 }
 
 export interface WatchItem {
@@ -104,8 +104,8 @@ export function watchList(input: WatchInput): WatchItem[] {
     items.push({
       key: "overspent",
       tone: "concern",
-      title: "More went out than came in",
-      detail: `Spending ran ${fmtCAD(Math.abs(input.saved))} ahead of income over these months.`,
+      title: "Expenses exceeded income",
+      detail: `Expenses ran ${fmtCAD(Math.abs(input.saved))} ahead of income over the period, so net savings were negative.`,
       href: "/expenses",
     });
   }
@@ -114,8 +114,8 @@ export function watchList(input: WatchInput): WatchItem[] {
     items.push({
       key: "runway",
       tone: input.runway < 1 ? "concern" : "caution",
-      title: "Cash is thin",
-      detail: `What you hold in cash covers ${input.runway.toFixed(1)} months of spending.`,
+      title: "Low cash runway",
+      detail: `Liquid cash covers ${input.runway.toFixed(1)} months of average expenses, under the ${THIN_RUNWAY_MONTHS}-month threshold.`,
       href: "/accounts",
     });
   }
@@ -124,8 +124,8 @@ export function watchList(input: WatchInput): WatchItem[] {
     items.push({
       key: "debt",
       tone: "caution",
-      title: "Debt went up",
-      detail: `What you owe rose by ${fmtCAD(input.debtClosing - input.debtOpening)}.`,
+      title: "Liabilities increased",
+      detail: `Total liabilities rose by ${fmtCAD(input.debtClosing - input.debtOpening)} over the period.`,
       href: "/accounts",
     });
   }
@@ -136,8 +136,8 @@ export function watchList(input: WatchInput): WatchItem[] {
       items.push({
         key: "spending",
         tone: "caution",
-        title: "Spending is up",
-        detail: `A month now costs ${pct(change)} more than it did the year before.`,
+        title: "Expenses are up",
+        detail: `Average monthly expenses are ${pct(change)} higher than in the prior twelve months.`,
         href: "/expenses",
       });
     }
@@ -150,7 +150,7 @@ export function watchList(input: WatchInput): WatchItem[] {
         key: "income",
         tone: "caution",
         title: "Income is down",
-        detail: `A month brings in ${pct(change)} less than it did the year before.`,
+        detail: `Average monthly income is ${pct(change)} lower than in the prior twelve months.`,
         href: "/income",
       });
     }
@@ -160,8 +160,8 @@ export function watchList(input: WatchInput): WatchItem[] {
     items.push({
       key: "snapshots",
       tone: "caution",
-      title: "The portfolio record has gaps",
-      detail: `${input.snapshotGaps} month${input.snapshotGaps === 1 ? " has" : "s have"} no recorded value. The monthly checklist fills them in.`,
+      title: "Gaps in the portfolio record",
+      detail: `${input.snapshotGaps} month${input.snapshotGaps === 1 ? " has" : "s have"} no recorded portfolio valuation. The monthly checklist fills them in.`,
       href: "/investments",
     });
   }
