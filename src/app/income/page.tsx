@@ -238,7 +238,7 @@ export default function IncomePage() {
           <StatCard
             label="Total income"
             value={fmtCAD(breakdown.total)}
-            deltaValue={`${fmtCAD(breakdown.average)} a month`}
+            deltaValue={`${fmtCAD(breakdown.average)} per month`}
             deltaLabel={`over ${breakdown.windowMonths} month${
               breakdown.windowMonths === 1 ? "" : "s"
             }`}
@@ -260,7 +260,7 @@ export default function IncomePage() {
                   </span>
                   <span className="tabular-nums text-ink">
                     {fmtCAD(data.active)}
-                    <span className="text-ink-faint"> a month</span>
+                    <span className="text-ink-faint"> per month</span>
                   </span>
                 </div>
                 <div className="flex items-baseline justify-between gap-3 text-xs">
@@ -275,7 +275,7 @@ export default function IncomePage() {
                     {fmtCAD(data.passive)}
                     <span className="text-ink-faint">
                       {" "}
-                      a month
+                      per month
                       {breakdown.average > 0
                         ? ` · ${((data.passive / breakdown.average) * 100).toFixed(1)}%`
                         : ""}
@@ -350,11 +350,11 @@ export default function IncomePage() {
               <div className="space-y-2 text-xs">
                 <FactRow
                   label={`${data.yoy.now.year} · ${fmtCAD(data.yoy.now.total)} in total`}
-                  value={`${fmtCAD(data.yoy.now.average)} a month`}
+                  value={`${fmtCAD(data.yoy.now.average)} per month`}
                 />
                 <FactRow
                   label={`${data.yoy.before.year} · ${fmtCAD(data.yoy.before.total)} in total`}
-                  value={`${fmtCAD(data.yoy.before.average)} a month`}
+                  value={`${fmtCAD(data.yoy.before.average)} per month`}
                   dim
                 />
                 <p className="pt-1 text-[0.6875rem] leading-relaxed text-ink-faint">
@@ -362,7 +362,7 @@ export default function IncomePage() {
                     ? `Nothing recorded in ${data.yoy.before.year} to compare against.`
                     : `${
                         data.yoy.change >= 0 ? "Up" : "Down"
-                      } ${fmtCAD(Math.abs(data.yoy.now.average - data.yoy.before.average))} a month on the same stretch of last year.`}
+                      } ${fmtCAD(Math.abs(data.yoy.now.average - data.yoy.before.average))} per month on the same stretch of last year.`}
                 </p>
               </div>
             }
@@ -552,7 +552,7 @@ export default function IncomePage() {
               />
             </div>
             <p className="px-5 pb-5 text-[0.6875rem] leading-relaxed text-ink-faint">
-              {fmtCAD(data.passive)} a month on average, which is{" "}
+              {fmtCAD(data.passive)} per month on average, which is{" "}
               <strong className="text-ink-dim">
                 {breakdown.average > 0
                   ? `${((data.passive / breakdown.average) * 100).toFixed(1)}%`

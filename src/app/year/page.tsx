@@ -845,7 +845,7 @@ export default function YearPage() {
             </div>
             {room.some((r) => r.over) && (
               <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] text-negative">
-                An over-contribution is charged 1% a month on the excess until it is
+                An over-contribution is charged 1% per month on the excess until it is
                 withdrawn. Check the figure against your notice of assessment before
                 acting on it.
               </p>

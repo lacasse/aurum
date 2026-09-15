@@ -306,7 +306,7 @@ export default function AccountsPage() {
                   {fmtCAD(summary.contributed)}
                 </p>
                 <p className="mt-1 text-[0.6875rem] text-ink-faint">
-                  {fmtCAD(summary.monthly)} a month lately
+                  {fmtCAD(summary.monthly)} per month lately
                 </p>
               </div>
               <div>
