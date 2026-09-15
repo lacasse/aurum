@@ -175,7 +175,7 @@ function MonthRow({
           <div
             className="absolute -inset-y-1 w-0.5 rounded-full bg-ink-faint"
             style={{ left: width(before) }}
-            title={`Prior twelve months: ${fmtCAD(before)}`}
+            title={`The year before: ${fmtCAD(before)}`}
           />
         )}
       </div>
@@ -317,10 +317,10 @@ export default function OverviewPage() {
 
   if (!shape || !closing) {
     return (
-      <Shell title="Where you stand" subtitle="The trailing twelve months">
+      <Shell title="Where you stand" subtitle="The last twelve months">
         <EmptyState
           title="Not enough on record yet"
-          subtitle="This page needs at least one recorded month-end balance and a month of transactions."
+          subtitle="Once there is a balance and a month of transactions, this page tells you where you stand."
         />
       </Shell>
     );
@@ -359,13 +359,13 @@ export default function OverviewPage() {
 
   const span =
     shape.months === WINDOW
-      ? "the trailing twelve months"
-      : `the trailing ${shape.months} month${shape.months === 1 ? "" : "s"}`;
+      ? "the last twelve months"
+      : `the last ${shape.months} month${shape.months === 1 ? "" : "s"}`;
 
   return (
     <Shell
       title="Where you stand"
-      subtitle={`Every figure below covers ${span} to ${monthName}, month-end`}
+      subtitle={`Everything below reads ${span}, through ${monthName}`}
       action={
         <MonthlyChecklistButton onOpen={() => setChecklistOpen(true)} gaps={data.gaps} />
       }
@@ -377,7 +377,7 @@ export default function OverviewPage() {
         <Card className="p-6">
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:items-end">
             <div className="min-w-0">
-              <p className="text-xs font-medium text-ink-dim">Net worth at {monthName} month-end</p>
+              <p className="text-xs font-medium text-ink-dim">Net worth</p>
               <p className="mt-1 text-4xl font-semibold tracking-tight tabular-nums">
                 {fmtCAD(shape.netWorth)}
               </p>
@@ -406,11 +406,11 @@ export default function OverviewPage() {
                 closing.pension > 0 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3",
               )}
             >
-              <Holding label="Liquid cash" value={fmtCAD(closing.assets)} />
-              <Holding label="Portfolio" value={fmtCAD(closing.portfolio)} />
+              <Holding label="Cash" value={fmtCAD(closing.assets)} />
+              <Holding label="Invested" value={fmtCAD(closing.portfolio)} />
               {closing.pension > 0 && <Holding label="Pension" value={fmtCAD(closing.pension)} />}
               <Holding
-                label="Liabilities"
+                label="Owed"
                 value={closing.liabilities > 0 ? `−${fmtCAD(closing.liabilities)}` : fmtCAD(0)}
                 tone={closing.liabilities > 0 ? "negative" : undefined}
               />
@@ -418,7 +418,7 @@ export default function OverviewPage() {
           </div>
         </Card>
 
-        <Chapter title="What moved net worth" note={`${labelMonth(shape.from)} – ${monthName}`} />
+        <Chapter title="What changed it" note={`${labelMonth(shape.from)} to ${monthName}`} />
         {/*
           * The roll-forward beside the months that make it up. The two income
           * and spending bars are twelve months of the three figures on the
@@ -434,8 +434,8 @@ export default function OverviewPage() {
         <div className="grid gap-4 lg:grid-cols-2">
           <Card className="flex h-full flex-col">
             <CardHeader
-              title="Net worth roll-forward"
-              subtitle="Opening balance, plus income, less expenses, plus revaluation"
+              title="From where you started to where you are"
+              subtitle="What came in, what went out, and what everything else did"
             />
             <div className="min-h-[380px] flex-1 px-3 pb-4">
               <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} height="100%" />
@@ -443,11 +443,11 @@ export default function OverviewPage() {
           </Card>
           <Card className="flex h-full flex-col">
             <CardHeader
-              title="The average month behind it"
+              title="A typical month"
               subtitle={
                 before
-                  ? "Monthly means, against the prior twelve months"
-                  : "Monthly means over the period"
+                  ? "These twelve months, against the twelve before"
+                  : "These twelve months"
               }
             />
             <div className="flex flex-1 flex-col justify-around divide-y divide-line px-5 pb-2">
@@ -459,15 +459,15 @@ export default function OverviewPage() {
                 colour={accent("positive")}
               />
               <MonthRow
-                label="Expenses"
+                label="Spending"
                 now={spending}
                 before={spendingBefore}
                 good="down"
                 colour={accent("negative")}
               />
               <MonthRow
-                label="Net savings"
-                note={rateNow === null ? undefined : `Savings rate ${rateNow.toFixed(1)}%`}
+                label="Saved"
+                note={rateNow === null ? undefined : `${rateNow.toFixed(1)}% of income`}
                 now={saved}
                 before={savedBefore}
                 good="up"
@@ -479,15 +479,15 @@ export default function OverviewPage() {
 
         {data.flow && data.flow.links.length > 0 && (
           <>
-            <Chapter title="Where the money went" note="every dollar that entered or left an account over the period" />
+            <Chapter title="Where the money went" note="every dollar that entered or left an account" />
             <Card>
               <CardHeader
-                title="Sources and uses of funds"
-                subtitle="Income by source, the accounts it landed in, and how each dollar was spent, invested, repaid or kept"
+                title="Sources and uses"
+                subtitle="Where it came from, which accounts it passed through, and what it became"
                 action={
                   <Link href="/year">
                     <Button variant="ghost" size="sm">
-                      View by year <ArrowRight size={13} />
+                      By year <ArrowRight size={13} />
                     </Button>
                   </Link>
                 }
@@ -503,7 +503,7 @@ export default function OverviewPage() {
           </>
         )}
 
-        <Chapter title="What your money does for you" note="financial independence and passive income coverage" />
+        <Chapter title="What your money does for you" />
         {/*
           * Two readings of one question, deliberately side by side: what the
           * money could pay you if you drew on it, and what it already pays
@@ -522,7 +522,7 @@ export default function OverviewPage() {
                 <p className="text-xs font-medium text-ink-dim">Financial independence</p>
                 <p className="mt-1 text-2xl font-semibold tabular-nums">{fi.pct.toFixed(1)}%</p>
                 <p className="mt-0.5 text-[0.6875rem] text-ink-faint">
-                  of a {fmtCAD(fi.target)} target: annual expenses divided by the withdrawal rate
+                  of the {fmtCAD(fi.target)} that would pay for a month like yours for good
                 </p>
               </div>
               <Segmented<string>
@@ -537,51 +537,48 @@ export default function OverviewPage() {
             </div>
             <Progress value={fi.pct} max={100} tone="positive" className="mt-4" />
             <p className="mt-3 text-[0.6875rem] leading-relaxed text-ink-faint">
-              A{" "}
-              <span className="font-medium text-ink-dim">{(fi.rate * 100).toFixed(1)}% annual withdrawal</span>{" "}
-              from current net worth would yield{" "}
+              Drawing{" "}
+              <span className="font-medium text-ink-dim">{(fi.rate * 100).toFixed(1)}% a year</span>{" "}
+              from what you have would pay{" "}
               <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(fi.monthly)}</span> a
               month, against{" "}
-              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(spending)}</span> in
-              average expenses
+              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(spending)}</span> spent
               {fi.shortfall > 0 ? (
                 <>
                   {" "}
-                  — a{" "}
-                  <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(fi.shortfall)}</span>{" "}
-                  monthly shortfall
+                  — <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(fi.shortfall)}</span>{" "}
+                  short
                 </>
               ) : (
-                ", fully covered"
+                " — covered"
               )}
               .
             </p>
           </Card>
 
           <Card className="p-5">
-            <p className="text-xs font-medium text-ink-dim">Passive income coverage</p>
+            <p className="text-xs font-medium text-ink-dim">Already paying for itself</p>
             <p className="mt-1 text-2xl font-semibold tabular-nums">
               {covered === null ? "—" : `${covered.toFixed(1)}%`}
             </p>
             <p className="mt-0.5 text-[0.6875rem] text-ink-faint">
-              of recurring fixed costs already paid by income you do not work for
+              of what a month costs before anything is decided
             </p>
             <Progress value={covered ?? 0} max={100} tone="positive" className="mt-4" />
             <p className="mt-3 text-[0.6875rem] leading-relaxed text-ink-faint">
-              Dividends, interest and pension income averaged{" "}
-              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(passive)}</span> a month,
-              against{" "}
-              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(data.floor.total)}</span>{" "}
-              of{" "}
+              Dividends, interest and pension paid you{" "}
+              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(passive)}</span> a month.
+              The{" "}
               <Link href="/expenses" className="text-ink-dim underline-offset-2 hover:underline">
-                recurring fixed costs
+                bills that arrive on their own
               </Link>{" "}
-              — the categories billed in nearly every month, at their median.
+              come to{" "}
+              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(data.floor.total)}</span>.
             </p>
           </Card>
         </div>
 
-        <Chapter title="Worth a look" note="anything past a threshold against the prior twelve months" />
+        <Chapter title="Worth a look" />
         <Card className="overflow-hidden">
           {watch.length > 0 ? (
             <div className="divide-y divide-line">
@@ -593,18 +590,18 @@ export default function OverviewPage() {
             <div className="flex items-center gap-3 px-5 py-4">
               <CheckCircle2 size={16} className="shrink-0 text-positive" />
               <p className="text-sm text-ink-dim">
-                No thresholds crossed. Expenses, income, cash runway and liabilities are all within
-                range of the prior twelve months.
+                Nothing stands out. Spending, income, cash and debt all look steady against the year
+                before.
               </p>
             </div>
           )}
         </Card>
 
-        <Chapter title="The long view" note="the only section not limited to the trailing twelve months" />
+        <Chapter title="The long view" note="the one chart here that reaches past these twelve months" />
         <Card>
           <CardHeader
             title="Net worth over time"
-            subtitle={`Month-end net worth across the whole record, through ${labelMonth(longView[longView.length - 1]?.key ?? data.through)}`}
+            subtitle={`Through ${labelMonth(longView[longView.length - 1]?.key ?? data.through)}`}
             action={
               <div className="flex items-center gap-2">
                 <Segmented<Range>
@@ -619,7 +616,7 @@ export default function OverviewPage() {
                 />
                 <Link href="/year">
                   <Button variant="ghost" size="sm">
-                    Composition <ArrowRight size={13} />
+                    What it is made of <ArrowRight size={13} />
                   </Button>
                 </Link>
               </div>
