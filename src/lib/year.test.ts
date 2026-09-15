@@ -218,7 +218,7 @@ describe("what was repaid is named, opposite what was borrowed", () => {
       d.links
         .filter((l) => d.nodes[l.target].name === name)
         .reduce((a, l) => a + l.value, 0);
-    assert.equal(into("Spending"), 20000, "the groceries, and not the repayment");
+    assert.equal(into("Expenses"), 20000, "the groceries, and not the repayment");
     assert.equal(into("Debt repaid"), 5000);
   });
 
@@ -385,7 +385,7 @@ describe("the year's move, as a waterfall", () => {
   test("spending points down and income points up", () => {
     const steps = yearWaterfall(shape);
     assert.equal(steps.find((s) => s.label === "Income")?.kind, "up");
-    assert.equal(steps.find((s) => s.label === "Spending")?.kind, "down");
+    assert.equal(steps.find((s) => s.label === "Expenses")?.kind, "down");
   });
 
   test("the two totals stand on the axis rather than floating", () => {
@@ -854,9 +854,9 @@ describe("what the money left an account for", () => {
       .reduce((a, l) => a + l.value, 0);
 
   test("spending ends at whether it could have been avoided", () => {
-    assert.equal(edge("Money in", "Spending"), 25000);
-    assert.equal(edge("Spending", "Necessity"), 20000);
-    assert.equal(edge("Spending", "Discretionary"), 5000);
+    assert.equal(edge("Money in", "Expenses"), 25000);
+    assert.equal(edge("Expenses", "Necessity"), 20000);
+    assert.equal(edge("Expenses", "Discretionary"), 5000);
     // The categories themselves are not drawn: two ends, not ten.
     assert.equal(f.nodes.some((n) => n.name === "Housing"), false);
     assert.equal(f.nodes.some((n) => n.name === "Travel"), false);
@@ -878,8 +878,8 @@ describe("what the money left an account for", () => {
     // Straight off the account: the Spending bar shows what was spent, and a
     // repayment is not that.
     assert.equal(e("Money in", "Debt repaid"), 7000);
-    assert.equal(e("Money in", "Spending"), 0);
-    assert.ok(!d.nodes.some((n) => n.name === "Spending"), "no spending this year");
+    assert.equal(e("Money in", "Expenses"), 0);
+    assert.ok(!d.nodes.some((n) => n.name === "Expenses"), "no spending this year");
     assert.equal(d.nodes.some((n) => n.name === "Debt Repayment"), false);
   });
 
@@ -892,7 +892,7 @@ describe("what the money left an account for", () => {
       o.links
         .filter((l) => o.nodes[l.source].name === from && o.nodes[l.target].name === to)
         .reduce((a, l) => a + l.value, 0);
-    assert.equal(e("Spending", "Necessity"), 25000);
+    assert.equal(e("Expenses", "Necessity"), 25000);
     assert.equal(o.nodes.some((n) => n.name === "Discretionary"), false);
   });
 
@@ -912,11 +912,11 @@ describe("what the money left an account for", () => {
     // A transfer is not spending and not yet a purchase; it is the money
     // moving to where the buying happens.
     assert.equal(edge("Money in", "Investments"), 15000);
-    assert.equal(edge("Spending", "Investments"), 0);
+    assert.equal(edge("Expenses", "Investments"), 0);
   });
 
   test("a group passes on exactly what it was given", () => {
-    for (const g of ["Spending", "Investing"]) assert.equal(into(g), outOf(g));
+    for (const g of ["Expenses", "Investing"]) assert.equal(into(g), outOf(g));
   });
 
   test("the account still balances across the extra column", () => {
@@ -1237,7 +1237,7 @@ describe("spending on a card is spending", () => {
     // The old shape charged the card's 12k to "From savings" and let the
     // salary that paid it fall out as cash left over — two equal errors that cancelled.
     assert.equal(f.nodes.some((n) => n.name === "From savings"), false);
-    assert.equal(into("Spending"), 20000);
+    assert.equal(into("Expenses"), 20000);
     assert.equal(into("Left in cash"), 30000);
   });
 
@@ -1252,7 +1252,7 @@ describe("spending on a card is spending", () => {
     // balance, not about what the year spent.
     const unpaid = yearFlow(rows.slice(0, 3), "2026", { accounts });
     const spend = (g: ReturnType<typeof yearFlow>) =>
-      g.links.filter((l) => g.nodes[l.target].name === "Spending").reduce((a, l) => a + l.value, 0);
+      g.links.filter((l) => g.nodes[l.target].name === "Expenses").reduce((a, l) => a + l.value, 0);
     assert.equal(spend(unpaid), spend(f));
   });
 });
@@ -1436,7 +1436,7 @@ describe("the flow, on shapes the sample data does not have", () => {
     ];
     const f = yearFlow(rows, "2026", { accounts });
     assert.equal(columnsOf(f), 4, "four columns, not five");
-    assert.equal(edge(f, "Investments", "Spending"), 0, "never through the Spending bar");
+    assert.equal(edge(f, "Investments", "Expenses"), 0, "never through the Spending bar");
     assert.ok(
       f.links.some((l) => f.nodes[l.source].name === "Investments" && f.nodes[l.target].name === "Discretionary"),
       "straight to what it was for",

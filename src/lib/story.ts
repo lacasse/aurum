@@ -104,7 +104,7 @@ export function watchList(input: WatchInput): WatchItem[] {
     items.push({
       key: "overspent",
       tone: "concern",
-      title: "More went out than came in",
+      title: "Expenses exceeded income",
       detail: `Spending ran ${fmtCAD(Math.abs(input.saved))} ahead of income over these months.`,
       href: "/expenses",
     });
@@ -114,7 +114,7 @@ export function watchList(input: WatchInput): WatchItem[] {
     items.push({
       key: "runway",
       tone: input.runway < 1 ? "concern" : "caution",
-      title: "Cash is thin",
+      title: "Low cash runway",
       detail: `What you hold in cash covers ${input.runway.toFixed(1)} months of spending.`,
       href: "/accounts",
     });
@@ -124,7 +124,7 @@ export function watchList(input: WatchInput): WatchItem[] {
     items.push({
       key: "debt",
       tone: "caution",
-      title: "Debt went up",
+      title: "Liabilities increased",
       detail: `What you owe rose by ${fmtCAD(input.debtClosing - input.debtOpening)}.`,
       href: "/accounts",
     });
@@ -136,7 +136,7 @@ export function watchList(input: WatchInput): WatchItem[] {
       items.push({
         key: "spending",
         tone: "caution",
-        title: "Spending is up",
+        title: "Expenses are up",
         detail: `A month now costs ${pct(change)} more than it did the year before.`,
         href: "/expenses",
       });
@@ -160,8 +160,8 @@ export function watchList(input: WatchInput): WatchItem[] {
     items.push({
       key: "snapshots",
       tone: "caution",
-      title: "The portfolio record has gaps",
-      detail: `${input.snapshotGaps} month${input.snapshotGaps === 1 ? " has" : "s have"} no recorded value. The monthly checklist fills them in.`,
+      title: "Gaps in the portfolio record",
+      detail: `${input.snapshotGaps} month${input.snapshotGaps === 1 ? " has" : "s have"} no recorded portfolio valuation. The monthly checklist fills them in.`,
       href: "/investments",
     });
   }
@@ -171,14 +171,11 @@ export function watchList(input: WatchInput): WatchItem[] {
 }
 
 /**
- * How much of a month the portfolio already pays for, as a share.
- *
- * Against the floor rather than against all spending: the floor is what a
- * month costs before anything is decided, and income that covers it is the
- * part of independence that has already happened. Capped at a hundred,
- * because covering the floor twice over is not more covered.
+ * How much of an average month of expenses passive income already pays for,
+ * as a share. Capped at a hundred, because covering it twice over is not more
+ * covered.
  */
-export function coverage(passivePerMonth: number, floor: number): number | null {
-  if (floor <= 0) return null;
-  return Math.min(100, (Math.max(passivePerMonth, 0) / floor) * 100);
+export function coverage(passivePerMonth: number, expenses: number): number | null {
+  if (expenses <= 0) return null;
+  return Math.min(100, (Math.max(passivePerMonth, 0) / expenses) * 100);
 }

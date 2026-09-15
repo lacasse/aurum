@@ -35,7 +35,7 @@ import {
   savingsRate,
   DEFAULT_WITHDRAWAL_RATE,
 } from "@/lib/analytics";
-import { groupOf, recurringFloor } from "@/lib/expenses";
+import { groupOf } from "@/lib/expenses";
 import { periodShape, spendableCashAt, yearFlow, yearWaterfall } from "@/lib/year";
 import { coverage, driverPhrase, perMonth, watchList, type WatchItem } from "@/lib/story";
 import {
@@ -66,7 +66,7 @@ import { roundMoney } from "@/lib/money";
  * long view at the foot is the one exception, and says so.
  *
  * Nothing here is calculated for this page alone. The roll-forward and the
- * flow chart are the Year page's own, over a different window; the floor is
+ * flow chart are the Year page's own, over a different window; the expenses are
  * the Expenses page's; the withdrawal arithmetic is the one the old dashboard
  * used. What this page adds is the order, and the few judgements in story.ts.
  */
@@ -175,7 +175,7 @@ function MonthRow({
           <div
             className="absolute -inset-y-1 w-0.5 rounded-full bg-ink-faint"
             style={{ left: width(before) }}
-            title={`The year before: ${fmtCAD(before)}`}
+            title={`Prior twelve months: ${fmtCAD(before)}`}
           />
         )}
       </div>
@@ -288,14 +288,13 @@ export default function OverviewPage() {
         )
       : null;
 
-    const floor = recurringFloor(transactions, spendGroups, WINDOW, through);
 
     const gaps = snapshotGaps(
       Object.fromEntries(Object.entries(snapshots).map(([m, t]) => [m, Object.keys(t).length])),
       through,
     ).length;
 
-    return { through, shape, before, closing, opening, flow, floor, netWorth, gaps };
+    return { through, shape, before, closing, opening, flow, netWorth, gaps };
   }, [accounts, transactions, holdings, snapshots, usdCadRate, spendGroups]);
 
   /*
@@ -317,10 +316,10 @@ export default function OverviewPage() {
 
   if (!shape || !closing) {
     return (
-      <Shell title="Where you stand" subtitle="The last twelve months">
+      <Shell title="Where you stand" subtitle="The trailing twelve months">
         <EmptyState
           title="Not enough on record yet"
-          subtitle="Once there is a balance and a month of transactions, this page tells you where you stand."
+          subtitle="This page needs at least one recorded end of the month balance and a month of transactions."
         />
       </Shell>
     );
@@ -341,7 +340,7 @@ export default function OverviewPage() {
   const phrase = driverPhrase(shape);
 
   const passive = perMonth(shape.passive, shape.months);
-  const covered = coverage(passive, data.floor.total);
+  const covered = coverage(passive, spending);
   const fi = fiProgress(closing.net, spending, Number(rate) || DEFAULT_WITHDRAWAL_RATE);
   const runway = runwayMonths(closing.assets, spending);
 
@@ -359,8 +358,8 @@ export default function OverviewPage() {
 
   const span =
     shape.months === WINDOW
-      ? "the last twelve months"
-      : `the last ${shape.months} month${shape.months === 1 ? "" : "s"}`;
+      ? "the trailing twelve months"
+      : `the trailing ${shape.months} month${shape.months === 1 ? "" : "s"}`;
 
   return (
     <Shell
@@ -410,7 +409,7 @@ export default function OverviewPage() {
               <Holding label="Invested" value={fmtCAD(closing.portfolio)} />
               {closing.pension > 0 && <Holding label="Pension" value={fmtCAD(closing.pension)} />}
               <Holding
-                label="Owed"
+                label="Liabilities"
                 value={closing.liabilities > 0 ? `−${fmtCAD(closing.liabilities)}` : fmtCAD(0)}
                 tone={closing.liabilities > 0 ? "negative" : undefined}
               />
@@ -418,7 +417,7 @@ export default function OverviewPage() {
           </div>
         </Card>
 
-        <Chapter title="What changed it" note={`${labelMonth(shape.from)} to ${monthName}`} />
+        <Chapter title="What changed the net worth" note={`${labelMonth(shape.from)} to ${monthName}`} />
         {/*
           * The roll-forward beside the months that make it up. The two income
           * and spending bars are twelve months of the three figures on the
@@ -434,8 +433,8 @@ export default function OverviewPage() {
         <div className="grid gap-4 lg:grid-cols-2">
           <Card className="flex h-full flex-col">
             <CardHeader
-              title="From where you started to where you are"
-              subtitle="What came in, what went out, and what everything else did"
+              title="Net worth roll forward"
+              subtitle={`Net worth 12 months ago plus what came in, minus what went out, plus growth, equals net worth as of ${monthName}`}
             />
             <div className="min-h-[380px] flex-1 px-3 pb-4">
               <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} height="100%" />
@@ -443,11 +442,11 @@ export default function OverviewPage() {
           </Card>
           <Card className="flex h-full flex-col">
             <CardHeader
-              title="A typical month"
+              title="Average monthly cash flow"
               subtitle={
                 before
-                  ? "These twelve months, against the twelve before"
-                  : "These twelve months"
+                  ? "Monthly averages compared to the previous 12 months"
+                  : "Monthly averages"
               }
             />
             <div className="flex flex-1 flex-col justify-around divide-y divide-line px-5 pb-2">
@@ -459,14 +458,14 @@ export default function OverviewPage() {
                 colour={accent("positive")}
               />
               <MonthRow
-                label="Spending"
+                label="Expenses"
                 now={spending}
                 before={spendingBefore}
                 good="down"
                 colour={accent("negative")}
               />
               <MonthRow
-                label="Saved"
+                label="Savings"
                 note={rateNow === null ? undefined : `${rateNow.toFixed(1)}% of income`}
                 now={saved}
                 before={savedBefore}
@@ -479,15 +478,15 @@ export default function OverviewPage() {
 
         {data.flow && data.flow.links.length > 0 && (
           <>
-            <Chapter title="Where the money went" note="every dollar that entered or left an account" />
+            <Chapter title="Where the money went" />
             <Card>
               <CardHeader
-                title="Sources and uses"
-                subtitle="Where it came from, which accounts it passed through, and what it became"
+                title="Money flows"
+                subtitle="Where money came from, which accounts it passed through, and what it became"
                 action={
                   <Link href="/year">
                     <Button variant="ghost" size="sm">
-                      By year <ArrowRight size={13} />
+                      View by year <ArrowRight size={13} />
                     </Button>
                   </Link>
                 }
@@ -537,48 +536,43 @@ export default function OverviewPage() {
             </div>
             <Progress value={fi.pct} max={100} tone="positive" className="mt-4" />
             <p className="mt-3 text-[0.6875rem] leading-relaxed text-ink-faint">
-              Drawing{" "}
-              <span className="font-medium text-ink-dim">{(fi.rate * 100).toFixed(1)}% a year</span>{" "}
-              from what you have would pay{" "}
-              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(fi.monthly)}</span> a
-              month, against{" "}
-              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(spending)}</span> spent
+              With monthly expenses at{" "}
+              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(spending)}</span> and a{" "}
+              <span className="font-medium tabular-nums text-ink-dim">{(fi.rate * 100).toFixed(1)}%</span> safe withdrawal rate generating{" "}
+              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(fi.monthly)}</span>
               {fi.shortfall > 0 ? (
                 <>
-                  {" "}
-                  — <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(fi.shortfall)}</span>{" "}
-                  short
+                  , you would need an extra{" "}
+                  <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(fi.shortfall)}</span> per month to be
+                  financially independent.
                 </>
               ) : (
-                " — covered"
+                ", you are financially independent."
               )}
-              .
             </p>
           </Card>
 
           <Card className="p-5">
-            <p className="text-xs font-medium text-ink-dim">Already paying for itself</p>
+            <p className="text-xs font-medium text-ink-dim">Passive income coverage</p>
             <p className="mt-1 text-2xl font-semibold tabular-nums">
               {covered === null ? "—" : `${covered.toFixed(1)}%`}
             </p>
             <p className="mt-0.5 text-[0.6875rem] text-ink-faint">
-              of what a month costs before anything is decided
+              of an average month of expenses
             </p>
             <Progress value={covered ?? 0} max={100} tone="positive" className="mt-4" />
             <p className="mt-3 text-[0.6875rem] leading-relaxed text-ink-faint">
               Dividends, interest and pension paid you{" "}
-              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(passive)}</span> a month.
-              The{" "}
+              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(passive)}</span> per month, against{" "}
+              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(spending)}</span> per month in{" "}
               <Link href="/expenses" className="text-ink-dim underline-offset-2 hover:underline">
-                bills that arrive on their own
-              </Link>{" "}
-              come to{" "}
-              <span className="font-medium tabular-nums text-ink-dim">{fmtCAD(data.floor.total)}</span>.
+                average expenses
+              </Link>.
             </p>
           </Card>
         </div>
 
-        <Chapter title="Worth a look" />
+        <Chapter title="Worth a look" note="anything out of the ordinary compared to the last 12 months" />
         <Card className="overflow-hidden">
           {watch.length > 0 ? (
             <div className="divide-y divide-line">
@@ -597,11 +591,11 @@ export default function OverviewPage() {
           )}
         </Card>
 
-        <Chapter title="The long view" note="the one chart here that reaches past these twelve months" />
+        <Chapter title="The long term" />
         <Card>
           <CardHeader
             title="Net worth over time"
-            subtitle={`Through ${labelMonth(longView[longView.length - 1]?.key ?? data.through)}`}
+            subtitle={`up to the end of ${labelMonth(longView[longView.length - 1]?.key ?? data.through)}`}
             action={
               <div className="flex items-center gap-2">
                 <Segmented<Range>
@@ -616,7 +610,7 @@ export default function OverviewPage() {
                 />
                 <Link href="/year">
                   <Button variant="ghost" size="sm">
-                    What it is made of <ArrowRight size={13} />
+                    Net worth composition <ArrowRight size={13} />
                   </Button>
                 </Link>
               </div>

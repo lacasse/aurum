@@ -1404,7 +1404,6 @@ export function Waterfall({
    * is the distortion this is meant to avoid rather than cause.
    */
   const floor = low >= 0 && raw < 0 ? 0 : raw;
-  const truncated = floor !== 0;
   /*
    * Headroom over the tallest column, inside the plot. The figures are drawn
    * with the columns, and the plot clips what it draws: at the data's own
@@ -1612,17 +1611,6 @@ export function Waterfall({
         </ComposedChart>
       </ResponsiveContainer>
       </div>
-      {truncated && (
-        /*
-         * Said plainly rather than drawn as a break in the axis. A zigzag is a
-         * convention people either know or misread, and the sentence costs one
-         * line.
-         */
-        <p className="px-2 pt-1 text-[0.625rem] text-ink-faint">
-          The scale starts at {format(floor)}, not zero, so the movements are
-          readable against a much larger balance.
-        </p>
-      )}
     </div>
   );
 }
