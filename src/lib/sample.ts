@@ -96,6 +96,16 @@ function walk(
   return out;
 }
 
+/** INVENTED: the demo's rent before and after its lease renewed. */
+const RENT = 2150;
+const RENT_RENEWED = 2600;
+/**
+ * How far back the renewal sits: the start of the overview's window. The
+ * demo's months end on the one in progress and the overview's on the last
+ * complete one, hence one more.
+ */
+const WINDOW_MONTHS = 12;
+
 export function generateSampleData(): FinanceData {
   const rng = mulberry32(1337);
   const months = lastMonthKeys(18);
@@ -540,7 +550,17 @@ export function generateSampleData(): FinanceData {
     const m = months[mi];
     const dim = daysInMonth(m);
 
-    add(m, 1, "expense", 2150, "Housing", "acc-checking", "Skyline Property Mgmt");
+    /*
+     * The lease renewed a year ago, at a higher rent.
+     *
+     * The overview's "Worth a look" list is empty on a record where nothing
+     * changed, and a steady demo would show only its reassuring empty state —
+     * never what the list is for. A rent rise at the start of the last twelve
+     * months is the most ordinary way a month gets dearer: it lifts a month's
+     * spending past the threshold against the year before, and it pushes
+     * Housing over its budget, so the expenses page tells the same story.
+     */
+    add(m, 1, "expense", mi >= n - 1 - WINDOW_MONTHS ? RENT_RENEWED : RENT, "Housing", "acc-checking", "Skyline Property Mgmt");
     add(m, 15, "income", 3850, "Salary", "acc-checking", "Northwind Labs");
     add(m, dim, "income", 3850, "Salary", "acc-checking", "Northwind Labs");
     add(m, 3, "expense", 45, "Subscriptions", "acc-credit", "Iron Temple Gym");
@@ -680,7 +700,8 @@ export function generateSampleData(): FinanceData {
     {
       id: "rec-demo-rent",
       type: "expense",
-      amount: 2150,
+      // The rent the rule will post next: the renewed one.
+      amount: RENT_RENEWED,
       category: "Housing",
       sourceAccountId: "acc-checking",
       payee: "Skyline Property Mgmt",

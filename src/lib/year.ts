@@ -1,13 +1,15 @@
 import {
   NON_SPENDABLE_INCOME,
   PASSIVE_INCOME_CATEGORIES,
+  accountValueAt,
   chainedReturns,
   isIncome,
 } from "./analytics";
 import type { ClassPoint, NetWorthPoint, PortfolioPoint } from "./analytics";
-import type { Account, AccountKind, Holding } from "./types";
+import { isLiability, type Account, type AccountKind, type Holding } from "./types";
 import { Transaction } from "./types";
 import { fromCents, roundMoney, toCents } from "./money";
+import { previousMonthKey } from "./format";
 import { PENSION_CATEGORY } from "./pension";
 import {
   DEBT_CATEGORY,
@@ -98,6 +100,22 @@ function lastMonthOf(year: string, months: string[]): string | undefined {
   return found;
 }
 
+/**
+ * Whether a row is income, spending, or neither, as a year counts it.
+ *
+ * One answer for every window this file sums — a calendar year, or the twelve
+ * months the overview reads — because the same money must not be spending on
+ * one page and a debt repayment on the next.
+ */
+export function countedAs(
+  t: Pick<Transaction, "type" | "category">,
+  spendGroup: (category: string) => SpendGroup = (c) => groupOf(c),
+): "income" | "expense" | null {
+  if (isIncome(t)) return "income";
+  if (t.type === "expense" && spendGroup(t.category) !== "excluded") return "expense";
+  return null;
+}
+
 export function yearRows(
   transactions: Transaction[],
   netWorth: readonly NetWorthPoint[],
@@ -132,11 +150,12 @@ export function yearRows(
     const amount = toCents(t.amount);
     const within = t.date.slice(5) <= dayOfYear;
     const early = toDate.get(key) ?? { income: 0, expenses: 0 };
-    if (isIncome(t)) {
+    const kind = countedAs(t, spendGroup);
+    if (kind === "income") {
       slot.income += amount;
       if (!NON_SPENDABLE_INCOME.has(t.category)) slot.spendable += amount;
       if (within) early.income += amount;
-    } else if (t.type === "expense" && spendGroup(t.category) !== "excluded") {
+    } else if (kind === "expense") {
       /*
        * Paying down a loan is not spending, and the page used to count it as
        * spending while the Expenses page did not. Money borrowed is already
@@ -369,6 +388,112 @@ export function yearShapes(
   });
 }
 
+/** The same arithmetic as a year's shape, over any run of whole months. */
+export interface PeriodShape {
+  /** First and last month counted, inclusive. */
+  from: string;
+  through: string;
+  months: number;
+  openingNetWorth: number;
+  netWorth: number;
+  income: number;
+  /** The part of income that arrived without work: dividends, interest, a pension paid. */
+  passive: number;
+  expenses: number;
+  saved: number;
+  revaluation: number;
+}
+
+/**
+ * A year's roll-forward, for a window that is not a calendar year.
+ *
+ * The overview reads the last twelve complete months, which rarely begin in
+ * January. The arithmetic is the year's exactly — opening net worth, what came
+ * in, what went out, and everything else that moved it — and it counts rows
+ * through `countedAs`, so a window that happens to be a calendar year gives
+ * that year's figures to the cent.
+ *
+ * The window is clipped to the record: it cannot open before there is a net
+ * worth to open on, since income counted against a balance nobody recorded
+ * would land in "everything else" as though a market had produced it. Null
+ * when nothing of the window is on record at all.
+ */
+export function periodShape(
+  transactions: Transaction[],
+  netWorth: readonly NetWorthPoint[],
+  from: string,
+  through: string,
+  spendGroup: (category: string) => SpendGroup = (c) => groupOf(c),
+): PeriodShape | null {
+  const byMonth = new Map(netWorth.map((p) => [p.key, p.net]));
+  const first = netWorth[0]?.key;
+  if (!first || !byMonth.has(through)) return null;
+
+  // Open on the close of the month before the window, or on the first month
+  // there is a close for.
+  let start = from;
+  if (!byMonth.has(previousMonthKey(start))) {
+    if (first >= through) return null;
+    start = first > from ? first : from;
+    while (!byMonth.has(previousMonthKey(start)) && start < through) {
+      const [y, m] = start.split("-").map(Number);
+      start = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+    }
+    if (!byMonth.has(previousMonthKey(start))) return null;
+  }
+
+  let income = 0;
+  let passive = 0;
+  let expenses = 0;
+  for (const t of transactions) {
+    const key = t.date.slice(0, 7);
+    if (key < start || key > through) continue;
+    const kind = countedAs(t, spendGroup);
+    if (kind === "income") {
+      income += toCents(t.amount);
+      if (PASSIVE_INCOME_CATEGORIES.has(t.category)) passive += toCents(t.amount);
+    } else if (kind === "expense") expenses += toCents(t.amount);
+  }
+
+  const openingNetWorth = byMonth.get(previousMonthKey(start)) ?? 0;
+  const closing = byMonth.get(through) ?? 0;
+  const saved = fromCents(income - expenses);
+  const [fy, fm] = start.split("-").map(Number);
+  const [ty, tm] = through.split("-").map(Number);
+  return {
+    from: start,
+    through,
+    months: (ty - fy) * 12 + (tm - fm) + 1,
+    openingNetWorth,
+    netWorth: closing,
+    income: fromCents(income),
+    passive: fromCents(passive),
+    expenses: fromCents(expenses),
+    saved,
+    revaluation: roundMoney(closing - openingNetWorth - saved),
+  };
+}
+
+/**
+ * What the spendable accounts held at a month's close.
+ *
+ * The same accounts the flow chart's middle bar is made of, netted the way a
+ * balance sheet nets them: a card is money owed against the cash beside it,
+ * not money you have. Read through `accountValueAt`, so a gap in an account's
+ * history is filled the way it is filled everywhere else.
+ */
+export function spendableCashAt(
+  accounts: readonly Account[],
+  month: string,
+): number {
+  return accounts
+    .filter((a) => CASH_KINDS.has(a.kind))
+    .reduce(
+      (sum, a) => sum + (isLiability(a.kind) ? -1 : 1) * accountValueAt(a, month),
+      0,
+    );
+}
+
 /** One step of the year's move from opening net worth to closing. */
 export interface WaterfallStep {
   label: string;
@@ -378,6 +503,13 @@ export interface WaterfallStep {
   base: number;
   top: number;
   kind: "total" | "up" | "down";
+  /**
+   * What the step is, for its colour: money earned, money spent, or what the
+   * markets and everything else did. Up and down say which way a step went;
+   * this says why, and the two are different questions — a market fall and a
+   * month's rent both go down.
+   */
+  role?: "balance" | "income" | "spending" | "market";
 }
 
 /**
@@ -389,19 +521,22 @@ export interface WaterfallStep {
  * point: any surprise in the chart is a surprise about the year, not about the
  * chart.
  */
-export function yearWaterfall(shape: YearShape): WaterfallStep[] {
+export function yearWaterfall(
+  shape: Pick<YearShape, "openingNetWorth" | "income" | "expenses" | "revaluation" | "netWorth">,
+): WaterfallStep[] {
   const steps: WaterfallStep[] = [];
   let running = shape.openingNetWorth;
 
   steps.push({
-    label: "Opened at",
+    label: "Opening",
     delta: 0,
     base: 0,
     top: shape.openingNetWorth,
     kind: "total",
+    role: "balance",
   });
 
-  const add = (label: string, delta: number) => {
+  const add = (label: string, delta: number, role: WaterfallStep["role"]) => {
     const from = running;
     running += delta;
     steps.push({
@@ -410,14 +545,22 @@ export function yearWaterfall(shape: YearShape): WaterfallStep[] {
       base: Math.min(from, running),
       top: Math.max(from, running),
       kind: delta >= 0 ? "up" : "down",
+      role,
     });
   };
 
-  add("Income", shape.income);
-  add("Spending", -shape.expenses);
-  add(shape.revaluation >= 0 ? "Growth" : "Decline", shape.revaluation);
+  add("Income", shape.income, "income");
+  add("Expenses", -shape.expenses, "spending");
+  add(shape.revaluation >= 0 ? "Growth" : "Decline", shape.revaluation, "market");
 
-  steps.push({ label: "Closed at", delta: 0, base: 0, top: shape.netWorth, kind: "total" });
+  steps.push({
+    label: "Closing",
+    delta: 0,
+    base: 0,
+    top: shape.netWorth,
+    kind: "total",
+    role: "balance",
+  });
   return steps;
 }
 
@@ -853,7 +996,7 @@ const OTHER_INCOME = "Other income";
  */
 const MIN_SOURCE_SHARE = 0.01;
 
-const SPENDING = "Spending";
+const SPENDING = "Expenses";
 /**
  * A purchase, which needs no node of its own.
  *
@@ -1040,9 +1183,16 @@ export interface YearFlowOptions {
   spendGroup?: (category: string) => SpendGroup;
 }
 
+/** A run of whole months, and what to call it where the chart needs a name. */
+export interface FlowPeriod {
+  from: string;
+  through: string;
+  label: string;
+}
+
 export function yearFlow(
   transactions: Transaction[],
-  year: string,
+  period: string | FlowPeriod,
   {
     accounts = [],
     holdings = [],
@@ -1053,7 +1203,19 @@ export function yearFlow(
   }: YearFlowOptions = {},
 ): YearFlow {
   const byId = new Map(accounts.map((a) => [a.id, a]));
-  const TRUNK = year;
+  /*
+   * A year is the window January to December and is named after itself, so
+   * the Year page is exactly what it was; the overview passes a window.
+   */
+  const { from, through, label } =
+    typeof period === "string"
+      ? { from: `${period}-01`, through: `${period}-12`, label: period }
+      : period;
+  const inPeriod = (date: string) => {
+    const key = date.slice(0, 7);
+    return key >= from && key <= through;
+  };
+  const TRUNK = label;
 
   /**
    * The account a row touched, or the year itself when it names none. Every
@@ -1100,7 +1262,7 @@ export function yearFlow(
     transactions
       .filter(
         (t) =>
-          t.date.slice(0, 4) === year &&
+          inPeriod(t.date) &&
           t.type === "expense" &&
           spendGroup(t.category) === "excluded",
       )
@@ -1116,7 +1278,7 @@ export function yearFlow(
   };
 
   for (const t of transactions) {
-    if (t.date.slice(0, 4) !== year) continue;
+    if (!inPeriod(t.date)) continue;
     const cents = toCents(t.amount);
     if (cents <= 0) continue;
     if (isIncome(t)) {
@@ -1253,7 +1415,7 @@ export function yearFlow(
   for (const h of holdings) {
     const inPension = byId.get(h.accountId)?.kind === "pension";
     for (const f of h.flows ?? []) {
-      if (f.date.slice(0, 4) !== year) continue;
+      if (!inPeriod(f.date)) continue;
       const cents = toCents(f.amount);
       if (cents <= 0) continue;
       const signed = f.kind === "buy" ? cents : f.kind === "sell" ? -cents : 0;

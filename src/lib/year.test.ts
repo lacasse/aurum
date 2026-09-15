@@ -9,6 +9,8 @@ import {
   yearFlow,
   unearnedShare,
   milestones,
+  periodShape,
+  spendableCashAt,
   yearRows,
   yearShapes,
   yearWaterfall,
@@ -216,7 +218,7 @@ describe("what was repaid is named, opposite what was borrowed", () => {
       d.links
         .filter((l) => d.nodes[l.target].name === name)
         .reduce((a, l) => a + l.value, 0);
-    assert.equal(into("Spending"), 20000, "the groceries, and not the repayment");
+    assert.equal(into("Expenses"), 20000, "the groceries, and not the repayment");
     assert.equal(into("Debt repaid"), 5000);
   });
 
@@ -383,7 +385,7 @@ describe("the year's move, as a waterfall", () => {
   test("spending points down and income points up", () => {
     const steps = yearWaterfall(shape);
     assert.equal(steps.find((s) => s.label === "Income")?.kind, "up");
-    assert.equal(steps.find((s) => s.label === "Spending")?.kind, "down");
+    assert.equal(steps.find((s) => s.label === "Expenses")?.kind, "down");
   });
 
   test("the two totals stand on the axis rather than floating", () => {
@@ -852,9 +854,9 @@ describe("what the money left an account for", () => {
       .reduce((a, l) => a + l.value, 0);
 
   test("spending ends at whether it could have been avoided", () => {
-    assert.equal(edge("Money in", "Spending"), 25000);
-    assert.equal(edge("Spending", "Necessity"), 20000);
-    assert.equal(edge("Spending", "Discretionary"), 5000);
+    assert.equal(edge("Money in", "Expenses"), 25000);
+    assert.equal(edge("Expenses", "Necessity"), 20000);
+    assert.equal(edge("Expenses", "Discretionary"), 5000);
     // The categories themselves are not drawn: two ends, not ten.
     assert.equal(f.nodes.some((n) => n.name === "Housing"), false);
     assert.equal(f.nodes.some((n) => n.name === "Travel"), false);
@@ -876,8 +878,8 @@ describe("what the money left an account for", () => {
     // Straight off the account: the Spending bar shows what was spent, and a
     // repayment is not that.
     assert.equal(e("Money in", "Debt repaid"), 7000);
-    assert.equal(e("Money in", "Spending"), 0);
-    assert.ok(!d.nodes.some((n) => n.name === "Spending"), "no spending this year");
+    assert.equal(e("Money in", "Expenses"), 0);
+    assert.ok(!d.nodes.some((n) => n.name === "Expenses"), "no spending this year");
     assert.equal(d.nodes.some((n) => n.name === "Debt Repayment"), false);
   });
 
@@ -890,7 +892,7 @@ describe("what the money left an account for", () => {
       o.links
         .filter((l) => o.nodes[l.source].name === from && o.nodes[l.target].name === to)
         .reduce((a, l) => a + l.value, 0);
-    assert.equal(e("Spending", "Necessity"), 25000);
+    assert.equal(e("Expenses", "Necessity"), 25000);
     assert.equal(o.nodes.some((n) => n.name === "Discretionary"), false);
   });
 
@@ -910,11 +912,11 @@ describe("what the money left an account for", () => {
     // A transfer is not spending and not yet a purchase; it is the money
     // moving to where the buying happens.
     assert.equal(edge("Money in", "Investments"), 15000);
-    assert.equal(edge("Spending", "Investments"), 0);
+    assert.equal(edge("Expenses", "Investments"), 0);
   });
 
   test("a group passes on exactly what it was given", () => {
-    for (const g of ["Spending", "Investing"]) assert.equal(into(g), outOf(g));
+    for (const g of ["Expenses", "Investing"]) assert.equal(into(g), outOf(g));
   });
 
   test("the account still balances across the extra column", () => {
@@ -1235,7 +1237,7 @@ describe("spending on a card is spending", () => {
     // The old shape charged the card's 12k to "From savings" and let the
     // salary that paid it fall out as cash left over — two equal errors that cancelled.
     assert.equal(f.nodes.some((n) => n.name === "From savings"), false);
-    assert.equal(into("Spending"), 20000);
+    assert.equal(into("Expenses"), 20000);
     assert.equal(into("Left in cash"), 30000);
   });
 
@@ -1250,7 +1252,7 @@ describe("spending on a card is spending", () => {
     // balance, not about what the year spent.
     const unpaid = yearFlow(rows.slice(0, 3), "2026", { accounts });
     const spend = (g: ReturnType<typeof yearFlow>) =>
-      g.links.filter((l) => g.nodes[l.target].name === "Spending").reduce((a, l) => a + l.value, 0);
+      g.links.filter((l) => g.nodes[l.target].name === "Expenses").reduce((a, l) => a + l.value, 0);
     assert.equal(spend(unpaid), spend(f));
   });
 });
@@ -1434,7 +1436,7 @@ describe("the flow, on shapes the sample data does not have", () => {
     ];
     const f = yearFlow(rows, "2026", { accounts });
     assert.equal(columnsOf(f), 4, "four columns, not five");
-    assert.equal(edge(f, "Investments", "Spending"), 0, "never through the Spending bar");
+    assert.equal(edge(f, "Investments", "Expenses"), 0, "never through the Spending bar");
     assert.ok(
       f.links.some((l) => f.nodes[l.source].name === "Investments" && f.nodes[l.target].name === "Discretionary"),
       "straight to what it was for",
@@ -1694,5 +1696,102 @@ describe("a band too thin to see is pooled, whatever kind of band it is", () => 
   test("one thin band on its own still says what it is", () => {
     const f = yearFlow([at(100000, "Salary"), at(36, "Refund"), spend], "2026", { accounts });
     assert.ok(sources(f).includes("Refunds"), "renaming it would save nothing");
+  });
+});
+
+describe("a window that is not a calendar year", () => {
+  // INVENTED: round figures across two years, with a repayment that a year
+  // does not count as spending.
+  const netWorth = [
+    nw("2025-06", 10000),
+    nw("2025-12", 20000),
+    nw("2026-03", 25000),
+    nw("2026-06", 40000),
+    nw("2026-12", 55000),
+  ];
+  const all = [
+    txn("2025-09-30", "income", 3000, "Salary"),
+    txn("2026-01-31", "income", 60000, "Salary"),
+    txn("2026-02-28", "expense", 20000, "Housing"),
+    txn("2026-04-30", "expense", 5000, "Debt Repayment"),
+    txn("2026-05-31", "income", 1000, "Dividends"),
+  ];
+  const filled = Array.from({ length: 19 }, (_, i) => {
+    const y = 2025 + Math.floor((5 + i) / 12);
+    const m = ((5 + i) % 12) + 1;
+    const key = `${y}-${String(m).padStart(2, "0")}`;
+    const known = netWorth.find((p) => p.key === key);
+    const prior = [...netWorth].reverse().find((p) => p.key <= key);
+    return known ?? nw(key, prior?.net ?? 0);
+  });
+
+  test("a calendar year read as a window gives that year's roll-forward to the cent", () => {
+    const rows = yearRows(all, filled, [], {}, "2027-02-01");
+    const [shape] = yearShapes(rows, []).filter((sh) => sh.year === "2026");
+    const period = periodShape(all, filled, "2026-01", "2026-12");
+    assert.ok(period);
+    assert.equal(period.income, shape.income);
+    assert.equal(period.expenses, shape.expenses);
+    assert.equal(period.openingNetWorth, shape.openingNetWorth);
+    assert.equal(period.netWorth, shape.netWorth);
+    assert.equal(period.revaluation, shape.revaluation);
+    assert.deepEqual(yearWaterfall(period), yearWaterfall(shape));
+  });
+
+  test("a repayment is not spending here either", () => {
+    const period = periodShape(all, filled, "2026-04", "2026-04");
+    assert.ok(period);
+    assert.equal(period.expenses, 0);
+  });
+
+  test("it opens on the close of the month before it, and says how long it ran", () => {
+    const period = periodShape(all, filled, "2026-04", "2026-06");
+    assert.ok(period);
+    assert.equal(period.openingNetWorth, 25000);
+    assert.equal(period.netWorth, 40000);
+    assert.equal(period.months, 3);
+    assert.equal(period.passive, 1000, "dividends are the passive part of income");
+  });
+
+  test("it cannot open before there is a net worth to open on", () => {
+    const period = periodShape(all, filled, "2024-01", "2026-12");
+    assert.ok(period);
+    assert.equal(period.from, "2025-07", "the first month with a close before it");
+    assert.equal(period.income, 64000, "income before the record is not counted");
+  });
+
+  test("with nothing on record there is no shape rather than a zero one", () => {
+    assert.equal(periodShape(all, [], "2026-01", "2026-12"), null);
+    assert.equal(periodShape(all, filled, "2030-01", "2030-12"), null);
+  });
+
+  test("the flow chart draws a year and the same year as a window identically", () => {
+    assert.deepEqual(
+      yearFlow(all, "2026"),
+      yearFlow(all, { from: "2026-01", through: "2026-12", label: "2026" }),
+    );
+  });
+
+  test("and a window across a new year counts both sides of it", () => {
+    const f = yearFlow(all, { from: "2025-07", through: "2026-06", label: "Twelve months" });
+    const into = f.links
+      .filter((l) => f.nodes[l.target].name === "Twelve months")
+      .reduce((a, l) => a + l.value, 0);
+    assert.equal(Math.round(into), 64000);
+  });
+});
+
+describe("spendableCashAt", () => {
+  test("a card is owed against the cash beside it, and a portfolio is not cash", () => {
+    const account = (id: string, kind: string, balance: number) =>
+      ({ id, name: id, kind, balance, history: [], currency: "CAD" }) as unknown as Parameters<
+        typeof spendableCashAt
+      >[0][number];
+    const accounts = [
+      account("chq", "checking", 5000),
+      account("card", "credit", 1200),
+      account("brokerage", "investment", 90000),
+    ];
+    assert.equal(spendableCashAt(accounts, "2026-06"), 3800);
   });
 });

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useFinance } from "./store";
 import type { AssetClass, Currency } from "./types";
+import type { SpendGroup } from "./expenses";
 
 const emptySubscribe = () => () => {};
 
@@ -64,6 +65,34 @@ export function useRemembered<T extends string>(
     }
   };
   return [value, remember];
+}
+
+/**
+ * Which categories count as necessities, as the owner has set them.
+ *
+ * Read rather than assumed: the Expenses page lets the split be reassigned,
+ * and a page working from the defaults would put the same spending in a
+ * different half from the page it came from. Two answers to one question is
+ * the fault, not the mild inaccuracy. Until the request answers, the defaults
+ * apply, which is what an empty override map means everywhere.
+ */
+export function useSpendGroups(): Record<string, SpendGroup> {
+  const [groups, setGroups] = useState<Record<string, SpendGroup>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/expense-settings", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((s: { groups?: Record<string, SpendGroup> }) => {
+        if (!cancelled) setGroups(s.groups ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return groups;
 }
 
 export function PageSkeleton() {

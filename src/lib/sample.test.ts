@@ -2,8 +2,10 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { generateSampleData, generateSampleSnapshots } from "./sample";
 import { allTrades, replayFlows } from "./flows";
-import { isIncome } from "./analytics";
-import { todayISO } from "./format";
+import { isIncome, type NetWorthPoint } from "./analytics";
+import { lastCompleteMonthKey, lastMonthKeys, todayISO } from "./format";
+import { periodShape } from "./year";
+import { perMonth, watchList } from "./story";
 
 /*
  * The sample exists to show the app working, so what these check is coverage:
@@ -144,5 +146,43 @@ describe("sample recurring rules", () => {
     for (const r of data.recurring) {
       assert.ok(r.nextDate > today, `${r.payee} is already due`);
     }
+  });
+});
+
+describe("sample overview", () => {
+  /*
+   * "Worth a look" is empty on a steady record, which is right for a real one
+   * and useless in a demo: someone seeing the app for the first time would
+   * never learn what the section is for. The sample's rent rises at the start
+   * of the overview's window so the list has something in it — read here
+   * through the same functions the page reads it through.
+   */
+  test("gives the overview's watch list something to show", () => {
+    const through = lastCompleteMonthKey();
+    const keys = [...new Set(data.transactions.map((t) => t.date.slice(0, 7)))].sort();
+    const points = keys.map(
+      (key) => ({ key, label: key, assets: 0, liabilities: 0, portfolio: 0, pension: 0, net: 0 }) as NetWorthPoint,
+    );
+    const from = lastMonthKeys(12, through)[0];
+    const priorThrough = lastMonthKeys(13, through)[0];
+    const now = periodShape(data.transactions, points, from, through);
+    const before = periodShape(data.transactions, points, lastMonthKeys(12, priorThrough)[0], priorThrough);
+    assert.ok(now && before, "both windows have months on record");
+    const items = watchList({
+      runway: 12,
+      spending: perMonth(now.expenses, now.months),
+      spendingBefore: perMonth(before.expenses, before.months),
+      income: perMonth(now.income, now.months),
+      incomeBefore: perMonth(before.income, before.months),
+      saved: now.saved,
+      debtOpening: 0,
+      debtClosing: 0,
+      snapshotGaps: 0,
+    });
+    assert.ok(
+      items.some((i) => i.key === "spending"),
+      `expected spending to be flagged, got ${items.map((i) => i.key).join(", ") || "nothing"}`,
+    );
+    assert.equal(items.some((i) => i.key === "overspent"), false, "the demo still saves");
   });
 });

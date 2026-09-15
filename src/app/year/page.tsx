@@ -31,9 +31,8 @@ import {
 } from "@/components/charts";
 import { accent as accentFor } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
-import { PageSkeleton, useReady } from "@/lib/hooks";
+import { PageSkeleton, useReady, useRemembered, useSpendGroups } from "@/lib/hooks";
 import {
-  accountValueAt,
   allTimeSeries,
   classShares,
   firstFlowMonth,
@@ -48,20 +47,26 @@ import {
   contributionsVsValue,
   incomeTypeAmounts,
   incomeTypeShares,
+  spendableCashAt,
   yearFlow,
   yearRows,
   yearShapes,
   yearWaterfall,
+  periodShape,
 } from "@/lib/year";
-import { groupOf, type SpendGroup } from "@/lib/expenses";
-import { isLiability, type Account } from "@/lib/types";
+import { groupOf } from "@/lib/expenses";
+import { yearToDate } from "@/lib/spans";
 import {
   REGISTERED_PLANS,
   contributionRoom,
   type ContributionLimits,
   type RegisteredPlan,
 } from "@/lib/contributions";
-import { fmtCAD, fmtCompact, fmtPct, fmtSignedCAD } from "@/lib/format";
+import { fmtCAD, fmtCompact, fmtPct, fmtSignedCAD, labelMonth } from "@/lib/format";
+
+/** How much of the monthly composition to draw. */
+type Range = "ytd" | "12" | "60" | "all";
+const RANGES: Range[] = ["ytd", "12", "60", "all"];
 
 /** A colour per plan, so the same gauge is the same colour every time. */
 const PLAN_TONE = {
@@ -78,14 +83,6 @@ const PLAN_TONE = {
  * the question the spreadsheet's Year sheet was built to answer and the one
  * the dashboard, always looking at the last twelve months, cannot.
  */
-/** The kinds the flow chart's spendable bar is made of. See CASH in year.ts. */
-const CASH_ACCOUNT_KINDS = new Set<Account["kind"]>([
-  "checking",
-  "savings",
-  "cash",
-  "credit",
-]);
-
 export default function YearPage() {
   const ready = useReady();
   const accounts = useFinance((s) => s.accounts);
@@ -95,28 +92,8 @@ export default function YearPage() {
   const [year, setYear] = useState<string | null>(null);
   const [limits, setLimits] = useState<ContributionLimits>({});
   const [roomOpen, setRoomOpen] = useState(false);
-  /*
-   * Which categories count as necessities, as the owner has set them.
-   *
-   * Read rather than assumed: the Expenses page lets the split be reassigned,
-   * and a year page working from the defaults would put the same spending in a
-   * different half from the page it came from. Two answers to one question is
-   * the fault, not the mild inaccuracy.
-   */
-  const [spendGroups, setSpendGroups] = useState<Record<string, SpendGroup>>({});
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/expense-settings", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((s: { groups?: Record<string, SpendGroup> }) => {
-        if (!cancelled) setSpendGroups(s.groups ?? {});
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const spendGroups = useSpendGroups();
+  const [mixRange, setMixRange] = useRemembered<Range>("aurum.span.composition", "all", RANGES);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,11 +154,32 @@ export default function YearPage() {
       : [];
     return {
       rows,
+      classes,
       shapes: yearShapes(rows, classes),
       /* The last month the record reaches, for closing a year still running. */
+      netWorth,
       lastMonth: netWorth[netWorth.length - 1]?.key ?? null,
     };
   }, [accounts, holdings, transactions, snapshots, usdCadRate, spendGroups]);
+
+  /*
+   * The balance sheet month by month, cut to the range asked for. A level,
+   * so the year to date opens on last December.
+   */
+  const monthlyMix = useMemo(() => {
+    const bands =
+      mixRange === "all"
+        ? data.classes
+        : mixRange === "ytd"
+          ? yearToDate(data.classes, (r) => r.key, { withBase: true })
+          : data.classes.slice(-Number(mixRange));
+    return {
+      bands,
+      names: BAND_ORDER.filter((c) => bands.some((p) => p[c] > 0)),
+      shares: classShares(bands),
+      last: bands[bands.length - 1],
+    };
+  }, [data.classes, mixRange]);
 
   if (!ready) return <PageSkeleton />;
 
@@ -243,21 +241,7 @@ export default function YearPage() {
   const typeLast = typeRow
     ? { ...incomeTypeAmounts(transactions, selected.year), shares: typeRow }
     : null;
-  /*
-   * What the spendable accounts held at either end of the year.
-   *
-   * The same accounts the flow chart's middle bar is made of, netted the way a
-   * balance sheet nets them: a card is money owed against the cash beside it,
-   * not money you have. Read through `accountValueAt` so a gap in an account's
-   * history is filled the way it is filled everywhere else.
-   */
-  const cashAt = (month: string) =>
-    accounts
-      .filter((a) => CASH_ACCOUNT_KINDS.has(a.kind))
-      .reduce(
-        (sum, a) => sum + (isLiability(a.kind) ? -1 : 1) * accountValueAt(a, month),
-        0,
-      );
+  const cashAt = (month: string) => spendableCashAt(accounts, month);
   /*
    * A year still running closes on the last month on record, not on a December
    * that has not happened.
@@ -279,36 +263,20 @@ export default function YearPage() {
    * asset had produced it.
    */
   const passiveShare = typeRow ? Number(typeRow.Passive) : null;
-  const allBalanceBars = data.shapes.map((sh) => ({
-    label: sh.year,
-    Cash: sh.cash,
-    Bonds: sh.bonds,
-    Stocks: sh.stocks,
-    Crypto: sh.crypto,
-    Pension: sh.pension,
-  }));
   /*
-   * The record starts where there was something to own.
-   *
-   * Transactions can begin years before the first holding or balance, and a
-   * year with nothing in it normalises to nothing — a flat empty band, then a
-   * cliff into the first real mix. That opening is not a composition that
-   * changed; it is a composition that did not exist yet, and drawing it as
-   * zero percent of everything invites the reader to see a collapse where the
-   * record simply had not started. Trailing years are kept: a year that ends
-   * owning nothing is a fact about that year.
+   * Each month of the selected year, split the way the roll-forward splits the
+   * whole of it: what was saved, and what everything else did to net worth.
+   * The roll-forward says how much; this says when.
    */
-  const owned = (b: (typeof allBalanceBars)[number]) =>
-    b.Cash + b.Bonds + b.Stocks + b.Crypto + b.Pension > 0;
-  const opening = allBalanceBars.findIndex(owned);
-  const balanceBars = opening < 0 ? [] : allBalanceBars.slice(opening);
-  /*
-   * Only the bands the record actually holds somewhere in it. A colour in the
-   * chart with no key beside it is a colour you cannot name, and a class never
-   * owned is not a nought worth drawing.
-   */
-  const mixBands = BAND_ORDER.filter((c) => balanceBars.some((p) => p[c] > 0));
-  const balanceMix = classShares(balanceBars);
+  const monthlyMoves = [] as { label: string; saved: number; growth: number }[];
+  for (let m = 1; m <= 12; m++) {
+    const key = `${selected.year}-${String(m).padStart(2, "0")}`;
+    if (key > closingMonth) break;
+    const month = periodShape(transactions, data.netWorth, key, key, (c) => groupOf(c, spendGroups));
+    if (month && month.from === key) {
+      monthlyMoves.push({ label: labelMonth(key), saved: month.saved, growth: month.revaluation });
+    }
+  }
 
   return (
     <Shell
@@ -551,14 +519,14 @@ export default function YearPage() {
           )}
         </div>
 
-        <SectionHeading title="Net worth" hint="What the year built, and what it is made of" />
+        <SectionHeading title="Net worth" hint="What the year built, when, and what it is made of" />
         {/*
-          * A third of the row for the roll-forward, two thirds for the mix.
+          * A third of the row for the roll-forward, two thirds for its months.
           *
           * Five columns given half a page were slabs — a waterfall is five
           * numbers and the shape they make, and at that width the shape was
-          * lost behind the bars drawing it. The composition beside it is a
-          * line over years and reads better the wider it gets, so the space
+          * lost behind the bars drawing it. The months beside it are twelve
+          * pairs of bars and read better the wider they get, so the space
           * one chart does not want is the space the other one does.
           *
           * Only where a third is wide enough to label, though. Below that the
@@ -583,119 +551,113 @@ export default function YearPage() {
             </Card>
           )}
 
-          {/*
-            * The balance sheet across years: what the money is, not what it did.
-            *
-            * The same chart as net worth composition on the dashboard, over
-            * years rather than months, because it is the same question asked
-            * of a longer window — and one chart read twice is cheaper than two
-            * charts learned separately. Same bands, same colours, same order,
-            * from the same three shared definitions.
-            */}
-          {balanceBars.length > 1 && (
+          {monthlyMoves.length > 1 && (
             <Card className="flex h-full flex-col xl:col-span-2">
               <CardHeader
-                title="Asset allocation at year end"
-                subtitle="Share of everything you own, at the close of each year"
+                title="Net worth change by month"
+                subtitle={`What was saved and what growth added, each month of ${selected.year}`}
               />
-              {/*
-                * Shares, not dollars. In dollars this was the net worth line
-                * again with lines inside it: the total grew several times over,
-                * so every band swept upward together and the mix — the only
-                * thing this chart is for — was a few pixels along the bottom.
-                *
-                * Drawn as an area between year ends, which is a real cost and
-                * a deliberate one. There is no June in a year already closed,
-                * so the slope between two points is not a record of anything;
-                * it says only that the mix went from one to the other. Bars
-                * were honest about that and made the drift between them
-                * something to work out rather than see, and the drift is the
-                * subject. The axis labels are year ends, so what is measured
-                * stays legible.
-                *
-                * A band worth very little is still only a few pixels tall, and
-                * the figures underneath are what answer for it.
-                */}
-              <div className="min-h-[280px] flex-1 px-3 pb-2">
-                <SeriesChart
-                  data={balanceMix as unknown as Record<string, unknown>[]}
+              <div className="min-h-[300px] flex-1 px-3 pb-4">
+                <GroupedBars
+                  data={monthlyMoves as unknown as Record<string, unknown>[]}
                   xKey="label"
-                  stacked
-                  fadeAtZero
-                  series={mixBands.map((name) => ({
-                    key: name,
-                    name,
-                    color: CLASS_COLORS[name],
-                  }))}
+                  bars={[
+                    { key: "saved", name: "Saved", color: accentFor("positive") },
+                    { key: "growth", name: "Growth", color: accentFor("market") },
+                  ]}
                   height="100%"
-                  yDomain={[0, 100]}
-                  yFmt={(n: number) => `${Math.round(n)}%`}
+                  yFmt={fmtCompact}
                 />
-              </div>
-              {shape && (
-                <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
-                  {/*
-                    * The bands the chart drew, not the ones held now — a colour
-                    * in the chart with no key beside it is a colour you cannot
-                    * name. One held in an earlier year and since sold reads as
-                    * zero, which is the answer rather than an omission.
-                    *
-                    * The figures are the selected year's, and they are what
-                    * answer for a band too thin to see: the chart gives up the
-                    * dollars to show the mix, and this is where they come back.
-                    */}
-                  {mixBands.map((c) => {
-                    const held = {
-                      Cash: shape.cash,
-                      Bonds: shape.bonds,
-                      Stocks: shape.stocks,
-                      Crypto: shape.crypto,
-                      Pension: shape.pension,
-                    }[c];
-                    return (
-                      <div key={c} className="flex items-baseline gap-2">
-                        <span
-                          className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
-                          style={{ background: CLASS_COLORS[c] }}
-                        />
-                        <span className="text-[0.6875rem] text-ink-faint">{c}</span>
-                        <span className="text-sm font-semibold tabular-nums">
-                          {fmtCompact(held)}
-                        </span>
-                        <span className="text-[0.6875rem] tabular-nums text-ink-faint">
-                          {shape.assets > 0
-                            ? `${Math.round((Math.max(0, held) / shape.assets) * 100)}%`
-                            : "—"}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-px border-t border-line bg-line sm:grid-cols-4">
-                {shape && [
-                  { label: "Assets", value: shape.assets },
-                  { label: "Owed", value: -shape.liabilities },
-                  { label: "Net worth", value: shape.netWorth },
-                  {
-                    label: "Cash share",
-                    value: null,
-                    text: shape.assets > 0 ? `${Math.round((shape.cash / shape.assets) * 100)}%` : "—",
-                  },
-                ].map((c) => (
-                  <div key={c.label} className="bg-surface px-4 py-2.5">
-                    <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
-                      {c.label}
-                    </p>
-                    <p className="mt-0.5 text-sm font-semibold tabular-nums">
-                      {c.text ?? fmtCAD(c.value ?? 0)}
-                    </p>
-                  </div>
-                ))}
               </div>
             </Card>
           )}
         </div>
+
+        {/*
+          * What everything owned is made of, month by month.
+          *
+          * Moved here from the old dashboard, which read the last twelve
+          * months and had no business drawing a record's whole shape. The
+          * year ends above say where the mix landed; this says how it got
+          * there — a band that swells over one summer and one that creeps up
+          * across years look the same at a year end and nothing alike here.
+          */}
+        {monthlyMix.bands.length > 1 && (
+          <Card>
+            <CardHeader
+              title="Net worth composition"
+              subtitle={`Share of everything you own, month by month · through ${labelMonth(monthlyMix.last.key)}`}
+              action={
+                <Segmented<Range>
+                  options={[
+                    { value: "ytd", label: "YTD" },
+                    { value: "12", label: "1Y" },
+                    { value: "60", label: "5Y" },
+                    { value: "all", label: "All" },
+                  ]}
+                  value={mixRange}
+                  onChange={setMixRange}
+                />
+              }
+            />
+            {/*
+              * Shares, not dollars. In dollars this is the net worth line again
+              * with lines inside it, and the mix — the only thing the chart is
+              * for — is a few pixels along the bottom. A band worth very little
+              * stays a few pixels tall, and the figures underneath answer for it.
+              */}
+            <div className="px-3 pb-2">
+              <SeriesChart
+                data={monthlyMix.shares as unknown as Record<string, unknown>[]}
+                xKey="label"
+                stacked
+                fadeAtZero
+                series={monthlyMix.names.map((name) => ({
+                  key: name,
+                  name,
+                  color: CLASS_COLORS[name],
+                }))}
+                height={280}
+                yDomain={[0, 100]}
+                yFmt={(n: number) => `${Math.round(n)}%`}
+              />
+            </div>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
+              {monthlyMix.names.map((c) => {
+                const owned = monthlyMix.names.reduce(
+                  (sum, k) => sum + Math.max(0, monthlyMix.last[k]),
+                  0,
+                );
+                return (
+                  <div key={c} className="flex items-baseline gap-2">
+                    <span
+                      className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
+                      style={{ background: CLASS_COLORS[c] }}
+                    />
+                    <span className="text-[0.6875rem] text-ink-faint">{c}</span>
+                    <span className="text-sm font-semibold tabular-nums">
+                      {fmtCompact(monthlyMix.last[c])}
+                    </span>
+                    <span className="text-[0.6875rem] tabular-nums text-ink-faint">
+                      {owned > 0
+                        ? `${Math.round((monthlyMix.last[c] / owned) * 100)}%`
+                        : "—"}
+                    </span>
+                  </div>
+                );
+              })}
+              {monthlyMix.last.liabilities > 0 && (
+                <div className="flex items-baseline gap-2">
+                  <span className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full border border-negative" />
+                  <span className="text-[0.6875rem] text-ink-faint">Debt</span>
+                  <span className="text-sm font-semibold tabular-nums text-negative">
+                    −{fmtCompact(monthlyMix.last.liabilities)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/*
@@ -777,7 +739,7 @@ export default function YearPage() {
             </div>
             {room.some((r) => r.over) && (
               <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] text-negative">
-                An over-contribution is charged 1% a month on the excess until it is
+                An over-contribution is charged 1% per month on the excess until it is
                 withdrawn. Check the figure against your notice of assessment before
                 acting on it.
               </p>
