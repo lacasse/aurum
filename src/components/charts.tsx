@@ -1703,13 +1703,6 @@ export function YearSankey({
           nodePadding={26}
           nodeWidth={12}
           /*
-           * A bar stands where it is reached. The layout's own default drags
-           * anything with nothing leaving it to the far edge, which is the
-           * tidy right-hand side paid for by bands that cross the whole chart
-           * — see the column arithmetic in flow-layout.
-           */
-          align="left"
-          /*
            * Keep each column in the order the data gives it. The relaxation
            * still decides how far apart the nodes sit; this only stops it
            * reordering them, which is what pulled what was kept up among the

@@ -18,16 +18,19 @@ export interface FlowGraph {
 }
 
 /**
- * The column each node is drawn in: the longest path from a source.
+ * The column each node is drawn in.
  *
- * A node with nothing leaving it stands where it is reached, not at the far
- * edge. Pushing every ending to the last column lines the right-hand side up
- * neatly and costs far more than it looks: the cash left in an account at the
- * end of the window is reached from the account bar in one hop, and dragging
- * it four columns right turns a short band into one that has to cross the
- * whole chart. On a real year that single rule was the difference between one
- * unavoidable crossing and eight, and four bands drawn the width of the page
- * rather than the width of a column. A ragged right edge is the cheaper price.
+ * The longest path from a source, and then one more rule: a node with nothing
+ * leaving it is drawn in the far column however short its path was, so the
+ * endings line up down the right-hand edge and what looks like the end of the
+ * chart is the end of the chart.
+ *
+ * That rule is what makes the ordering below matter. It turns a one-hop band —
+ * the cash left in an account, a debt paid off — into one that has to cross
+ * every column in between, and such a band can only be kept out of the way by
+ * the order the bars sit in. Reserving it a slot in each column it crosses is
+ * what gives it somewhere to be; finding the arrangement where it crosses
+ * nothing wider than a hairline is what the search is for.
  */
 export function columnsOf({ nodes, links }: FlowGraph): number[] {
   const at = nodes.map(() => 0);
@@ -41,6 +44,11 @@ export function columnsOf({ nodes, links }: FlowGraph): number[] {
     }
     if (!moved) break;
   }
+  const end = Math.max(0, ...at);
+  const leaves = new Set(links.map((l) => l.source));
+  nodes.forEach((_, i) => {
+    if (!leaves.has(i)) at[i] = end;
+  });
   return at;
 }
 
@@ -145,6 +153,7 @@ function weighedCrossings(graph: FlowGraph, order?: number[]): number {
  */
 export function seatColumns(graph: FlowGraph, passes = 8): number[] {
   const at = columnsOf(graph);
+  const drawn = graph.nodes;
   const after = new Map<number, number[]>();
   const before = new Map<number, number[]>();
   for (const l of graph.links) {
@@ -186,6 +195,19 @@ export function seatColumns(graph: FlowGraph, passes = 8): number[] {
   const better = (a: [number, number], b: [number, number]) =>
     a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
 
+  /*
+   * When to stop looking.
+   *
+   * Perfect is not the target — legible is. Once nothing crosses but bands too
+   * thin to see, more searching moves bars around for a picture nobody can
+   * tell apart, and the page waits for it: a second and a half on a year with
+   * everything in it, against a few milliseconds to reach this point. A pair
+   * of bands is invisible together at about a hundred-thousandth of the chart
+   * squared, which is the same judgement the slots make about a hairline.
+   */
+  const drawnTotal = graph.links.reduce((a, l) => a + Math.abs(l.value ?? 1), 0);
+  const goodEnough = drawnTotal * drawnTotal * 1e-5;
+
   const start = graph.nodes.map((_, i) => i);
   let best = group(start, at);
   let fewest = cost(best.flat());
@@ -217,7 +239,7 @@ export function seatColumns(graph: FlowGraph, passes = 8): number[] {
   ];
   for (const from of starts) {
     let cols = from;
-    for (let pass = 0; pass < passes && fewest[0] > 0; pass++) {
+    for (let pass = 0; pass < passes && fewest[0] > goodEnough; pass++) {
       cols = sweep(cols, before, true);
       cols = sweep(cols, after, false);
       const n = cost(cols.flat());
@@ -243,7 +265,7 @@ export function seatColumns(graph: FlowGraph, passes = 8): number[] {
     const out = cols.map((c) => [...c]);
     let at = cost(out.flat());
     let moved = true;
-    for (let round = 0; moved && round < passes; round++) {
+    for (let round = 0; moved && round < passes && at[0] > goodEnough; round++) {
       moved = false;
       for (const col of out) {
         for (let i = 0; i + 1 < col.length; i++) {
@@ -284,13 +306,25 @@ export function seatColumns(graph: FlowGraph, passes = 8): number[] {
   const settled = settle(best);
   best = settled[0];
   fewest = better(settled[1], fewest) ? settled[1] : fewest;
-  for (let shake = 0; shake < passes * 4 && fewest[0] > 0; shake++) {
+
+  /*
+   * The shake moves any two bars in a column, not just neighbours, because
+   * the arrangement that clears a long band usually needs it moved several
+   * places at once — the closing balance has to travel from the middle of a
+   * column to the foot of it before anything improves. Enough shakes to find
+   * that on a year's chart, and few enough that the page does not wait: this
+   * runs on tens of bars, and the cost of one arrangement is counted in
+   * microseconds.
+   */
+  const shakes = Math.min(240, 8 * drawn.length);
+  for (let shake = 0; shake < shakes && fewest[0] > goodEnough; shake++) {
     const trial = best.map((c) => [...c]);
     for (let k = 0; k <= shake % 3; k++) {
       const col = trial[Math.floor(random() * trial.length)];
       if (!col || col.length < 2) continue;
-      const i = Math.floor(random() * (col.length - 1));
-      [col[i], col[i + 1]] = [col[i + 1], col[i]];
+      const i = Math.floor(random() * col.length);
+      const j = Math.floor(random() * col.length);
+      [col[i], col[j]] = [col[j], col[i]];
     }
     const [order, at2] = settle(trial);
     if (better(at2, fewest)) {

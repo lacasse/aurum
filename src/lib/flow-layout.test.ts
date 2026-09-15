@@ -17,14 +17,14 @@ describe("which column a node stands in", () => {
     assert.deepEqual(at, [0, 1, 2]);
   });
 
-  test("a node with nothing leaving it stands where it is reached", () => {
+  test("a node with nothing leaving it is drawn at the far edge", () => {
     /*
-     * Pushing every ending to the far column lines the right edge up and makes
-     * a one-hop band cross the whole chart to get there. The band is what the
-     * reader follows; the edge is only tidy.
+     * The endings line up, so what looks like the end of the chart is the end
+     * of it. The band that then has to cross the columns between is given a
+     * slot in each of them, and the ordering keeps it clear of anything wide.
      */
     const at = columnsOf(graph(5, [[0, 1], [1, 2], [2, 3], [1, 4]]));
-    assert.equal(at[4], 2, "reached from the second column, drawn in the third");
+    assert.equal(at[4], 3, "one hop from the second column, drawn at the end");
     assert.equal(at[3], 3);
   });
 });
