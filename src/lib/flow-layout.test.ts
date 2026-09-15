@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { columnsOf, crossingsIn, seatColumns } from "./flow-layout";
+import { columnsOf, crossingsIn, layoutFlow, seatColumns } from "./flow-layout";
 
 /* ALL-FIXTURES-INVENTED */
 
@@ -104,5 +104,110 @@ describe("the shapes that kept coming back", () => {
   test("a band that skips the column between its ends", () => {
     const g = graph(5, [[0, 1], [1, 2], [2, 3], [1, 4]]);
     assert.equal(seated(g), 0);
+  });
+});
+
+/*
+ * Slots: the invented nodes that carry a band through a column it would
+ * otherwise be drawn straight across.
+ */
+describe("routing a band through the columns it crosses", () => {
+  const weighted = (
+    nodes: number,
+    edges: [number, number, number][],
+  ) => ({
+    nodes: Array.from({ length: nodes }, (_, i) => ({ name: `n${i}` })),
+    links: edges.map(([source, target, value]) => ({ source, target, value })),
+  });
+  const spans = (g: { nodes: unknown[]; links: { source: number; target: number }[] }) => {
+    const at = columnsOf(g);
+    return [...new Set(g.links.map((l) => at[l.target] - at[l.source]))].sort();
+  };
+
+  test("a band that skips one column gets a slot in it", () => {
+    // 0 → 1 → 2 → 3, and 1 → 3 straight over 2.
+    const g = weighted(4, [[0, 1, 100], [1, 2, 60], [2, 3, 60], [1, 3, 40]]);
+    const out = layoutFlow(g.nodes, g.links);
+    assert.equal(out.ghosts.size, 1);
+    assert.deepEqual(spans(out), [1], "nothing is drawn across a column any more");
+  });
+
+  test("a band that skips two columns gets a slot in each of them", () => {
+    /*
+     * One slot was enough while the chart had a single middle column. A record
+     * with named accounts, a pension and holdings sold makes longer bands than
+     * that, and every column past the first went back to being drawn over.
+     */
+    const g = weighted(5, [
+      [0, 1, 100], [1, 2, 50], [2, 3, 50], [3, 4, 50], [1, 4, 50],
+    ]);
+    const out = layoutFlow(g.nodes, g.links);
+    assert.equal(out.ghosts.size, 2, "one for each column crossed");
+    assert.deepEqual(spans(out), [1]);
+  });
+
+  test("the slots carry the colour and name of where the band ends", () => {
+    const g = weighted(5, [
+      [0, 1, 100], [1, 2, 50], [2, 3, 50], [3, 4, 50], [1, 4, 50],
+    ]);
+    const out = layoutFlow(g.nodes, g.links);
+    for (const [slot, end] of out.carries) {
+      assert.equal(out.nodes[slot].name, out.nodes[end].name);
+      assert.ok(out.ghosts.has(slot));
+    }
+  });
+
+  test("a hairline passes behind rather than parting a column", () => {
+    /*
+     * A slot costs the column the width of the band. Below a five-hundredth of
+     * the chart there is no band to see, so the column stays closed up.
+     */
+    const g = weighted(4, [[0, 1, 100000], [1, 2, 99999], [2, 3, 99999], [1, 3, 1]]);
+    const out = layoutFlow(g.nodes, g.links);
+    assert.equal(out.ghosts.size, 0);
+  });
+
+  test("every band still carries its own value, and none is lost", () => {
+    const g = weighted(5, [
+      [0, 1, 100], [1, 2, 50], [2, 3, 50], [3, 4, 50], [1, 4, 50],
+    ]);
+    const out = layoutFlow(g.nodes, g.links);
+    const into = (n: number) =>
+      out.links.filter((l) => l.target === n).reduce((a, l) => a + l.value, 0);
+    const end = out.nodes.findIndex((n, i) => n.name === "n4" && !out.ghosts.has(i));
+    // The band routed through the slots, and the one that arrives the short way.
+    assert.equal(into(end), 100);
+    for (const slot of out.ghosts) assert.equal(into(slot), 50, "a slot carries one band");
+  });
+});
+
+describe("which crossings matter", () => {
+  test("two wide bands are untangled ahead of four hairlines", () => {
+    /*
+     * Counted as pairs, the arrangement that tidies away the hairlines wins.
+     * It is the wrong answer: nobody sees a hairline cross, and everybody sees
+     * the two widest bands on the chart cross each other.
+     */
+    const g = {
+      nodes: Array.from({ length: 8 }, (_, i) => ({ name: `n${i}` })),
+      links: [
+        { source: 0, target: 5, value: 500 },
+        { source: 1, target: 4, value: 500 },
+        { source: 2, target: 6, value: 1 },
+        { source: 2, target: 7, value: 1 },
+        { source: 3, target: 6, value: 1 },
+        { source: 3, target: 7, value: 1 },
+      ],
+    };
+    const order = seatColumns(g);
+    const at = columnsOf(g);
+    const seat = new Map(order.map((n, k) => [n, k]));
+    const rank = (n: number) => seat.get(n)!;
+    assert.equal(at[0], 0);
+    // The two wide bands end in the same order they start.
+    assert.ok(
+      rank(0) < rank(1) === rank(5) < rank(4),
+      "the wide pair does not cross",
+    );
   });
 });
