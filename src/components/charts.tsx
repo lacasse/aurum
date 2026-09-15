@@ -30,7 +30,7 @@ import { Badge, cn } from "./ui";
 import { fmtPct, fmtSignedCAD } from "@/lib/format";
 import { accent, spectrumAt, type AccentName } from "@/lib/palette";
 import type { NetWorthClass } from "@/lib/analytics";
-import { seatColumns } from "@/lib/flow-layout";
+import { columnsOf, layoutFlow } from "@/lib/flow-layout";
 
 export { spectrumAt } from "@/lib/palette";
 
@@ -1656,155 +1656,14 @@ export function YearSankey({
   if (nodes.length === 0 || links.length === 0) return null;
 
   /*
-   * Depth decides both the colour and which side the label sits on, because
-   * the chart now has a middle rather than a trunk. Colouring by "is anything
-   * pointing at this" worked while there was exactly one column between the
-   * two ends; with accounts in the middle, an account that received income and
-   * an account that paid a bill are the same kind of thing and have to read
-   * that way.
+   * Where every bar stands and in what order, and the slots that carry a band
+   * through a column it would otherwise be drawn across. All of it is
+   * arithmetic over the nodes and the links, so it lives in `flow-layout`
+   * where it is tested without a browser — this only draws the answer.
    */
-  const columns = (
-    ns: { name: string }[],
-    ls: { source: number; target: number }[],
-  ) => {
-    const d = ns.map(() => 0);
-    for (let pass = 0; pass < ns.length; pass++) {
-      let moved = false;
-      for (const l of ls) {
-        if (d[l.target] < d[l.source] + 1) {
-          d[l.target] = d[l.source] + 1;
-          moved = true;
-        }
-      }
-      if (!moved) break;
-    }
-    /*
-     * The column the layout will actually use. Recharts pushes a node with
-     * nothing leaving it to the far edge however short its path from a source
-     * was, so counting hops alone puts what was kept in the middle — which is
-     * neither where it is drawn nor where the ribbon reaching it has to pass.
-     */
-    const end = Math.max(...d);
-    const leaves = new Set(ls.map((l) => l.source));
-    ns.forEach((_, i) => {
-      if (!leaves.has(i)) d[i] = end;
-    });
-    return d;
-  };
+  const { nodes: drawNodes, links: drawLinks, ghosts, carries } = layoutFlow(nodes, links);
 
-  /*
-   * A ribbon that skips a column gets a slot reserved in it.
-   *
-   * What was kept goes from the middle to the last column in one hop, so it
-   * has to cross whatever stands in between. Ordering cannot help: a lone bar
-   * in that column is centred on its neighbour by the layout's relaxation,
-   * which leaves no gap to pass through, and where two bars did happen to
-   * leave one it was luck rather than design — a year with no invested
-   * accounts has a single Spending bar and the ribbon went straight through
-   * it, reading as money that spending gave off.
-   *
-   * So the ribbon is routed through a node of its own in that column instead
-   * of over it. The node is drawn as nothing — no bar, no label — and carries
-   * the name and colour of where the ribbon ends, so the two halves read as
-   * one band and the tooltip still names the real destination. What it does
-   * is take up room: the column now has to part by exactly the width of the
-   * ribbon, and the bars either side are pushed clear of it.
-   */
-  const before = columns(nodes, links);
-  /*
-   * A slot is only worth reserving for a ribbon anyone can see.
-   *
-   * A nine-cent flow into an account skips a column exactly as a salary does,
-   * and it was given the same treatment: a node of its own, and a column
-   * parted by its width to let it through. The width is nothing, so the reader
-   * gets no ribbon and the layout pays for one anyway. Below a five-hundredth
-   * of the chart the band is a hairline, and a hairline crossing a bar is not
-   * a thing anybody can see happen — so it passes behind, as it did before any
-   * of this, and the columns stay closed up.
-   */
-  const drawn = links.reduce((a, l) => a + l.value, 0);
-  const worthASlot = drawn * 0.002;
-  const detour = new Map<number, number>();
-  links.forEach((l, i) => {
-    if (before[l.target] - before[l.source] <= 1) return;
-    if (l.value < worthASlot) return;
-    const mid = before[l.source] + 1;
-    let at = nodes.length;
-    for (let k = 0; k < nodes.length; k++) {
-      if (before[k] !== mid) continue;
-      const outs = links.filter((x) => x.source === k).map((x) => x.target);
-      // Ahead of the first bar in that column whose own ends come after this one.
-      if (outs.length === 0 || Math.min(...outs) > l.target) {
-        at = k;
-        break;
-      }
-      at = k + 1;
-    }
-    detour.set(i, at);
-  });
-
-  const moved = new Map<number, number>();
-  const spacerOf = new Map<number, number>();
-  const drawNodes: { name: string; role?: string }[] = [];
-  const place = (pos: number) => {
-    /*
-     * Where several ribbons reserve a slot in the same column, the slots go in
-     * the order of the ribbons that need them. Taking them in the order the
-     * links happen to be listed put a pension contribution's slot above a
-     * drawn balance's while its source sat below, so the two crossed on the
-     * way in for no reason other than the order they were written down.
-     */
-    const here = [...detour]
-      .filter(([, at]) => at === pos)
-      .sort(([a], [b]) => links[a].source - links[b].source || links[a].target - links[b].target);
-    for (const [li] of here) {
-      spacerOf.set(li, drawNodes.length);
-      const end = nodes[links[li].target];
-      drawNodes.push({ name: end.name, role: end.role });
-    }
-  };
-  nodes.forEach((node, k) => {
-    place(k);
-    moved.set(k, drawNodes.length);
-    drawNodes.push(node);
-  });
-  place(nodes.length);
-  const ghosts = new Set(spacerOf.values());
-  const drawLinks = links.flatMap((l, i) => {
-    const sp = spacerOf.get(i);
-    const from = moved.get(l.source) ?? l.source;
-    const to = moved.get(l.target) ?? l.target;
-    if (sp === undefined) return [{ source: from, target: to, value: l.value }];
-    return [
-      { source: from, target: sp, value: l.value },
-      { source: sp, target: to, value: l.value },
-    ];
-  });
-
-  /*
-   * Order each column so the ribbons between them cross as little as possible.
-   * The arithmetic is in `seatColumns`, which is where the reasoning lives and
-   * where it is tested; this only applies the answer.
-   */
-  const seated = seatColumns({ nodes: drawNodes, links: drawLinks });
-  if (seated.length === drawNodes.length) {
-    const moved = new Map(seated.map((old, next) => [old, next]));
-    const ordered = seated.map((i) => drawNodes[i]);
-    const relinked = drawLinks.map((l) => ({
-      source: moved.get(l.source) ?? l.source,
-      target: moved.get(l.target) ?? l.target,
-      value: l.value,
-    }));
-    const shifted = new Set([...ghosts].map((i) => moved.get(i) ?? i));
-    drawNodes.length = 0;
-    drawNodes.push(...ordered);
-    drawLinks.length = 0;
-    drawLinks.push(...relinked);
-    ghosts.clear();
-    for (const i of shifted) ghosts.add(i);
-  }
-
-  const depth = columns(drawNodes, drawLinks);
+  const depth = columnsOf({ nodes: drawNodes, links: drawLinks });
   const last = Math.max(...depth);
 
   /*
@@ -1814,7 +1673,7 @@ export function YearSankey({
    * reading it off the name meant the chart had to keep a list of them.
    */
   const colourOf = (index: number) => {
-    const role = drawNodes[index]?.role;
+    const role = drawNodes[carries.get(index) ?? index]?.role;
     if (role && FLOW_TONE[role]) return accent(FLOW_TONE[role]);
     if (depth[index] === 0) return accent("positive");
     return depth[index] < last ? accent("brand") : accent("negative");
@@ -1922,20 +1781,20 @@ export function YearSankey({
              * needs to know what it is.
              */
             /*
-             * The layout's own column, not the one counted from the links.
-             * A node with nothing leaving it is pushed to the last column
-             * however short its path from a source was, so counting hops put
-             * what was kept in the middle and laid its label across its bar.
+             * Where the band stops, not which column it stopped in.
+             *
+             * An ending is labelled to its right and a starting point to its
+             * left, wherever either stands: nothing is drawn past an ending,
+             * so the space beside it is free. Only a bar with bands on both
+             * sides is labelled above, because a label either side of one of
+             * those lands on the very flow it names.
              */
             const d = payload.depth ?? depth[index] ?? 0;
-            const middle = d > 0 && d < last;
-            /*
-             * The middle column is labelled above its bar rather than beside
-             * it. Either side of an account is a ribbon, so a label placed
-             * there lands on top of the very flow it names.
-             */
-            const tx = middle ? x + width / 2 : d === 0 ? x - 8 : x + width + 8;
-            const anchor = middle ? "middle" : d === 0 ? "end" : "start";
+            const ends = !drawLinks.some((l) => l.source === index);
+            const starts = d === 0;
+            const middle = !ends && !starts;
+            const tx = middle ? x + width / 2 : starts ? x - 8 : x + width + 8;
+            const anchor = middle ? "middle" : starts ? "end" : "start";
             const ty = middle ? y - 16 : y + h / 2;
             return (
               <Layer key={index}>

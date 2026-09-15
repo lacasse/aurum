@@ -14,15 +14,23 @@
 
 export interface FlowGraph {
   nodes: unknown[];
-  links: { source: number; target: number }[];
+  links: { source: number; target: number; value?: number }[];
 }
 
 /**
  * The column each node is drawn in.
  *
- * The longest path from a source, and then the layout's own last rule: a node
- * with nothing leaving it is pushed to the far column however short its path
- * was, so what a reader sees as the end of the chart is the end of the chart.
+ * The longest path from a source, and then one more rule: a node with nothing
+ * leaving it is drawn in the far column however short its path was, so the
+ * endings line up down the right-hand edge and what looks like the end of the
+ * chart is the end of the chart.
+ *
+ * That rule is what makes the ordering below matter. It turns a one-hop band —
+ * the cash left in an account, a debt paid off — into one that has to cross
+ * every column in between, and such a band can only be kept out of the way by
+ * the order the bars sit in. Reserving it a slot in each column it crosses is
+ * what gives it somewhere to be; finding the arrangement where it crosses
+ * nothing wider than a hairline is what the search is for.
  */
 export function columnsOf({ nodes, links }: FlowGraph): number[] {
   const at = nodes.map(() => 0);
@@ -88,6 +96,48 @@ export function crossingsIn(graph: FlowGraph, order?: number[]): number {
 }
 
 /**
+ * The same count, with each crossing weighed by the two bands that make it.
+ *
+ * Counting pairs decides an order; it does not decide which order *looks*
+ * settled. Two hairlines crossing is a detail nobody sees, and a salary
+ * crossing a year of rent is the thing being complained about — counted the
+ * same, an arrangement that tucks away four hairlines wins over one that
+ * untangles the two widest bands on the chart. So the objective is the product
+ * of the widths, which is what a reader's eye is actually totting up.
+ */
+function weighedCrossings(graph: FlowGraph, order?: number[]): number {
+  const at = columnsOf(graph);
+  const cols = group(order ?? graph.nodes.map((_, i) => i), at);
+  const out = new Map<number, { to: number; w: number }[]>();
+  for (const l of graph.links) {
+    const w = l.value ?? 1;
+    const to = out.get(l.source);
+    if (to) to.push({ to: l.target, w });
+    else out.set(l.source, [{ to: l.target, w }]);
+  }
+  let total = 0;
+  for (let i = 0; i + 1 < cols.length; i++) {
+    const seat = new Map(cols[i + 1].map((n, k) => [n, k]));
+    const ends: { from: number; to: number; w: number }[] = [];
+    cols[i].forEach((u, ui) => {
+      for (const e of out.get(u) ?? []) {
+        const vi = seat.get(e.to);
+        if (vi !== undefined) ends.push({ from: ui, to: vi, w: e.w });
+      }
+    });
+    for (let a = 0; a < ends.length; a++) {
+      for (let b = a + 1; b < ends.length; b++) {
+        const first = ends[a].from <= ends[b].from ? ends[a] : ends[b];
+        const second = first === ends[a] ? ends[b] : ends[a];
+        if (first.from < second.from && first.to > second.to) total += first.w * second.w;
+        else if (first.from === second.from) continue;
+      }
+    }
+  }
+  return total;
+}
+
+/**
  * An order for the nodes that draws as few crossings as it can find.
  *
  * The standard answer to an old problem, rather than another rule about
@@ -103,6 +153,7 @@ export function crossingsIn(graph: FlowGraph, order?: number[]): number {
  */
 export function seatColumns(graph: FlowGraph, passes = 8): number[] {
   const at = columnsOf(graph);
+  const drawn = graph.nodes;
   const after = new Map<number, number[]>();
   const before = new Map<number, number[]>();
   for (const l of graph.links) {
@@ -132,18 +183,245 @@ export function seatColumns(graph: FlowGraph, passes = 8): number[] {
     return out;
   };
 
+  /*
+   * Crossings weighed by width, with the plain count as the tie-break. Two
+   * arrangements that tangle the same amount of ribbon are separated by which
+   * one crosses fewer times, and only then by the order the caller gave.
+   */
+  const cost = (order: number[]): [number, number] => [
+    weighedCrossings(graph, order),
+    crossingsIn(graph, order),
+  ];
+  const better = (a: [number, number], b: [number, number]) =>
+    a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+
+  /*
+   * When to stop looking.
+   *
+   * Perfect is not the target — legible is. Once nothing crosses but bands too
+   * thin to see, more searching moves bars around for a picture nobody can
+   * tell apart, and the page waits for it: a second and a half on a year with
+   * everything in it, against a few milliseconds to reach this point. A pair
+   * of bands is invisible together at about a hundred-thousandth of the chart
+   * squared, which is the same judgement the slots make about a hairline.
+   */
+  const drawnTotal = graph.links.reduce((a, l) => a + Math.abs(l.value ?? 1), 0);
+  const goodEnough = drawnTotal * drawnTotal * 1e-5;
+
   const start = graph.nodes.map((_, i) => i);
   let best = group(start, at);
-  let fewest = crossingsIn(graph, best.flat());
-  let cols = best;
-  for (let pass = 0; pass < passes && fewest > 0; pass++) {
-    cols = sweep(cols, before, true);
-    cols = sweep(cols, after, false);
-    const n = crossingsIn(graph, cols.flat());
-    if (n < fewest) {
-      fewest = n;
-      best = cols.map((c) => [...c]);
+  let fewest = cost(best.flat());
+
+  /*
+   * Settle from several starting orders, not one.
+   *
+   * Averaging heights walks downhill from wherever it begins and stops at the
+   * first arrangement it cannot improve one node at a time. Which arrangement
+   * that is depends entirely on the order the data arrived in, and on a real
+   * year it stopped one swap short: a band into the middle column crossed a
+   * band into the bar beside it, and no single node could move to fix it
+   * because both had to. Beginning again from the reverse, and from the widest
+   * bands first, costs a handful of sweeps over tens of nodes and gets past it.
+   */
+  const widest = new Map<number, number>();
+  for (const l of graph.links) {
+    const w = l.value ?? 1;
+    widest.set(l.source, (widest.get(l.source) ?? 0) + w);
+    widest.set(l.target, (widest.get(l.target) ?? 0) + w);
+  }
+  const starts: number[][][] = [
+    group(start, at),
+    group([...start].reverse(), at),
+    group(
+      [...start].sort((a, b) => (widest.get(b) ?? 0) - (widest.get(a) ?? 0) || a - b),
+      at,
+    ),
+  ];
+  for (const from of starts) {
+    let cols = from;
+    for (let pass = 0; pass < passes && fewest[0] > goodEnough; pass++) {
+      cols = sweep(cols, before, true);
+      cols = sweep(cols, after, false);
+      const n = cost(cols.flat());
+      if (better(n, fewest)) {
+        fewest = n;
+        best = cols.map((c) => [...c]);
+      }
+    }
+  }
+
+  /*
+   * Then swap neighbours while it helps.
+   *
+   * Averaging heights settles a chart quickly and then stops: every node is
+   * already at the middle of what it joins, and the two bands still crossing
+   * would each have to move for either to improve, which no single average
+   * will do. Trying each neighbouring pair in turn is what gets out of that —
+   * it is slower, but a year's chart is tens of nodes, not thousands, and it
+   * is the difference between "nearly untangled" and untangled.
+   */
+  /* Improving swaps only, from wherever it is put down. */
+  const settle = (cols: number[][]): [number[][], [number, number]] => {
+    const out = cols.map((c) => [...c]);
+    let at = cost(out.flat());
+    let moved = true;
+    for (let round = 0; moved && round < passes && at[0] > goodEnough; round++) {
+      moved = false;
+      for (const col of out) {
+        for (let i = 0; i + 1 < col.length; i++) {
+          [col[i], col[i + 1]] = [col[i + 1], col[i]];
+          const n = cost(out.flat());
+          if (better(n, at)) {
+            at = n;
+            moved = true;
+          } else {
+            [col[i], col[i + 1]] = [col[i + 1], col[i]];
+          }
+        }
+      }
+    }
+    return [out, at];
+  };
+
+  /*
+   * Then shake it and let it settle again, keeping the best it ever saw.
+   *
+   * Some tangles cost more before they cost less. On a real year a band into a
+   * reserved slot crossed the band into the bar beside it, and clearing it
+   * meant swapping a pair in the source column *and* the pair they lead to in
+   * the next one — either swap alone makes the chart worse, so a search that
+   * only ever improves will not take the first step. Disturbing a settled
+   * arrangement by a swap or two and settling it again does take it. The
+   * disturbance is drawn from a fixed seed, so the same record always draws
+   * the same chart; a chart that rearranged itself between two loads of the
+   * same page would be worse than one that crosses.
+   */
+  let seed = 0x9e3779b9;
+  const random = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const settled = settle(best);
+  best = settled[0];
+  fewest = better(settled[1], fewest) ? settled[1] : fewest;
+
+  /*
+   * The shake moves any two bars in a column, not just neighbours, because
+   * the arrangement that clears a long band usually needs it moved several
+   * places at once — the closing balance has to travel from the middle of a
+   * column to the foot of it before anything improves. Enough shakes to find
+   * that on a year's chart, and few enough that the page does not wait: this
+   * runs on tens of bars, and the cost of one arrangement is counted in
+   * microseconds.
+   */
+  const shakes = Math.min(240, 8 * drawn.length);
+  for (let shake = 0; shake < shakes && fewest[0] > goodEnough; shake++) {
+    const trial = best.map((c) => [...c]);
+    for (let k = 0; k <= shake % 3; k++) {
+      const col = trial[Math.floor(random() * trial.length)];
+      if (!col || col.length < 2) continue;
+      const i = Math.floor(random() * col.length);
+      const j = Math.floor(random() * col.length);
+      [col[i], col[j]] = [col[j], col[i]];
+    }
+    const [order, at2] = settle(trial);
+    if (better(at2, fewest)) {
+      fewest = at2;
+      best = order;
     }
   }
   return best.flat();
+}
+
+/** A node the layout invented to carry a band through a column. */
+export interface FlowSpacer {
+  /** The link it belongs to, by index in the graph it was built from. */
+  link: number;
+  /** The column it stands in. */
+  column: number;
+}
+
+/**
+ * A band is only worth a slot of its own if anybody can see it: below this
+ * share of everything drawn it is a hairline, and a hairline passing behind a
+ * bar is not something a reader watches happen.
+ */
+const WORTH_A_SLOT = 0.002;
+
+/**
+ * The graph as it has to be drawn, with the bands that skip a column routed
+ * through slots of their own.
+ *
+ * A Sankey draws a band as a single curve from one bar to another, so a band
+ * whose ends are three columns apart is drawn straight over whatever stands in
+ * the two columns between — and a band crossing a bar reads as money that bar
+ * gave off. The fix is to give it somewhere to pass: an invented node in every
+ * column it crosses, drawn as the band itself rather than as a bar. The column
+ * then has to part by the width of the band, which is exactly what was missing.
+ *
+ * Doing this for only the first column it crossed is what this used to do, and
+ * it was enough while nothing skipped more than one — an account's closing
+ * balance passing the spending bars. A record with named accounts, a pension
+ * and sold holdings makes longer bands than that, and each of them went back
+ * to being drawn over everything past the first column.
+ */
+export function layoutFlow<T>(
+  nodes: readonly T[],
+  links: readonly { source: number; target: number; value: number }[],
+): {
+  nodes: T[];
+  links: { source: number; target: number; value: number }[];
+  /** Indexes in the returned nodes that are slots, not bars. */
+  ghosts: Set<number>;
+  /** Which node each slot carries the colour and name of. */
+  carries: Map<number, number>;
+} {
+  const at = columnsOf({ nodes: [...nodes], links: [...links] });
+  const drawn = links.reduce((a, l) => a + l.value, 0);
+  const worthASlot = drawn * WORTH_A_SLOT;
+
+  const out: T[] = [...nodes];
+  const ghosts = new Set<number>();
+  const carries = new Map<number, number>();
+  const drawLinks: { source: number; target: number; value: number }[] = [];
+
+  for (const l of links) {
+    const gap = at[l.target] - at[l.source];
+    if (gap <= 1 || l.value < worthASlot) {
+      drawLinks.push({ source: l.source, target: l.target, value: l.value });
+      continue;
+    }
+    /*
+     * One slot per column crossed, chained end to end. Each carries the name
+     * and the role of where the band is going, so the pieces read as one band
+     * and the tooltip still names the real destination.
+     */
+    let from = l.source;
+    for (let c = at[l.source] + 1; c < at[l.target]; c++) {
+      const slot = out.length;
+      out.push(nodes[l.target]);
+      ghosts.add(slot);
+      carries.set(slot, l.target);
+      drawLinks.push({ source: from, target: slot, value: l.value });
+      from = slot;
+    }
+    drawLinks.push({ source: from, target: l.target, value: l.value });
+  }
+
+  const seated = seatColumns({ nodes: out, links: drawLinks });
+  if (seated.length !== out.length) return { nodes: out, links: drawLinks, ghosts, carries };
+  const moved = new Map(seated.map((old, next) => [old, next]));
+  const at2 = (i: number) => moved.get(i) ?? i;
+  return {
+    nodes: seated.map((i) => out[i]),
+    links: drawLinks.map((l) => ({
+      source: at2(l.source),
+      target: at2(l.target),
+      value: l.value,
+    })),
+    ghosts: new Set([...ghosts].map(at2)),
+    carries: new Map([...carries].map(([slot, end]) => [at2(slot), at2(end)])),
+  };
 }
