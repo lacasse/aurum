@@ -52,6 +52,7 @@ import {
   yearRows,
   yearShapes,
   yearWaterfall,
+  periodShape,
 } from "@/lib/year";
 import { groupOf } from "@/lib/expenses";
 import { yearToDate } from "@/lib/spans";
@@ -156,6 +157,7 @@ export default function YearPage() {
       classes,
       shapes: yearShapes(rows, classes),
       /* The last month the record reaches, for closing a year still running. */
+      netWorth,
       lastMonth: netWorth[netWorth.length - 1]?.key ?? null,
     };
   }, [accounts, holdings, transactions, snapshots, usdCadRate, spendGroups]);
@@ -261,36 +263,20 @@ export default function YearPage() {
    * asset had produced it.
    */
   const passiveShare = typeRow ? Number(typeRow.Passive) : null;
-  const allBalanceBars = data.shapes.map((sh) => ({
-    label: sh.year,
-    Cash: sh.cash,
-    Bonds: sh.bonds,
-    Stocks: sh.stocks,
-    Crypto: sh.crypto,
-    Pension: sh.pension,
-  }));
   /*
-   * The record starts where there was something to own.
-   *
-   * Transactions can begin years before the first holding or balance, and a
-   * year with nothing in it normalises to nothing — a flat empty band, then a
-   * cliff into the first real mix. That opening is not a composition that
-   * changed; it is a composition that did not exist yet, and drawing it as
-   * zero percent of everything invites the reader to see a collapse where the
-   * record simply had not started. Trailing years are kept: a year that ends
-   * owning nothing is a fact about that year.
+   * Each month of the selected year, split the way the roll-forward splits the
+   * whole of it: what was saved, and what everything else did to net worth.
+   * The roll-forward says how much; this says when.
    */
-  const owned = (b: (typeof allBalanceBars)[number]) =>
-    b.Cash + b.Bonds + b.Stocks + b.Crypto + b.Pension > 0;
-  const opening = allBalanceBars.findIndex(owned);
-  const balanceBars = opening < 0 ? [] : allBalanceBars.slice(opening);
-  /*
-   * Only the bands the record actually holds somewhere in it. A colour in the
-   * chart with no key beside it is a colour you cannot name, and a class never
-   * owned is not a nought worth drawing.
-   */
-  const mixBands = BAND_ORDER.filter((c) => balanceBars.some((p) => p[c] > 0));
-  const balanceMix = classShares(balanceBars);
+  const monthlyMoves = [] as { label: string; saved: number; growth: number }[];
+  for (let m = 1; m <= 12; m++) {
+    const key = `${selected.year}-${String(m).padStart(2, "0")}`;
+    if (key > closingMonth) break;
+    const month = periodShape(transactions, data.netWorth, key, key, (c) => groupOf(c, spendGroups));
+    if (month && month.from === key) {
+      monthlyMoves.push({ label: labelMonth(key), saved: month.saved, growth: month.revaluation });
+    }
+  }
 
   return (
     <Shell
@@ -533,14 +519,14 @@ export default function YearPage() {
           )}
         </div>
 
-        <SectionHeading title="Net worth" hint="What the year built, and what it is made of" />
+        <SectionHeading title="Net worth" hint="What the year built, when, and what it is made of" />
         {/*
-          * A third of the row for the roll-forward, two thirds for the mix.
+          * A third of the row for the roll-forward, two thirds for its months.
           *
           * Five columns given half a page were slabs — a waterfall is five
           * numbers and the shape they make, and at that width the shape was
-          * lost behind the bars drawing it. The composition beside it is a
-          * line over years and reads better the wider it gets, so the space
+          * lost behind the bars drawing it. The months beside it are twelve
+          * pairs of bars and read better the wider they get, so the space
           * one chart does not want is the space the other one does.
           *
           * Only where a third is wide enough to label, though. Below that the
@@ -565,122 +551,30 @@ export default function YearPage() {
             </Card>
           )}
 
-          {/*
-            * The balance sheet across years: what the money is, not what it did.
-            *
-            * The same chart as net worth composition on the dashboard, over
-            * years rather than months, because it is the same question asked
-            * of a longer window — and one chart read twice is cheaper than two
-            * charts learned separately. Same bands, same colours, same order,
-            * from the same three shared definitions.
-            */}
-          {balanceBars.length > 1 && (
+          {monthlyMoves.length > 1 && (
             <Card className="flex h-full flex-col xl:col-span-2">
               <CardHeader
-                title="Asset allocation at year end"
-                subtitle="Share of everything you own, at the close of each year"
+                title="Net worth change by month"
+                subtitle={`What was saved and what growth added, each month of ${selected.year}`}
               />
-              {/*
-                * Shares, not dollars. In dollars this was the net worth line
-                * again with lines inside it: the total grew several times over,
-                * so every band swept upward together and the mix — the only
-                * thing this chart is for — was a few pixels along the bottom.
-                *
-                * Drawn as an area between year ends, which is a real cost and
-                * a deliberate one. There is no June in a year already closed,
-                * so the slope between two points is not a record of anything;
-                * it says only that the mix went from one to the other. Bars
-                * were honest about that and made the drift between them
-                * something to work out rather than see, and the drift is the
-                * subject. The axis labels are year ends, so what is measured
-                * stays legible.
-                *
-                * A band worth very little is still only a few pixels tall, and
-                * the figures underneath are what answer for it.
-                */}
-              <div className="min-h-[280px] flex-1 px-3 pb-2">
-                <SeriesChart
-                  data={balanceMix as unknown as Record<string, unknown>[]}
+              <div className="min-h-[300px] flex-1 px-3 pb-4">
+                <GroupedBars
+                  data={monthlyMoves as unknown as Record<string, unknown>[]}
                   xKey="label"
-                  stacked
-                  fadeAtZero
-                  series={mixBands.map((name) => ({
-                    key: name,
-                    name,
-                    color: CLASS_COLORS[name],
-                  }))}
+                  bars={[
+                    { key: "saved", name: "Saved", color: accentFor("positive") },
+                    { key: "growth", name: "Growth", color: accentFor("market") },
+                  ]}
                   height="100%"
-                  yDomain={[0, 100]}
-                  yFmt={(n: number) => `${Math.round(n)}%`}
+                  yFmt={fmtCompact}
                 />
-              </div>
-              {shape && (
-                <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
-                  {/*
-                    * The bands the chart drew, not the ones held now — a colour
-                    * in the chart with no key beside it is a colour you cannot
-                    * name. One held in an earlier year and since sold reads as
-                    * zero, which is the answer rather than an omission.
-                    *
-                    * The figures are the selected year's, and they are what
-                    * answer for a band too thin to see: the chart gives up the
-                    * dollars to show the mix, and this is where they come back.
-                    */}
-                  {mixBands.map((c) => {
-                    const held = {
-                      Cash: shape.cash,
-                      Bonds: shape.bonds,
-                      Stocks: shape.stocks,
-                      Crypto: shape.crypto,
-                      Pension: shape.pension,
-                    }[c];
-                    return (
-                      <div key={c} className="flex items-baseline gap-2">
-                        <span
-                          className="h-2 w-2 shrink-0 translate-y-[-1px] rounded-full"
-                          style={{ background: CLASS_COLORS[c] }}
-                        />
-                        <span className="text-[0.6875rem] text-ink-faint">{c}</span>
-                        <span className="text-sm font-semibold tabular-nums">
-                          {fmtCompact(held)}
-                        </span>
-                        <span className="text-[0.6875rem] tabular-nums text-ink-faint">
-                          {shape.assets > 0
-                            ? `${Math.round((Math.max(0, held) / shape.assets) * 100)}%`
-                            : "—"}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-px border-t border-line bg-line sm:grid-cols-4">
-                {shape && [
-                  { label: "Assets", value: shape.assets },
-                  { label: "Owed", value: -shape.liabilities },
-                  { label: "Net worth", value: shape.netWorth },
-                  {
-                    label: "Cash share",
-                    value: null,
-                    text: shape.assets > 0 ? `${Math.round((shape.cash / shape.assets) * 100)}%` : "—",
-                  },
-                ].map((c) => (
-                  <div key={c.label} className="bg-surface px-4 py-2.5">
-                    <p className="text-[0.6875rem] uppercase tracking-wider text-ink-faint">
-                      {c.label}
-                    </p>
-                    <p className="mt-0.5 text-sm font-semibold tabular-nums">
-                      {c.text ?? fmtCAD(c.value ?? 0)}
-                    </p>
-                  </div>
-                ))}
               </div>
             </Card>
           )}
         </div>
 
         {/*
-          * The same question as the chart above, asked month by month.
+          * What everything owned is made of, month by month.
           *
           * Moved here from the old dashboard, which read the last twelve
           * months and had no business drawing a record's whole shape. The
