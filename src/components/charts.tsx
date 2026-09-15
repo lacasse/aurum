@@ -1703,6 +1703,13 @@ export function YearSankey({
           nodePadding={26}
           nodeWidth={12}
           /*
+           * A bar stands where it is reached. The layout's own default drags
+           * anything with nothing leaving it to the far edge, which is the
+           * tidy right-hand side paid for by bands that cross the whole chart
+           * — see the column arithmetic in flow-layout.
+           */
+          align="left"
+          /*
            * Keep each column in the order the data gives it. The relaxation
            * still decides how far apart the nodes sit; this only stops it
            * reordering them, which is what pulled what was kept up among the
@@ -1781,20 +1788,20 @@ export function YearSankey({
              * needs to know what it is.
              */
             /*
-             * The layout's own column, not the one counted from the links.
-             * A node with nothing leaving it is pushed to the last column
-             * however short its path from a source was, so counting hops put
-             * what was kept in the middle and laid its label across its bar.
+             * Where the band stops, not which column it stopped in.
+             *
+             * An ending is labelled to its right and a starting point to its
+             * left, wherever either stands: nothing is drawn past an ending,
+             * so the space beside it is free. Only a bar with bands on both
+             * sides is labelled above, because a label either side of one of
+             * those lands on the very flow it names.
              */
             const d = payload.depth ?? depth[index] ?? 0;
-            const middle = d > 0 && d < last;
-            /*
-             * The middle column is labelled above its bar rather than beside
-             * it. Either side of an account is a ribbon, so a label placed
-             * there lands on top of the very flow it names.
-             */
-            const tx = middle ? x + width / 2 : d === 0 ? x - 8 : x + width + 8;
-            const anchor = middle ? "middle" : d === 0 ? "end" : "start";
+            const ends = !drawLinks.some((l) => l.source === index);
+            const starts = d === 0;
+            const middle = !ends && !starts;
+            const tx = middle ? x + width / 2 : starts ? x - 8 : x + width + 8;
+            const anchor = middle ? "middle" : starts ? "end" : "start";
             const ty = middle ? y - 16 : y + h / 2;
             return (
               <Layer key={index}>

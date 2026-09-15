@@ -18,11 +18,16 @@ export interface FlowGraph {
 }
 
 /**
- * The column each node is drawn in.
+ * The column each node is drawn in: the longest path from a source.
  *
- * The longest path from a source, and then the layout's own last rule: a node
- * with nothing leaving it is pushed to the far column however short its path
- * was, so what a reader sees as the end of the chart is the end of the chart.
+ * A node with nothing leaving it stands where it is reached, not at the far
+ * edge. Pushing every ending to the last column lines the right-hand side up
+ * neatly and costs far more than it looks: the cash left in an account at the
+ * end of the window is reached from the account bar in one hop, and dragging
+ * it four columns right turns a short band into one that has to cross the
+ * whole chart. On a real year that single rule was the difference between one
+ * unavoidable crossing and eight, and four bands drawn the width of the page
+ * rather than the width of a column. A ragged right edge is the cheaper price.
  */
 export function columnsOf({ nodes, links }: FlowGraph): number[] {
   const at = nodes.map(() => 0);
@@ -36,11 +41,6 @@ export function columnsOf({ nodes, links }: FlowGraph): number[] {
     }
     if (!moved) break;
   }
-  const end = Math.max(0, ...at);
-  const leaves = new Set(links.map((l) => l.source));
-  nodes.forEach((_, i) => {
-    if (!leaves.has(i)) at[i] = end;
-  });
   return at;
 }
 
