@@ -643,38 +643,58 @@ export function categoryByYear(
   return { years: drawn, rows };
 }
 
-/* ── What you put in, against what it became ── */
+/* ── What the assets pay, year over year ── */
 
-export interface ContributionPoint {
+export interface PassivePoint {
   label: string;
-  /** Everything paid into holdings up to the end of this year, less withdrawals. */
-  contributed: number;
-  /** What the portfolio was worth at that point. */
-  value: number;
+  /** Interest, cashback and dividends recorded in the year. */
+  passive: number;
+  /** What the year cost, so the share of it this covered can be read. */
+  expenses: number;
 }
 
 /**
- * The compounding story, which a single year cannot tell.
+ * Passive income over the whole record, in dollars.
  *
- * The waterfall answers what one year did. This answers the question behind
- * it: the two lines start together and separate, and the gap between them is
- * every dollar the portfolio earned rather than received. Watching that gap
- * open is the only view in the app where compounding is a picture rather than
- * a percentage.
+ * The mix chart asks what a year's income was made of, and normalises each
+ * year to its own total so that a rising salary cannot hide a rising dividend.
+ * That is the right question and it cannot answer this one: a share that holds
+ * steady says nothing about whether the amount is growing. Here the axis is
+ * money, so the only thing the curve can be doing is going up.
  *
- * A year the portfolio was not yet worth anything is dropped rather than drawn
- * as two lines at zero, which is a flat start that says nothing and squashes
- * the years that do.
+ * Read against `expenses`, it is the distance to not needing a job — which is
+ * why the year's cost comes back alongside it rather than being worked out
+ * again by the page.
+ *
+ * Years before anything was recorded are dropped, the same as elsewhere: a run
+ * of zeroes at the left is a flat start that squashes the years that move.
  */
-export function contributionsVsValue(rows: readonly YearRow[]): ContributionPoint[] {
-  const ordered = [...rows].sort((a, b) => a.year.localeCompare(b.year));
-  let running = 0;
-  const out: ContributionPoint[] = [];
-  for (const r of ordered) {
-    running = roundMoney(running + r.investmentFlows);
-    if (r.portfolio <= 0 && running <= 0) continue;
-    out.push({ label: r.year, contributed: running, value: r.portfolio });
+export function passiveIncomeByYear(
+  transactions: Transaction[],
+  spendGroup: (category: string) => SpendGroup = (c) => groupOf(c),
+): PassivePoint[] {
+  const byYear = new Map<string, { passive: number; expenses: number }>();
+  for (const t of transactions) {
+    const counted = countedAs(t, spendGroup);
+    if (counted === null) continue;
+    const year = t.date.slice(0, 4);
+    const slot = byYear.get(year) ?? { passive: 0, expenses: 0 };
+    const cents = toCents(t.amount);
+    if (counted === "expense") slot.expenses += cents;
+    else if (PASSIVE_INCOME_CATEGORIES.has(t.category)) slot.passive += cents;
+    byYear.set(year, slot);
   }
+  const out = [...byYear.keys()].sort().map((year) => {
+    const slot = byYear.get(year)!;
+    return {
+      label: year,
+      passive: fromCents(slot.passive),
+      expenses: fromCents(slot.expenses),
+    };
+  });
+  // Only the leading run, so a quiet year in the middle of the record stays on
+  // the chart as the gap it was.
+  while (out.length > 0 && out[0].passive === 0) out.shift();
   return out;
 }
 

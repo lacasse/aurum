@@ -44,9 +44,9 @@ import {
 } from "@/lib/analytics";
 import {
   categoryByYear,
-  contributionsVsValue,
   incomeTypeAmounts,
   incomeTypeShares,
+  passiveIncomeByYear,
   spendableCashAt,
   yearFlow,
   yearRows,
@@ -226,11 +226,25 @@ export default function YearPage() {
   const room = contributionRoom(selected.year, transactions, accounts, limits);
   const shape = data.shapes.find((sh) => sh.year === selected.year);
   const byYear = categoryByYear(transactions);
-  const contributions = contributionsVsValue(data.rows);
-  const latestGap =
-    contributions.length > 0
-      ? contributions[contributions.length - 1].value -
-        contributions[contributions.length - 1].contributed
+  const passiveYears = passiveIncomeByYear(transactions, (c) => groupOf(c, spendGroups));
+  const passiveLatest = passiveYears[passiveYears.length - 1] ?? null;
+  const passiveBefore = passiveYears[passiveYears.length - 2] ?? null;
+  /*
+   * Against the year before it in dollars, not against the record's first
+   * year: a rise from almost nothing is a large percentage and says little.
+   */
+  const passiveGrowth =
+    passiveLatest && passiveBefore && passiveBefore.passive > 0
+      ? ((passiveLatest.passive - passiveBefore.passive) / passiveBefore.passive) * 100
+      : null;
+  /*
+   * How much of a month of that year's spending the year's passive income
+   * would have paid for. Both figures are annual, so the ratio is the same
+   * either way round, and a month is the unit a reader lives in.
+   */
+  const passiveCoverage =
+    passiveLatest && passiveLatest.expenses > 0
+      ? (passiveLatest.passive / passiveLatest.expenses) * 100
       : null;
   const typeShares = incomeTypeShares(transactions);
   /*
@@ -661,37 +675,67 @@ export default function YearPage() {
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/*
-            * Compounding, as a picture rather than a percentage. The lines start
-            * together and separate; the gap is every dollar the portfolio earned
-            * rather than received.
+            * Passive income in dollars, which the mix chart beside it cannot
+            * say. That one normalises each year to its own total to stop a
+            * rising salary hiding a rising dividend; the price of doing so is
+            * that a steady share and a growing amount look identical. Here the
+            * axis is money, so the curve rising means one thing only.
             */}
-          {contributions.length > 1 && (
+          {passiveYears.length > 1 && (
             <Card className="flex h-full flex-col">
               <CardHeader
-                title="Net contributions against market value"
-                subtitle="Everything paid into the portfolio, beside what it is worth"
+                title="Passive income over time"
+                subtitle="What interest, cashback and dividends paid each year"
               />
               <div className="min-h-[240px] flex-1 px-3 pb-4">
                 <SeriesChart
-                  data={contributions as unknown as Record<string, unknown>[]}
+                  data={passiveYears as unknown as Record<string, unknown>[]}
                   xKey="label"
                   series={[
-                    { key: "contributed", name: "Paid in", color: accentFor("cost"), kind: "line" },
-                    { key: "value", name: "Worth", color: accentFor("brand") },
+                    { key: "passive", name: "Passive income", color: accentFor("cost") },
                   ]}
                   yFmt={(n: number) => fmtCompact(n)}
                   height="100%"
                 />
               </div>
-              {latestGap !== null && (
-                <p className="border-t border-line px-4 py-2.5 text-[0.6875rem] leading-relaxed text-ink-faint">
-                  The gap is {fmtCAD(Math.abs(latestGap))} the portfolio{" "}
-                  {latestGap >= 0 ? "has earned" : "is behind"} on what was paid
-                  into it, and still holds. Money leaving pulls both lines down
-                  by the same amount — a sale, or a dividend paid across to the
-                  account&rsquo;s cash — so the gap holds steady rather than
-                  closing, and what was taken out is simply no longer in it.
-                </p>
+              {passiveLatest && (
+                <div className="flex flex-wrap gap-x-6 gap-y-2 px-5 pb-5">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[0.6875rem] text-ink-faint">
+                      {passiveLatest.label}
+                    </span>
+                    <span className="text-sm font-semibold tabular-nums">
+                      {fmtCAD(passiveLatest.passive)}
+                    </span>
+                  </div>
+                  {passiveGrowth !== null && (
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[0.6875rem] text-ink-faint">
+                        vs {passiveBefore!.label}
+                      </span>
+                      <span
+                        className={cn(
+                          "text-sm font-semibold tabular-nums",
+                          passiveGrowth >= 0 ? "text-positive" : "text-negative",
+                        )}
+                      >
+                        {passiveGrowth >= 0 ? "+" : "−"}
+                        {Math.abs(Math.round(passiveGrowth))}%
+                      </span>
+                    </div>
+                  )}
+                  {passiveCoverage !== null && (
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[0.6875rem] text-ink-faint">Covers</span>
+                      <span className="text-sm font-semibold tabular-nums">
+                        {passiveCoverage.toFixed(1)}%
+                      </span>
+                      <span className="text-[0.6875rem] text-ink-faint">
+                        of what the year cost
+                      </span>
+                    </div>
+                  )}
+                </div>
               )}
             </Card>
           )}

@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
-  contributionsVsValue,
+  passiveIncomeByYear,
   incomeMix,
   incomeMixShares,
   incomeTypeShares,
@@ -454,32 +454,50 @@ describe("the waterfall at any size", () => {
 
 /* ALL-FIXTURES-INVENTED */
 
-describe("what you put in, against what it became", () => {
-  test("contributions accumulate while the value is read as it stands", () => {
-    const pts = contributionsVsValue([
-      row("2024", { investmentFlows: 10000, portfolio: 10500 }),
-      row("2025", { investmentFlows: 12000, portfolio: 26000 }),
-      row("2026", { investmentFlows: 8000, portfolio: 42000 }),
+describe("what the assets pay, year over year", () => {
+  test("passive income is summed per year in dollars", () => {
+    const pts = passiveIncomeByYear([
+      txn("2025-01-31", "income", 40000, "Salary"),
+      txn("2025-06-30", "income", 300, "Dividends"),
+      txn("2025-09-30", "income", 120, "Interest"),
+      txn("2026-06-30", "income", 800, "Dividends"),
     ]);
-    assert.deepEqual(pts.map((p) => p.contributed), [10000, 22000, 30000]);
-    assert.deepEqual(pts.map((p) => p.value), [10500, 26000, 42000]);
+    assert.deepEqual(pts.map((p) => p.passive), [420, 800]);
   });
 
-  test("a withdrawal pulls the contributed line back down", () => {
-    const pts = contributionsVsValue([
-      row("2025", { investmentFlows: 20000, portfolio: 21000 }),
-      row("2026", { investmentFlows: -5000, portfolio: 17000 }),
+  test("the year's spending comes back beside it, so coverage is read once", () => {
+    const pts = passiveIncomeByYear([
+      txn("2025-06-30", "income", 500, "Dividends"),
+      txn("2025-07-31", "expense", 2000, "Groceries"),
     ]);
-    assert.equal(pts[1].contributed, 15000);
+    assert.equal(pts[0].expenses, 2000);
   });
 
-  test("years before anything was invested are left out", () => {
-    const pts = contributionsVsValue([
-      row("2023", { investmentFlows: 0, portfolio: 0 }),
-      row("2024", { investmentFlows: 0, portfolio: 0 }),
-      row("2025", { investmentFlows: 5000, portfolio: 5100 }),
+  test("a salary is not passive, however large the year", () => {
+    const pts = passiveIncomeByYear([
+      txn("2025-01-31", "income", 90000, "Salary"),
+      txn("2025-02-28", "income", 100, "Interest"),
     ]);
-    assert.deepEqual(pts.map((p) => p.label), ["2025"]);
+    assert.equal(pts[0].passive, 100);
+  });
+
+  test("a gift is neither, and cannot flatter the line", () => {
+    const pts = passiveIncomeByYear([
+      txn("2025-03-31", "income", 5000, "Gift"),
+      txn("2025-04-30", "income", 200, "Dividends"),
+    ]);
+    assert.equal(pts[0].passive, 200);
+  });
+
+  test("years before the first payment are dropped, gaps inside are kept", () => {
+    const pts = passiveIncomeByYear([
+      txn("2023-05-31", "income", 30000, "Salary"),
+      txn("2024-05-31", "income", 150, "Dividends"),
+      txn("2025-05-31", "income", 30000, "Salary"),
+      txn("2026-05-31", "income", 400, "Dividends"),
+    ]);
+    assert.deepEqual(pts.map((p) => p.label), ["2024", "2025", "2026"]);
+    assert.equal(pts[1].passive, 0);
   });
 });
 
