@@ -463,6 +463,30 @@ own.
    should check in their own data.
 4. Deploy, and say whether the deployed image matches the tag.
 
+# Environments — Which Instance Is Which
+
+There are three, and the names are how instructions refer to them.
+
+- **Production** runs on a separate always-on host on the owner's network, not
+  this machine. It is the system of record. Its address, paths and secrets live
+  on that host and never in this repository — the same rule as any other
+  private fact. "Rebuild the prod", "deploy", and "take a backup first" mean
+  that host.
+- **Pre-prod** is the stack on this machine: Compose project `finance`,
+  containers `finance-*-1`. It holds a copy of the real record taken when
+  production moved, and is not the system of record — anything entered here
+  does not reach production. Every data-safety rule below still applies to it
+  in full: it is real data. Its Compose project is still named `finance` and
+  must stay so (see Data Safety); "pre-prod" is what it is called, not a rename
+  of anything.
+- **Dev** is `aurum_dev` behind `docker-compose.dev.yml`, holding only invented
+  data.
+
+The commands in this file that name `finance-backup-1` or `finance-db-1` act on
+pre-prod. Production runs the same `docker-compose.yml`, unmodified, with a
+host-specific override beside it, and is operated there through its own
+backup service in exactly the same way.
+
 # Data Safety — CRITICAL RULES
 
 The PostgreSQL database is the single source of truth for all personal finance data. Data
