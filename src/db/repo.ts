@@ -58,6 +58,7 @@ import {
   snapshotsBodySchema,
   transactionSchema,
 } from "@/lib/schemas";
+import { PROVIDERS, type ApiKeys } from "@/lib/api-keys";
 
 type AccountRow = typeof accounts.$inferSelect;
 type HoldingRow = typeof holdings.$inferSelect;
@@ -631,6 +632,49 @@ export async function setContributionLimits(limits: ContributionLimits): Promise
   await db
     .insert(appMeta)
     .values({ key: CONTRIBUTION_LIMITS_KEY, value })
+    .onConflictDoUpdate({ target: appMeta.key, set: { value } });
+}
+
+const API_KEYS_KEY = "api_keys";
+
+/**
+ * The market-data keys saved in settings, if any.
+ *
+ * Secrets, kept beside the record they belong to. Nothing here decides which
+ * key is used — that is `src/db/api-keys.ts`, which weighs these against the
+ * environment — and nothing here reaches the browser: the settings route sends
+ * a description of a key, never a key.
+ */
+export async function getSavedApiKeys(): Promise<Partial<ApiKeys>> {
+  const [row] = await db.select().from(appMeta).where(eq(appMeta.key, API_KEYS_KEY));
+  if (!row) return {};
+  try {
+    const parsed = JSON.parse(row.value) as Partial<ApiKeys>;
+    const out: Partial<ApiKeys> = {};
+    for (const provider of PROVIDERS) {
+      const value = parsed?.[provider];
+      if (typeof value === "string" && value.trim() !== "") out[provider] = value.trim();
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Saves the keys given, and removes the ones set to an empty string. */
+export async function setSavedApiKeys(next: Partial<ApiKeys>): Promise<void> {
+  const current = await getSavedApiKeys();
+  const merged: Partial<ApiKeys> = { ...current };
+  for (const provider of PROVIDERS) {
+    if (!(provider in next)) continue;
+    const value = (next[provider] ?? "").trim();
+    if (value === "") delete merged[provider];
+    else merged[provider] = value;
+  }
+  const value = JSON.stringify(merged);
+  await db
+    .insert(appMeta)
+    .values({ key: API_KEYS_KEY, value })
     .onConflictDoUpdate({ target: appMeta.key, set: { value } });
 }
 

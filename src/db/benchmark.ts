@@ -10,8 +10,9 @@ import {
   parseMonthlyBars,
 } from "@/lib/benchmark";
 import { writePriceHistory } from "./price-history";
+import { apiKeys } from "./api-keys";
 
-const EODHD_TOKEN = process.env.EODHD_API_KEY ?? "";
+
 
 /** `app_meta` key holding the UTC date the gap was last attempted. */
 const ATTEMPT_KEY = "benchmark_fill_attempt";
@@ -72,7 +73,8 @@ async function markAttempted(today: string): Promise<void> {
  * Returns how many months were written.
  */
 export async function fillBenchmarkGap(now: Date = new Date()): Promise<number> {
-  if (!EODHD_TOKEN) return 0;
+  const { eodhd: token } = await apiKeys();
+  if (!token) return 0;
 
   const last = await lastBenchmarkMonth();
   const missing = missingMonths(last);
@@ -90,7 +92,7 @@ export async function fillBenchmarkGap(now: Date = new Date()): Promise<number> 
   const to = now.toISOString().slice(0, 10);
   const url =
     `https://eodhd.com/api/eod/${encodeURIComponent(BENCHMARK_TICKER)}` +
-    `?api_token=${EODHD_TOKEN}&fmt=json&period=m&from=${from}&to=${to}`;
+    `?api_token=${token}&fmt=json&period=m&from=${from}&to=${to}`;
 
   let bars: Map<string, number>;
   try {

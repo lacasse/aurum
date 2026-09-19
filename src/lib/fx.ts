@@ -1,4 +1,5 @@
 import { reserveTwelveDataCredits } from "@/db/twelvedata";
+import { apiKeys } from "@/db/api-keys";
 
 /**
  * The USD→CAD rate, cached process-wide.
@@ -8,7 +9,7 @@ import { reserveTwelveDataCredits } from "@/db/twelvedata";
  * against the same per-minute credit budget.
  */
 
-const TWELVE_DATA_KEY = process.env.TWELVEDATA_API_KEY ?? "";
+
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 /** Used when the provider has never answered. Roughly right beats nothing. */
@@ -29,14 +30,15 @@ export async function usdCadRate(now = Date.now()): Promise<FxResult> {
     return { rate: cachedRate, cached: true };
   }
 
-  if (!TWELVE_DATA_KEY || !(await reserveTwelveDataCredits(1))) {
+  const { twelvedata: key } = await apiKeys();
+  if (!key || !(await reserveTwelveDataCredits(1))) {
     if (cachedRate) return { rate: cachedRate, cached: true, stale: true };
     return { rate: FALLBACK_USD_CAD, cached: false, fallback: true };
   }
 
   try {
     const res = await fetch(
-      `https://api.twelvedata.com/exchange_rate?symbol=USD/CAD&apikey=${TWELVE_DATA_KEY}`,
+      `https://api.twelvedata.com/exchange_rate?symbol=USD/CAD&apikey=${key}`,
       { signal: AbortSignal.timeout(8_000) },
     );
     if (!res.ok) throw new Error(`Twelve Data responded ${res.status}`);

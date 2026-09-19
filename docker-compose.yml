@@ -50,8 +50,11 @@ services:
       - SETUID
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-aurum}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-aurum}
-      TWELVEDATA_API_KEY: ${TWELVEDATA_API_KEY:?set TWELVEDATA_API_KEY in .env}
-      EODHD_API_KEY: ${EODHD_API_KEY:?set EODHD_API_KEY in .env}
+      # Optional. Keys are settings now — Settings in the app writes them to
+      # the database, and what is here is the fallback for a deployment that
+      # has always carried them, so an upgrade needs no change.
+      TWELVEDATA_API_KEY: ${TWELVEDATA_API_KEY:-}
+      EODHD_API_KEY: ${EODHD_API_KEY:-}
       AUTH_USERNAME: ${AUTH_USERNAME:?set AUTH_USERNAME in .env}
       # One of these two must be set; auth.ts refuses to start without a
       # password and prefers the hash when both are present. Neither is

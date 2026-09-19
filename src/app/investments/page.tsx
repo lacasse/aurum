@@ -67,6 +67,9 @@ import type { Holding } from "@/lib/types";
 import { awaitingPrice, priceReward } from "@/lib/rewards";
 import { replayFlows } from "@/lib/analytics";
 import { isDemo } from "@/lib/demo";
+import Link from "next/link";
+import { noKeysAtAll, type KeyStates } from "@/lib/api-keys";
+import { DEMO_HOLDING_ID_PREFIX } from "@/lib/sample";
 
 const POLL_MS = 60 * 60_000;
 
@@ -351,6 +354,12 @@ export default function InvestmentsPage() {
   const [priceRefreshing, setPriceRefreshing] = useState(false);
   const [staleTickers, setStaleTickers] = useState<Set<string>>(new Set());
   /*
+   * Whether this installation can fetch a price at all. Without a key nothing
+   * refreshes and every price is simply the last one entered, which is worth
+   * saying plainly rather than leaving as a page that never updates.
+   */
+  const [keysMissing, setKeysMissing] = useState(false);
+  /*
    * Sort order for the holdings table. Value descending matches how a portfolio
    * is usually read — biggest position first — so it stays the default.
    */
@@ -439,6 +448,13 @@ export default function InvestmentsPage() {
     ) => {
       const priceable = new Map<string, { assetClass: string; currency: string }>();
       for (const h of subset) {
+        /*
+         * The seeded demo holdings are invented, and their tickers are somebody
+         * else's or nobody's. Looking them up spends an allowance of twenty a
+         * day on prices that mean nothing, which on a fresh installation is the
+         * whole allowance before the first real holding is entered.
+         */
+        if (h.id.startsWith(DEMO_HOLDING_ID_PREFIX)) continue;
         const key = h.ticker.trim().toUpperCase();
         if (!priceable.has(key)) {
           priceable.set(key, { assetClass: h.assetClass, currency: h.currency });
@@ -598,6 +614,21 @@ export default function InvestmentsPage() {
     () => (historyStart ? monthsSince(historyStart).length : 18),
     [historyStart],
   );
+
+  useEffect(() => {
+    // The demo fetches nothing and needs no key, so it is never missing one.
+    if (isDemo()) return;
+    let cancelled = false;
+    fetch("/api/settings/api-keys", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((s: KeyStates) => {
+        if (!cancelled) setKeysMissing(noKeysAtAll(s));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /* ---- benchmark ---- */
   useEffect(() => {
@@ -919,14 +950,28 @@ export default function InvestmentsPage() {
       }
     >
       <div className="space-y-4">
-        {staleTickers.size > 0 && (
+        {(staleTickers.size > 0 || keysMissing) && (
           <Card className="border-amber-500/40 bg-amber-500/5 p-4">
             <p className="text-sm font-medium text-amber-400">
-              {staleTickers.size} price{staleTickers.size === 1 ? "" : "s"} not
-              updated today
+              {keysMissing
+                ? "Prices are not being updated"
+                : `${staleTickers.size} price${staleTickers.size === 1 ? "" : "s"} not updated today`}
             </p>
             <p className="mt-1 text-xs text-ink-dim">
-              Showing the last known price for these holdings.{" "}
+              {keysMissing ? (
+                <>
+                  No market-data key has been added, so nothing here can be
+                  priced: every holding shows the last price it was given.{" "}
+                  <Link
+                    href="/settings"
+                    className="font-medium text-amber-400 underline underline-offset-2 hover:text-amber-300"
+                  >
+                    Add a key in Settings
+                  </Link>
+                  . Both providers have a free plan.{" "}
+                </>
+              ) : null}
+              {keysMissing ? null : "Showing the last known price for these holdings. "}
               {/*
                 * The daily cap is named only when it is actually the cause.
                 * Staleness now covers both providers, and a Twelve Data ticker
@@ -934,9 +979,11 @@ export default function InvestmentsPage() {
                 * allowance — saying so would send you looking in the wrong
                 * place, or waiting for a reset that changes nothing.
                 */}
-              {quota && quota.remaining === 0
-                ? `The EODHD free plan allows ${quota.limit} price lookups a day and all ${quota.used} have been used; they reset at ${new Date(quota.resetsAt).toLocaleString()}. `
-                : "They update on the next successful refresh. "}
+              {keysMissing
+                ? null
+                : quota && quota.remaining === 0
+                  ? `The EODHD free plan allows ${quota.limit} price lookups a day and all ${quota.used} have been used; they reset at ${new Date(quota.resetsAt).toLocaleString()}. `
+                  : "They update on the next successful refresh. "}
             </p>
 
             {/*
@@ -947,6 +994,7 @@ export default function InvestmentsPage() {
               */}
             <button
               type="button"
+              hidden={keysMissing}
               onClick={() => setForceOpen(true)}
               disabled={priceRefreshing}
               aria-haspopup="dialog"

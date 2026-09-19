@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   Moon,
   Receipt,
+  Settings,
   ReceiptText,
   Sun,
   Trash2,
@@ -48,6 +49,7 @@ const NAV = [
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/year", label: "Year", icon: CalendarRange },
+  { href: "/settings", label: "Settings", icon: Settings },
   { href: "/tax", label: "Tax", icon: Receipt, unreleased: true },
   { href: "/guide", label: "Guide", icon: BookOpen, unreleased: true },
   /* Temporary: the colour-picking bench. Delete this line with the page. */
