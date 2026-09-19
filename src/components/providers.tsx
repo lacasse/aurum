@@ -1,6 +1,7 @@
 "use client";
 
 import { ThemeProvider } from "next-themes";
+import { usePathname } from "next/navigation";
 import { ReactNode, useEffect } from "react";
 import { useFinance } from "@/lib/store";
 
@@ -36,10 +37,19 @@ function LoadFailure({ kind }: { kind: "auth" | "failed" }) {
 export function Providers({ children }: { children: ReactNode }) {
   const loadFromServer = useFinance((s) => s.loadFromServer);
   const loadError = useFinance((s) => s.loadError);
+  /*
+   * Not on the login page.
+   *
+   * The record was fetched there too, which is the one page where nobody is
+   * signed in yet: the request came back 401 and the page said "your session
+   * has expired" to someone who had not tried to start one — over the demo
+   * button, at that. Signing in loads the record itself, before it navigates.
+   */
+  const onLoginPage = usePathname() === "/login";
 
   useEffect(() => {
-    void loadFromServer();
-  }, [loadFromServer]);
+    if (!onLoginPage) void loadFromServer();
+  }, [loadFromServer, onLoginPage]);
 
   return (
     <ThemeProvider
@@ -48,7 +58,7 @@ export function Providers({ children }: { children: ReactNode }) {
       enableSystem={false}
       disableTransitionOnChange
     >
-      {loadError ? <LoadFailure kind={loadError} /> : null}
+      {loadError && !onLoginPage ? <LoadFailure kind={loadError} /> : null}
       {children}
     </ThemeProvider>
   );
