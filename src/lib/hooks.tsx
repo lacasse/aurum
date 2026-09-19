@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useFinance } from "./store";
 import type { AssetClass, Currency } from "./types";
 import type { SpendGroup } from "./expenses";
+import { getSettings } from "@/lib/api";
+import { isDemo } from "./demo";
 
 const emptySubscribe = () => () => {};
 
@@ -81,9 +83,8 @@ export function useSpendGroups(): Record<string, SpendGroup> {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/expense-settings", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((s: { groups?: Record<string, SpendGroup> }) => {
+    getSettings<{ groups?: Record<string, SpendGroup> }>("/api/expense-settings")
+      .then((s) => {
         if (!cancelled) setGroups(s.groups ?? {});
       })
       .catch(() => {});
@@ -177,6 +178,13 @@ export function useTickerValidation(ticker: string, assetClass: AssetClass, curr
     if (cached) {
       setStatus(cached.valid ? "valid" : "invalid");
       setPrice(cached.price);
+      return;
+    }
+
+    // A ticker typed into the demo is not sent to the server to be checked.
+    if (isDemo()) {
+      setStatus("unknown");
+      setPrice(null);
       return;
     }
 

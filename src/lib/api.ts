@@ -8,6 +8,7 @@ import type {
   RecurringRule,
   Transaction,
 } from "./types";
+import { browserStorage, isDemo, readDemoSetting, writeDemoSetting, type DemoSetting } from "./demo";
 
 export interface ServerState extends FinanceData {
   merchantRules: Record<string, string>;
@@ -31,7 +32,32 @@ export class NotAuthenticatedError extends Error {
   }
 }
 
+/**
+ * A request the demo does not make.
+ *
+ * The store keeps a demo visitor's record in the browser and never asks the
+ * server for anything. This is the backstop behind that: if some path forgets,
+ * the request still does not leave, and the caller hears a reason rather than
+ * an expired session.
+ */
+export class DemoModeError extends Error {
+  constructor(url: string) {
+    super(`not sent in the demo: ${url}`);
+    this.name = "DemoModeError";
+  }
+}
+
 async function send<T>(url: string, method: string, body?: unknown): Promise<T> {
+  /*
+   * In the demo a write is a success that goes nowhere — the store has already
+   * applied it and saves it in the browser — and a read is refused, since the
+   * only thing on the other end is the record the demo exists to keep out of
+   * reach.
+   */
+  if (isDemo()) {
+    if (method === "GET") throw new DemoModeError(url);
+    return undefined as T;
+  }
   const res = await fetch(url, {
     method,
     headers: body === undefined ? undefined : JSON_HEADERS,
@@ -112,3 +138,34 @@ export const api = {
       "GET",
     ),
 };
+
+/*
+ * Settings that pages load and save for themselves rather than through the
+ * store. One pair of functions for all of them, so the demo is handled in one
+ * place: in the demo they are kept in the browser under their own key, and
+ * otherwise they go to the server exactly as they did.
+ */
+const SETTINGS: Record<"/api/expense-settings" | "/api/contribution-limits", DemoSetting> = {
+  "/api/expense-settings": "expense-settings",
+  "/api/contribution-limits": "contribution-limits",
+};
+export type SettingsPath = keyof typeof SETTINGS;
+
+export async function getSettings<T extends object>(path: SettingsPath): Promise<T> {
+  if (isDemo()) return (readDemoSetting(browserStorage(), SETTINGS[path]) ?? {}) as T;
+  const res = await fetch(path, { cache: "no-store" });
+  if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
+  return (await res.json()) as T;
+}
+
+export async function saveSettings(path: SettingsPath, value: object): Promise<void> {
+  if (isDemo()) {
+    writeDemoSetting(browserStorage(), SETTINGS[path], value);
+    return;
+  }
+  await fetch(path, {
+    method: "PUT",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(value),
+  });
+}

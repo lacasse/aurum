@@ -2,9 +2,10 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { Lock } from "lucide-react";
+import { Lock, Sparkles } from "lucide-react";
 import { Button, Input, Field } from "@/components/ui";
 import { useFinance } from "@/lib/store";
+import { enterDemo, leaveDemo } from "@/lib/demo";
 
 function LoginForm() {
   const router = useRouter();
@@ -56,6 +57,8 @@ function LoginForm() {
        * failure banner clears with it. If this request fails the banner says
        * so, which is the correct outcome rather than a silent one.
        */
+      // A real session ends the demo, or the store would load the demo again.
+      leaveDemo();
       await loadFromServer();
       router.push(next);
       router.refresh();
@@ -64,6 +67,19 @@ function LoginForm() {
     } finally {
       setLoading(false);
     }
+  };
+
+  /*
+   * The same order as signing in: load the store as the demo first, then
+   * navigate. The store loaded once already, when this page mounted without a
+   * demo, and a client navigation does not load it again. The cookie goes with
+   * the navigation's own requests, which is what lets the route guard through.
+   */
+  const tryDemo = async () => {
+    enterDemo();
+    await loadFromServer();
+    router.push("/");
+    router.refresh();
   };
 
   return (
@@ -121,6 +137,16 @@ function LoginForm() {
             {loading ? "Signing in…" : "Sign in"}
           </Button>
         </form>
+
+        <div className="mt-4 rounded-2xl border border-dashed border-line p-4 text-center">
+          <Button variant="secondary" className="w-full" onClick={tryDemo}>
+            <Sparkles size={15} /> Explore with demo data
+          </Button>
+          <p className="mt-2 text-[0.6875rem] leading-relaxed text-ink-faint">
+            The whole app, with invented figures. Anything you change is saved in
+            this browser only, and never sent anywhere.
+          </p>
+        </div>
       </div>
     </div>
   );

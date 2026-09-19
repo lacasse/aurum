@@ -1,31 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySession, getSessionCookieName } from "./lib/auth";
+import { DEMO_COOKIE } from "./lib/demo";
+import { decideRoute } from "./lib/route-guard";
 
-function isAuthenticated(req: NextRequest): boolean {
-  return verifySession(req.cookies.get(getSessionCookieName())?.value);
-}
-
+/*
+ * The decision is made in lib/route-guard, where it is tested; this only reads
+ * the cookies and turns the answer into a response.
+ */
 export function proxy(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+  const decision = decideRoute(req.nextUrl.pathname, {
+    authenticated: verifySession(req.cookies.get(getSessionCookieName())?.value),
+    demo: req.cookies.get(DEMO_COOKIE)?.value === "1",
+  });
 
-  if (isAuthenticated(req)) {
-    // Already logged in: don't show the login page
-    if (pathname === "/login") {
-      return NextResponse.redirect(new URL("/", req.url));
-    }
-    return NextResponse.next();
-  }
-
-  // Not authenticated.
-  if (pathname.startsWith("/api/")) {
+  if (decision.kind === "unauthorized") {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
-
-  if (pathname === "/login") {
-    return NextResponse.next();
-  }
-
-  return NextResponse.redirect(new URL(`/login?next=${encodeURIComponent(pathname)}`, req.url));
+  const res =
+    decision.kind === "redirect"
+      ? NextResponse.redirect(new URL(decision.to, req.url))
+      : NextResponse.next();
+  if (decision.endDemo) res.cookies.delete(DEMO_COOKIE);
+  return res;
 }
 
 export const config = {

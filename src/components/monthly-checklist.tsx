@@ -57,6 +57,7 @@ import {
 } from "@/lib/corporate-actions";
 import { planTrades } from "@/lib/trade-batch";
 import { contributionsByMonth, estimateValue } from "@/lib/pension";
+import { getSettings, saveSettings } from "@/lib/api";
 
 type Step =
   | "import"
@@ -1984,9 +1985,8 @@ function Checklist({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/contribution-limits", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { limits?: ContributionLimits; deferrals?: RoomDeferrals }) => {
+    getSettings<{ limits?: ContributionLimits; deferrals?: RoomDeferrals }>("/api/contribution-limits")
+      .then((d) => {
         if (cancelled) return;
         setLimits(d.limits ?? {});
         setDeferrals(d.deferrals ?? {});
@@ -2003,11 +2003,7 @@ function Checklist({ onClose }: { onClose: () => void }) {
       const tidied = clearAnswered(nextLimits, nextDeferrals);
       setLimits(nextLimits);
       setDeferrals(tidied);
-      fetch("/api/contribution-limits", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limits: nextLimits, deferrals: tidied }),
-      }).catch(() => {});
+      saveSettings("/api/contribution-limits", { limits: nextLimits, deferrals: tidied }).catch(() => {});
     },
     [],
   );
