@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { Button, Modal } from "./ui";
 import { useFinance } from "@/lib/store";
+import { leaveDemo } from "@/lib/demo";
 import { useMounted } from "@/lib/hooks";
 import { cn } from "./ui";
 
@@ -164,6 +165,62 @@ function ThemeToggle() {
  * It disappears for good once that data is gone — there is nothing left to
  * delete, and the server will not seed it again.
  */
+/**
+ * Says, on every page, that this is the demo.
+ *
+ * The figures are invented but plausible, which is exactly what makes them
+ * dangerous to mistake for a real record — so the demo is never shown without
+ * this, and the way out is always in reach.
+ */
+function DemoBanner() {
+  const router = useRouter();
+  const demo = useFinance((s) => s.demo);
+  const resetDemo = useFinance((s) => s.resetDemo);
+  const [confirming, setConfirming] = useState(false);
+  if (!demo) return null;
+
+  const signIn = () => {
+    leaveDemo();
+    router.push("/login");
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-brand/30 bg-brand/10 px-4 py-2 text-xs sm:px-6 lg:px-8">
+      <p className="min-w-0 flex-1 text-ink-dim">
+        <span className="font-semibold text-brand">Demo</span> · Invented data. Your
+        changes are saved in this browser only, and never sent anywhere.
+      </p>
+      <div className="flex items-center gap-2">
+        {confirming ? (
+          <>
+            <span className="text-ink-faint">Discard your changes?</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                resetDemo();
+                setConfirming(false);
+              }}
+            >
+              Reset
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+              Keep
+            </Button>
+          </>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>
+            Reset demo
+          </Button>
+        )}
+        <Button size="sm" variant="secondary" onClick={signIn}>
+          Sign in
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function DeleteDemo() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -302,7 +359,15 @@ function SidebarContent({
   const pathname = usePathname();
   const router = useRouter();
 
+  const demo = useFinance((s) => s.demo);
+
   const logout = async () => {
+    if (demo) {
+      // Nothing to sign out of. What the demo saved stays for the next visit.
+      leaveDemo();
+      router.push("/login");
+      return;
+    }
     await fetch("/api/logout", { method: "POST" });
     router.push("/login");
     router.refresh();
@@ -354,7 +419,7 @@ function SidebarContent({
           className="flex h-7 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium text-ink-faint transition-colors hover:bg-elevated hover:text-ink-dim"
         >
           <LogOut size={14} className="shrink-0" />
-          <span className="nav-label whitespace-nowrap">Sign out</span>
+          <span className="nav-label whitespace-nowrap">{demo ? "Exit demo" : "Sign out"}</span>
         </button>
         {collapsible ? <CollapseToggle /> : null}
       </div>
@@ -399,6 +464,7 @@ export function Shell({
           * title and two buttons over every screen of content below it — a
           * band of the window spent restating where you already are.
           */}
+        <DemoBanner />
         <header className="border-b border-line bg-background">
           <div className="flex items-center gap-3 px-4 py-4 sm:px-6 lg:px-8">
             <Button

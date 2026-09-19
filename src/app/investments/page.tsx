@@ -66,6 +66,7 @@ import {
 import type { Holding } from "@/lib/types";
 import { awaitingPrice, priceReward } from "@/lib/rewards";
 import { replayFlows } from "@/lib/analytics";
+import { isDemo } from "@/lib/demo";
 
 const POLL_MS = 60 * 60_000;
 
@@ -444,6 +445,8 @@ export default function InvestmentsPage() {
         }
       }
       if (priceable.size === 0) return;
+      // The demo's holdings are the visitor's to invent; their tickers stay in the browser.
+      if (isDemo()) return;
 
       setPriceRefreshing(true);
       try {
@@ -598,6 +601,8 @@ export default function InvestmentsPage() {
 
   /* ---- benchmark ---- */
   useEffect(() => {
+    // Nothing is fetched in the demo; the comparison simply is not drawn.
+    if (isDemo()) return;
     let cancelled = false;
     fetch(`/api/benchmark?months=${spanMonths}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))

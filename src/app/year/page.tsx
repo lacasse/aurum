@@ -63,6 +63,7 @@ import {
   type RegisteredPlan,
 } from "@/lib/contributions";
 import { fmtCAD, fmtCompact, fmtPct, fmtSignedCAD, labelMonth } from "@/lib/format";
+import { getSettings, saveSettings } from "@/lib/api";
 
 /** How much of the monthly composition to draw. */
 type Range = "ytd" | "12" | "60" | "all";
@@ -97,9 +98,8 @@ export default function YearPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/contribution-limits", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { limits?: ContributionLimits }) => {
+    getSettings<{ limits?: ContributionLimits }>("/api/contribution-limits")
+      .then((d) => {
         if (!cancelled) setLimits(d.limits ?? {});
       })
       .catch(() => {});
@@ -110,11 +110,7 @@ export default function YearPage() {
 
   const saveLimits = useCallback((next: ContributionLimits) => {
     setLimits(next);
-    fetch("/api/contribution-limits", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ limits: next }),
-    }).catch(() => {});
+    saveSettings("/api/contribution-limits", { limits: next }).catch(() => {});
   }, []);
 
   /*

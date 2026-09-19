@@ -59,6 +59,7 @@ import {
   labelMonth,
 } from "@/lib/format";
 import type { Budget } from "@/lib/types";
+import { getSettings, saveSettings } from "@/lib/api";
 
 interface Settings {
   groups: Record<string, SpendGroup>;
@@ -108,9 +109,8 @@ export default function ExpensesPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/expense-settings", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((s: Settings) => {
+    getSettings<Settings>("/api/expense-settings")
+      .then((s) => {
         if (!cancelled) setSettings({ groups: s.groups ?? {}, car: s.car ?? null });
       })
       .catch(() => {});
@@ -121,11 +121,7 @@ export default function ExpensesPage() {
 
   const save = useCallback((next: Settings) => {
     setSettings(next);
-    fetch("/api/expense-settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(next),
-    }).catch(() => {});
+    saveSettings("/api/expense-settings", next).catch(() => {});
   }, []);
 
   const months = useMemo(() => expenseMonths(transactions), [transactions]);

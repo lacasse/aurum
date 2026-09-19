@@ -7,6 +7,7 @@ import {
   resetLoginFailures,
 } from "@/lib/login-rate-limit";
 import { loginSchema } from "@/lib/schemas";
+import { DEMO_COOKIE } from "@/lib/demo";
 
 function clientIp(request: Request): string | undefined {
   // Prefer X-Real-IP: nginx sets it to the real peer address (not spoofable
@@ -72,5 +73,11 @@ export async function POST(request: Request) {
     path: session.path,
     maxAge: session.maxAge,
   });
+  /*
+   * Signing in ends any demo in this browser. The client clears it as well, but
+   * the session is the authority: a demo cookie left beside a real session
+   * would have the app load invented data over the record just signed into.
+   */
+  (await cookies()).delete(DEMO_COOKIE);
   return NextResponse.json({ ok: true });
 }

@@ -21,6 +21,7 @@ import { HISTORY_MONTHS } from "./types";
 import { currentMonthKey } from "./format";
 import type { SnapshotHistory } from "./analytics";
 import { api, NotAuthenticatedError } from "./api";
+import { browserStorage, clearDemo, isDemo, readDemo, writeDemo, type DemoRecord } from "./demo";
 
 export function uid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -152,6 +153,16 @@ interface FinanceStore extends FinanceData {
   demoPresent: boolean;
   /** Deletes the seeded demo rows, keeping everything the user created. */
   deleteDemo: () => Promise<void>;
+  /**
+   * Whether this is the demo: invented data, kept in the browser, and never
+   * sent to the server. Set by the load, from the demo cookie — so it is for
+   * drawing the page. Decisions about the server read the cookie itself with
+   * `isDemo()`: a page's effects run before the app's, so a page can ask for
+   * data before this flag has been set.
+   */
+  demo: boolean;
+  /** Throws away the demo visitor's changes and starts again from fresh data. */
+  resetDemo: () => void;
   /** Monthly snapshots for the checklist feature. */
   snapshots: MonthlySnapshot[];
   snapshotMonth: string;
@@ -254,6 +265,20 @@ function messageFor(err: unknown): string {
  */
 let historyInFlight: Promise<void> | null = null;
 
+/** The months a demo visitor has closed with the checklist. */
+let demoSnapshots: MonthlySnapshot[] = [];
+
+/** The demo as the visitor left it, or fresh invented data. */
+function demoRecord(): Omit<DemoRecord, "snapshots"> {
+  const saved = readDemo(browserStorage());
+  demoSnapshots = saved?.snapshots ?? [];
+  if (saved) {
+    const { snapshots: _snapshots, ...record } = saved;
+    return record;
+  }
+  return { ...generateSampleData(), merchantRules: {} };
+}
+
 /** Compute CAD fields for a holding given the current FX rate. */
 function computeCadFields(
   h: Pick<Holding, "price" | "avgCost" | "dividendsReceived" | "history" | "currency"> & {
@@ -340,6 +365,7 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
   usdCadRate: 1.37,
   merchantRules: {},
   demoPresent: false,
+  demo: false,
   categories: [...generateSampleData().categories],
   snapshots: [],
   snapshotMonth: "",
@@ -347,6 +373,7 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
   snapshotHistoryReady: false,
 
   refreshFxRate: async () => {
+    if (isDemo()) return;
     try {
       const res = await fetch("/api/fx");
       const data = await res.json();
@@ -372,13 +399,23 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
    * no figure on screen is demo data pretending to be the owner's.
    */
   loadFromServer: async () => {
+    /*
+     * The demo loads nothing from the server. It picks up where the visitor
+     * left it, or starts from freshly invented data — and says so on every
+     * page, so it can never be read as anybody's real record.
+     */
+    if (isDemo()) {
+      set({ ...demoRecord(), demo: true, demoPresent: false, hydrated: true, loadError: null });
+      return;
+    }
     try {
       const [data] = await Promise.all([api.loadData(), get().refreshFxRate()]);
-      set({ ...data, hydrated: true, loadError: null });
+      set({ ...data, demo: false, hydrated: true, loadError: null });
     } catch (err) {
       report(err);
       set({
         ...emptyData(),
+        demo: false,
         hydrated: true,
         loadError: err instanceof NotAuthenticatedError ? "auth" : "failed",
       });
@@ -393,6 +430,11 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
   },
 
   loadSnapshots: async (month) => {
+    if (isDemo()) {
+      const rows = demoSnapshots.filter((r) => r.month === month);
+      set({ snapshots: rows, snapshotMonth: month });
+      return;
+    }
     try {
       const { snapshots } = await api.getSnapshots(month);
       set({ snapshots, snapshotMonth: month });
@@ -411,6 +453,16 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
    */
   loadSnapshotHistory: async () => {
     if (get().snapshotHistoryReady) return;
+    /*
+     * The server aggregates the saved months into a history; doing the same
+     * here would be a second implementation of that rule. The demo draws its
+     * charts from the holdings' own price history instead, as a record with no
+     * months closed does.
+     */
+    if (isDemo()) {
+      set({ snapshotHistory: {}, snapshotHistoryReady: true });
+      return;
+    }
     if (historyInFlight) return historyInFlight;
     historyInFlight = (async () => {
       try {
@@ -434,6 +486,12 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
    * a rejected month came to look like a saved one.
    */
   saveSnapshots: async (rows) => {
+    if (isDemo()) {
+      const months = new Set(rows.map((r) => r.month));
+      demoSnapshots = [...demoSnapshots.filter((r) => !months.has(r.month)), ...rows];
+      set({ snapshots: rows, snapshotHistory: {}, snapshotHistoryReady: false });
+      return;
+    }
     try {
       await api.saveSnapshots(rows);
       /*
@@ -798,6 +856,17 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
         api.deleteRecurring(id).catch(report);
       },
 
+      resetDemo: () => {
+        clearDemo(browserStorage());
+        demoSnapshots = [];
+        set({
+          ...demoRecord(),
+          snapshots: [],
+          snapshotHistory: {},
+          snapshotHistoryReady: false,
+        });
+      },
+
       deleteDemo: async () => {
         // Deliberately not optimistic: the server decides which rows are demo
         // rows, so the store takes the state it returns rather than guessing.
@@ -810,3 +879,32 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
       },
     }),
 );
+
+/*
+ * Every change in the demo is kept in the browser, so a visitor who reloads or
+ * comes back finds what they left. Only the record is saved — never anything
+ * from the server, which the demo does not reach — and only once the demo has
+ * loaded, so the empty store the app starts with is never written over it.
+ */
+if (typeof window !== "undefined") {
+  let pending: ReturnType<typeof setTimeout> | null = null;
+  useFinance.subscribe((s) => {
+    if (!s.demo || !s.hydrated) return;
+    if (pending) clearTimeout(pending);
+    pending = setTimeout(() => {
+      pending = null;
+      const now = useFinance.getState();
+      if (!now.demo) return;
+      writeDemo(browserStorage(), {
+        accounts: now.accounts,
+        transactions: now.transactions,
+        holdings: now.holdings,
+        budgets: now.budgets,
+        categories: now.categories,
+        recurring: now.recurring,
+        merchantRules: now.merchantRules,
+        snapshots: demoSnapshots,
+      });
+    }, 250);
+  });
+}
