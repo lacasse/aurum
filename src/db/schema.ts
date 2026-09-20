@@ -212,3 +212,45 @@ export const priceHistory = pgTable(
     primaryKey({ name: "price_history_pkey", columns: [t.ticker, t.month] }),
   ],
 );
+
+/**
+ * The people who use this installation.
+ *
+ * Until now there was one, and they lived in the environment: a username and a
+ * password hash in `.env`, read at startup. That made an account something only
+ * whoever ran the deployment could change, and made "whose data is this?" a
+ * question the database could not answer, because every row belonged to the
+ * installation rather than to anybody.
+ *
+ * The first row is created from those same environment variables when the
+ * table is empty, so an existing installation keeps its login exactly as it
+ * was and every row it already holds becomes that user's.
+ */
+export const users = pgTable("users", {
+  id: text("id").primaryKey(),
+  /* Stored lowercase; the login compares lowercase, so "Alex" and "alex" are
+     one account rather than two. */
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  /** "admin" may invite others and remove them. The first user is one. */
+  role: text("role").notNull().default("member"),
+  createdAt: text("created_at").notNull(),
+});
+
+/**
+ * Single-use invitations.
+ *
+ * Nobody can sign themselves up: an admin creates an invitation, and the link
+ * carries a token that is good once. The token is stored hashed, so the table
+ * cannot be read to gain access — the same reason a password is not stored.
+ */
+export const invites = pgTable("invites", {
+  id: text("id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  /** Set when it has been used; a used invitation is kept as a record. */
+  acceptedAt: text("accepted_at"),
+  acceptedBy: text("accepted_by"),
+});

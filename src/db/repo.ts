@@ -3,6 +3,7 @@ import { db } from "./index";
 import {
   accounts,
   appMeta,
+  users,
   budgets,
   categories,
   holdings,
@@ -633,6 +634,68 @@ export async function setContributionLimits(limits: ContributionLimits): Promise
     .insert(appMeta)
     .values({ key: CONTRIBUTION_LIMITS_KEY, value })
     .onConflictDoUpdate({ target: appMeta.key, set: { value } });
+}
+
+/* ------------------------------------------------------------------ */
+/* Users                                                               */
+/* ------------------------------------------------------------------ */
+
+export interface UserRow {
+  id: string;
+  username: string;
+  role: "admin" | "member";
+  createdAt: string;
+}
+
+const asUser = (r: typeof users.$inferSelect): UserRow => ({
+  id: r.id,
+  username: r.username,
+  role: r.role === "admin" ? "admin" : "member",
+  createdAt: r.createdAt,
+});
+
+export async function countUsers(): Promise<number> {
+  const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(users);
+  return row?.n ?? 0;
+}
+
+/** Usernames are held lowercase, so signing in is not case-sensitive. */
+export async function findUserByUsername(username: string): Promise<
+  (UserRow & { passwordHash: string }) | null
+> {
+  const [row] = await db
+    .select()
+    .from(users)
+    .where(eq(users.username, username.trim().toLowerCase()));
+  return row ? { ...asUser(row), passwordHash: row.passwordHash } : null;
+}
+
+export async function findUser(id: string): Promise<UserRow | null> {
+  const [row] = await db.select().from(users).where(eq(users.id, id));
+  return row ? asUser(row) : null;
+}
+
+export async function listUsers(): Promise<UserRow[]> {
+  const rows = await db.select().from(users).orderBy(users.createdAt);
+  return rows.map(asUser);
+}
+
+/**
+ * Adds a user. Fails rather than overwrites when the name is taken: the unique
+ * index is the authority, so two people signing up at once cannot both win.
+ */
+export async function insertUser(user: {
+  id: string;
+  username: string;
+  passwordHash: string;
+  role: "admin" | "member";
+  createdAt: string;
+}): Promise<void> {
+  await db.insert(users).values({ ...user, username: user.username.trim().toLowerCase() });
+}
+
+export async function setUserPassword(id: string, passwordHash: string): Promise<void> {
+  await db.update(users).set({ passwordHash }).where(eq(users.id, id));
 }
 
 const API_KEYS_KEY = "api_keys";
