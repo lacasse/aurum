@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, KeyRound } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { Button, Card, CardHeader, Field, Input } from "@/components/ui";
 import { useFinance } from "@/lib/store";
@@ -18,7 +18,7 @@ import { PROVIDERS, invalidReason, type KeyState, type KeyStates, type Provider 
 
 const PROVIDER_COPY: Record<
   Provider,
-  { name: string; what: string; limits: string; free: string; url: string }
+  { name: string; what: string; limits: string; free: string }
 > = {
   eodhd: {
     name: "EODHD",
@@ -26,8 +26,7 @@ const PROVIDER_COPY: Record<
       "End-of-day prices for shares and funds — what a holding closed at. This is what most of the portfolio is valued with, and it is asked once a day per security rather than continuously.",
     limits:
       "The free plan allows 20 price lookups a day. The app spends them deliberately: it fetches the securities whose prices are oldest first, keeps the rest at their last known price, and marks those as not updated today rather than guessing.",
-    free: "eodhd.com — free plan, no card",
-    url: "https://eodhd.com/",
+    free: "Sign up for the free plan on the provider's own site — no card needed — and paste the key here.",
   },
   twelvedata: {
     name: "Twelve Data",
@@ -35,8 +34,7 @@ const PROVIDER_COPY: Record<
       "Live quotes for crypto, and the US dollar exchange rate used to convert holdings priced in dollars. Without it, crypto and anything in US dollars keep the last rate the app saw.",
     limits:
       "The free plan allows 8 requests a minute and 800 a day. The app holds a little of each back, so a price refresh cannot use the last of the allowance and leave the exchange rate unfetchable.",
-    free: "twelvedata.com — free plan, no card",
-    url: "https://twelvedata.com/",
+    free: "Sign up for the free plan on the provider's own site — no card needed — and paste the key here.",
   },
 };
 
@@ -203,14 +201,13 @@ export default function SettingsPage() {
                 {saved === provider ? (
                   <p className="text-xs text-positive">Saved. It is used from the next refresh.</p>
                 ) : null}
-                <a
-                  href={copy.url}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1.5 text-xs text-ink-faint underline-offset-2 hover:text-ink-dim hover:underline"
-                >
-                  {copy.free} <ExternalLink size={12} />
-                </a>
+                {/*
+                  * Named, not linked. The security check refuses either
+                  * provider's host outside the two places allowed to call it,
+                  * and it is right to: the way to keep an unrationed call from
+                  * creeping in is for the name not to appear elsewhere at all.
+                  */}
+                <p className="text-xs text-ink-faint">{copy.free}</p>
               </div>
             </Card>
           );

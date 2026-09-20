@@ -71,7 +71,7 @@ describe("refusing what cannot be a key", () => {
   test("what cannot be a key is named", () => {
     assert.match(invalidReason("abc") ?? "", /too short/);
     assert.match(invalidReason("abcd1234 efgh5678") ?? "", /no spaces/);
-    assert.match(invalidReason("https://eodhd.com/api/token") ?? "", /web address/);
+    assert.match(invalidReason("https://example.com/api/token") ?? "", /web address/);
     assert.match(invalidReason("x".repeat(201)) ?? "", /longer than/);
   });
 });
