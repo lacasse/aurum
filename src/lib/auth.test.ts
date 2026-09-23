@@ -65,13 +65,19 @@ describe("sessions", () => {
   const USER = "user-1111";
   const OTHER = "user-2222";
 
-  test("a freshly issued cookie verifies, and names its user", () => {
-    const session = createSession(USER);
+  test("a freshly issued cookie verifies, and names its user and epoch", () => {
+    const session = createSession(USER, 3);
     assert.equal(session.name, getSessionCookieName());
     assert.equal(session.httpOnly, true);
     assert.equal(session.sameSite, "lax");
     assert.equal(verifySession(session.value), true);
-    assert.equal(sessionUser(session.value), USER);
+    assert.deepEqual(sessionUser(session.value), { userId: USER, epoch: 3 });
+  });
+
+  test("the epoch is signed, so an old cookie cannot claim a new one", () => {
+    const session = createSession(USER, 1);
+    const [id, , expiry, signature] = session.value.split(".");
+    assert.equal(sessionUser(`${id}.2.${expiry}.${signature}`), null);
   });
 
   test("one user's cookie is never read as another's", () => {
@@ -80,9 +86,9 @@ describe("sessions", () => {
      * the cookie, so swapping it in an otherwise valid cookie proves nothing.
      */
     const session = createSession(USER);
-    const [, expiry, signature] = session.value.split(".");
-    assert.equal(sessionUser(`${OTHER}.${expiry}.${signature}`), null);
-    assert.notEqual(sessionUser(createSession(OTHER).value), USER);
+    const [, epoch, expiry, signature] = session.value.split(".");
+    assert.equal(sessionUser(`${OTHER}.${epoch}.${expiry}.${signature}`), null);
+    assert.notEqual(sessionUser(createSession(OTHER).value)?.userId, USER);
   });
 
   test("rejects missing, malformed and tampered cookies", () => {
@@ -90,24 +96,26 @@ describe("sessions", () => {
     assert.equal(verifySession(""), false);
     assert.equal(verifySession("no-separator"), false);
     assert.equal(verifySession("two.parts"), false);
+    assert.equal(verifySession("three.part.cookie"), false);
     assert.equal(sessionUser(undefined), null);
 
     const session = createSession(USER);
-    const [id, expiry, signature] = session.value.split(".");
-    assert.equal(verifySession(`${id}.${expiry}.${signature}tampered`), false);
+    const [id, epoch, expiry, signature] = session.value.split(".");
+    assert.equal(verifySession(`${id}.${epoch}.${expiry}.${signature}tampered`), false);
     // Extending the expiry invalidates the signature it was computed over.
-    assert.equal(verifySession(`${id}.${Number(expiry) + 60_000}.${signature}`), false);
+    assert.equal(verifySession(`${id}.${epoch}.${Number(expiry) + 60_000}.${signature}`), false);
   });
 
   test("rejects an expired cookie even with a valid signature", () => {
     const session = createSession(USER);
-    const [id, , signature] = session.value.split(".");
+    const [id, epoch, , signature] = session.value.split(".");
     const past = Date.now() - 1000;
-    assert.equal(verifySession(`${id}.${past}.${signature}`), false);
+    assert.equal(verifySession(`${id}.${epoch}.${past}.${signature}`), false);
   });
 
   test("an empty user id proves nothing", () => {
-    assert.equal(sessionUser(`.${Date.now() + 1000}.signature`), null);
+    assert.equal(sessionUser(`.0.${Date.now() + 1000}.signature`), null);
+    assert.equal(sessionUser(`${USER}.x.${Date.now() + 1000}.signature`), null);
   });
 
   test("rotating AUTH_SECRET invalidates already-issued cookies", () => {

@@ -92,7 +92,7 @@ export async function fillBenchmarkGap(now: Date = new Date()): Promise<number> 
   const to = now.toISOString().slice(0, 10);
   const url =
     `https://eodhd.com/api/eod/${encodeURIComponent(BENCHMARK_TICKER)}` +
-    `?api_token=${token}&fmt=json&period=m&from=${from}&to=${to}`;
+    `?api_token=${encodeURIComponent(token)}&fmt=json&period=m&from=${from}&to=${to}`;
 
   let bars: Map<string, number>;
   try {

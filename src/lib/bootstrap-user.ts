@@ -1,5 +1,6 @@
 import { hashPassword } from "./auth";
 import { uid } from "./ids";
+import { normaliseUsername } from "./usernames";
 
 /**
  * The first user, worked out from the environment an installation already has.
@@ -22,7 +23,7 @@ export function bootstrapUserFromEnv(env: NodeJS.ProcessEnv | Record<string, str
   role: "admin";
   createdAt: string;
 } | null {
-  const username = (env.AUTH_USERNAME ?? "").trim().toLowerCase();
+  const username = normaliseUsername(env.AUTH_USERNAME ?? "");
   const hash = (env.AUTH_PASSWORD_HASH ?? "").trim();
   const plain = (env.AUTH_PASSWORD ?? "").trim();
   if (!username || (!hash && !plain)) return null;

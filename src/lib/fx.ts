@@ -38,7 +38,7 @@ export async function usdCadRate(now = Date.now()): Promise<FxResult> {
 
   try {
     const res = await fetch(
-      `https://api.twelvedata.com/exchange_rate?symbol=USD/CAD&apikey=${key}`,
+      `https://api.twelvedata.com/exchange_rate?symbol=USD/CAD&apikey=${encodeURIComponent(key)}`,
       { signal: AbortSignal.timeout(8_000) },
     );
     if (!res.ok) throw new Error(`Twelve Data responded ${res.status}`);

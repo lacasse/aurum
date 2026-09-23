@@ -52,7 +52,7 @@ async function fetchTwelveData(
     let prices: Map<string, number>;
     try {
       const res = await fetch(
-        `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbols)}&apikey=${key}`,
+        `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbols)}&apikey=${encodeURIComponent(key)}`,
         { signal: AbortSignal.timeout(10_000) },
       );
       if (!res.ok) {
@@ -107,7 +107,7 @@ async function fetchEodhd(
   for (const item of items) {
     attempted.push(item.ticker);
     try {
-      const url = `https://eodhd.com/api/eod/${encodeURIComponent(item.symbol)}?api_token=${token}&fmt=json&period=1d&from=${fmt(from)}&to=${fmt(to)}`;
+      const url = `https://eodhd.com/api/eod/${encodeURIComponent(item.symbol)}?api_token=${encodeURIComponent(token)}&fmt=json&period=1d&from=${fmt(from)}&to=${fmt(to)}`;
       const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
       if (!res.ok) {
         console.warn(`[prices] EODHD ${res.status} for ${item.symbol}`);

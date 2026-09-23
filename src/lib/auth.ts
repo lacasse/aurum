@@ -160,15 +160,21 @@ function cookieAttrs(maxAge: number, secure: boolean): Omit<SessionCookie, "valu
 /**
  * An authenticated session, for one user.
  *
+ * The cookie carries the user's session epoch as well as their id. The guard
+ * cannot check it — that would be a query per page — so it only proves the
+ * cookie was issued here and has not expired; the routes, which query anyway,
+ * compare the epoch with the user's row and refuse a cookie from before a
+ * password change.
+ *
  * The user's id travels in the cookie and is signed with it, so a request can
  * be attributed without a database lookup — which is what lets the route guard
  * stay in front of every page without becoming a query per page. It is an id
  * rather than a username: renaming a user must not sign them out, and an id
  * says nothing about who they are if the cookie is ever seen.
  */
-export function createSession(userId: string): SessionCookie {
+export function createSession(userId: string, epoch = 0): SessionCookie {
   const expiresAt = Date.now() + SESSION_TTL_MS;
-  const payload = `${userId}.${expiresAt}`;
+  const payload = `${userId}.${epoch}.${expiresAt}`;
   return {
     ...cookieAttrs(SESSION_TTL_MS / 1000, process.env.NODE_ENV === "production"),
     value: `${payload}.${sign(payload)}`,
@@ -188,16 +194,19 @@ export function clearSession(): SessionCookie {
  * cannot tell those apart, which is deliberate — an unauthenticated request is
  * one answer, not a diagnosis.
  */
-export function sessionUser(value: string | undefined): string | null {
+export function sessionUser(
+  value: string | undefined,
+): { userId: string; epoch: number } | null {
   if (!value) return null;
   const parts = value.split(".");
-  if (parts.length !== 3) return null;
-  const [userId, expiresAt, token] = parts;
-  if (!userId || !expiresAt) return null;
+  if (parts.length !== 4) return null;
+  const [userId, epochText, expiresAt, token] = parts;
+  if (!userId || !/^\d+$/.test(epochText) || !expiresAt) return null;
   const expires = Number(expiresAt);
   if (!Number.isFinite(expires) || expires <= Date.now()) return null;
   try {
-    return safeEqual(token, sign(`${userId}.${expiresAt}`)) ? userId : null;
+    const ok = safeEqual(token, sign(`${userId}.${epochText}.${expiresAt}`));
+    return ok ? { userId, epoch: Number(epochText) } : null;
   } catch {
     // Missing or misconfigured secret: treat as unauthenticated.
     return null;

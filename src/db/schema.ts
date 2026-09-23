@@ -235,6 +235,8 @@ export const users = pgTable("users", {
   /** "admin" may invite others and remove them. The first user is one. */
   role: text("role").notNull().default("member"),
   createdAt: text("created_at").notNull(),
+  /** Raised to end every session this user holds. See migration 0026. */
+  sessionEpoch: integer("session_epoch").notNull().default(0),
 });
 
 /**

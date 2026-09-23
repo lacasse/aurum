@@ -60,6 +60,7 @@ import {
   transactionSchema,
 } from "@/lib/schemas";
 import { PROVIDERS, type ApiKeys } from "@/lib/api-keys";
+import { normaliseUsername } from "@/lib/usernames";
 
 type AccountRow = typeof accounts.$inferSelect;
 type HoldingRow = typeof holdings.$inferSelect;
@@ -645,6 +646,7 @@ export interface UserRow {
   username: string;
   role: "admin" | "member";
   createdAt: string;
+  sessionEpoch: number;
 }
 
 const asUser = (r: typeof users.$inferSelect): UserRow => ({
@@ -652,6 +654,7 @@ const asUser = (r: typeof users.$inferSelect): UserRow => ({
   username: r.username,
   role: r.role === "admin" ? "admin" : "member",
   createdAt: r.createdAt,
+  sessionEpoch: r.sessionEpoch,
 });
 
 export async function countUsers(): Promise<number> {
@@ -666,7 +669,7 @@ export async function findUserByUsername(username: string): Promise<
   const [row] = await db
     .select()
     .from(users)
-    .where(eq(users.username, username.trim().toLowerCase()));
+    .where(eq(users.username, normaliseUsername(username)));
   return row ? { ...asUser(row), passwordHash: row.passwordHash } : null;
 }
 
@@ -690,12 +693,17 @@ export async function insertUser(user: {
   passwordHash: string;
   role: "admin" | "member";
   createdAt: string;
+  sessionEpoch?: number;
 }): Promise<void> {
-  await db.insert(users).values({ ...user, username: user.username.trim().toLowerCase() });
+  await db.insert(users).values({ ...user, username: normaliseUsername(user.username) });
 }
 
+/** A new password ends every session the user had, by raising their epoch. */
 export async function setUserPassword(id: string, passwordHash: string): Promise<void> {
-  await db.update(users).set({ passwordHash }).where(eq(users.id, id));
+  await db
+    .update(users)
+    .set({ passwordHash, sessionEpoch: sql`${users.sessionEpoch} + 1` })
+    .where(eq(users.id, id));
 }
 
 const API_KEYS_KEY = "api_keys";

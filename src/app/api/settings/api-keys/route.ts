@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { ensureDb } from "@/db/init";
+import { withUser } from "@/db/session";
 import { apiKeyStates } from "@/db/api-keys";
 import { setSavedApiKeys } from "@/db/repo";
 import { invalidReason, PROVIDERS } from "@/lib/api-keys";
@@ -19,22 +19,22 @@ const bodySchema = z.object({
 });
 
 export async function GET() {
-  await ensureDb();
-  return NextResponse.json(await apiKeyStates());
+  return withUser(async () => NextResponse.json(await apiKeyStates()));
 }
 
 export async function PUT(request: Request) {
-  await ensureDb();
-  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Send a key for each provider to change." }, { status: 400 });
-  }
-  for (const provider of PROVIDERS) {
-    const value = parsed.data[provider];
-    if (value === undefined) continue;
-    const reason = invalidReason(value);
-    if (reason) return NextResponse.json({ error: reason }, { status: 400 });
-  }
-  await setSavedApiKeys(parsed.data);
-  return NextResponse.json(await apiKeyStates());
+  return withUser(async () => {
+    const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Send a key for each provider to change." }, { status: 400 });
+    }
+    for (const provider of PROVIDERS) {
+      const value = parsed.data[provider];
+      if (value === undefined) continue;
+      const reason = invalidReason(value);
+      if (reason) return NextResponse.json({ error: reason }, { status: 400 });
+    }
+    await setSavedApiKeys(parsed.data);
+    return NextResponse.json(await apiKeyStates());
+  });
 }

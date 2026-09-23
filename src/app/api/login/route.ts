@@ -84,7 +84,7 @@ export async function POST(request: Request) {
 
   resetLoginFailures(ip);
 
-  const session = createSession(user.id);
+  const session = createSession(user.id, user.sessionEpoch);
   (await cookies()).set(session.name, session.value, {
     httpOnly: session.httpOnly,
     secure: session.secure,

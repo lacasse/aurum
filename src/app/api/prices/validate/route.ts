@@ -35,7 +35,7 @@ async function fetchTwelveDataPrice(symbol: string, key: string): Promise<Lookup
   if (!(await reserveTwelveDataCredits(1))) return unchecked; // over rate/quota budget
   try {
     const res = await fetch(
-      `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${key}`,
+      `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(key)}`,
       { signal: AbortSignal.timeout(8_000) },
     );
     if (!res.ok) return unchecked;
@@ -65,7 +65,7 @@ async function fetchEodhdPrice(symbol: string, token: string): Promise<Lookup> {
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
   try {
     const res = await fetch(
-      `https://eodhd.com/api/eod/${encodeURIComponent(symbol)}?api_token=${token}&fmt=json&period=1d&from=${fmt(from)}&to=${fmt(to)}`,
+      `https://eodhd.com/api/eod/${encodeURIComponent(symbol)}?api_token=${encodeURIComponent(token)}&fmt=json&period=1d&from=${fmt(from)}&to=${fmt(to)}`,
       { signal: AbortSignal.timeout(8_000) },
     );
     // A 404 is EODHD's answer for an unknown symbol, and that is a real
