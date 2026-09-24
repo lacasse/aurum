@@ -30,9 +30,9 @@ interface Lookup {
 
 const unchecked: Lookup = { price: null, checked: false };
 
-async function fetchTwelveDataPrice(symbol: string, key: string): Promise<Lookup> {
+async function fetchTwelveDataPrice(userId: string, symbol: string, key: string): Promise<Lookup> {
   if (!key) return unchecked;
-  if (!(await reserveTwelveDataCredits(1))) return unchecked; // over rate/quota budget
+  if (!(await reserveTwelveDataCredits(userId, 1))) return unchecked; // over rate/quota budget
   try {
     const res = await fetch(
       `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(key)}`,
@@ -51,14 +51,14 @@ async function fetchTwelveDataPrice(symbol: string, key: string): Promise<Lookup
   }
 }
 
-async function fetchEodhdPrice(symbol: string, token: string): Promise<Lookup> {
+async function fetchEodhdPrice(userId: string, symbol: string, token: string): Promise<Lookup> {
   if (!token) return unchecked;
   /*
    * Validating spends one of the 20 daily calls, but draws against a lower
    * ceiling than the price refresh does: somebody typing a ticker must not be
    * able to exhaust the allowance every holding's price depends on.
    */
-  if ((await reserveEodhdCalls(1, new Date(), validateLimit())) < 1) return unchecked;
+  if ((await reserveEodhdCalls(userId, 1, new Date(), validateLimit())) < 1) return unchecked;
   const to = new Date();
   const from = new Date(to);
   from.setDate(from.getDate() - 7);
@@ -87,8 +87,8 @@ async function fetchEodhdPrice(symbol: string, token: string): Promise<Lookup> {
 }
 
 export async function GET(req: Request) {
-  return handle(async () => {
-    const keys = await apiKeys();
+  return handle(async (user) => {
+    const keys = await apiKeys(user.id);
     const url = new URL(req.url);
     const ticker = (url.searchParams.get("ticker") ?? "").trim().toUpperCase();
     const ac = (url.searchParams.get("class") ?? "US Equity") as AssetClass;
@@ -102,18 +102,18 @@ export async function GET(req: Request) {
     let result: Lookup;
 
     if (usesEodhd) {
-      result = await fetchEodhdPrice(toEodhdSymbol(ticker), keys.eodhd);
+      result = await fetchEodhdPrice(user.id, toEodhdSymbol(ticker), keys.eodhd);
       // Only a ticker that spelled out its exchange reaches EODHD now, so a
       // rejection here is a verdict on the symbol rather than on a guessed
       // ".TO" suffix, and there is nothing to second-guess with another feed.
       if (result.price != null) await recordEodhdFetched([ticker]);
     } else {
-      result = await fetchTwelveDataPrice(toTwelveDataSymbol(ticker, ac, cu), keys.twelvedata);
+      result = await fetchTwelveDataPrice(user.id, toTwelveDataSymbol(ticker, ac, cu), keys.twelvedata);
       // Same reason as the price route: a coin may not carry a CAD pair.
       if (result.price == null && ac === "Crypto" && cu === "CAD") {
-        const usd = await fetchTwelveDataPrice(toUsdCryptoSymbol(ticker), keys.twelvedata);
+        const usd = await fetchTwelveDataPrice(user.id, toUsdCryptoSymbol(ticker), keys.twelvedata);
         if (usd.price != null) {
-          const { rate } = await usdCadRate();
+          const { rate } = await usdCadRate(user.id);
           result = { price: Math.round(usd.price * rate * 100) / 100, checked: true };
         } else if (usd.checked) {
           result = usd;
@@ -133,7 +133,7 @@ export async function GET(req: Request) {
       price: valid && result.price != null && result.price > 0 ? result.price : null,
       ticker,
       quotaExhausted: usesEodhd && !result.checked,
-      quota: usesEodhd ? await eodhdUsage() : undefined,
+      quota: usesEodhd ? await eodhdUsage(user.id) : undefined,
     };
   });
 }

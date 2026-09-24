@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, like, or } from "drizzle-orm";
 import { db } from "./index";
 import { appMeta } from "./schema";
 import {
@@ -22,7 +22,11 @@ import {
  * allowance and jointly exceed it. The row is created first, outside the lock,
  * because `FOR UPDATE` cannot lock a row that does not exist yet.
  */
+/* Per user, for the same reason as the EODHD ledger: the allowance is the key's. */
+const ledgerKey = (userId: string) => `${TWELVEDATA_QUOTA_KEY}:${userId}`;
+
 export async function reserveTwelveDataCredits(
+  userId: string,
   credits: number,
   now: Date = new Date(),
   /** Spend past the plan's limits at the user's explicit request. */
@@ -35,14 +39,14 @@ export async function reserveTwelveDataCredits(
 
   await db
     .insert(appMeta)
-    .values({ key: TWELVEDATA_QUOTA_KEY, value: serializeLedger(parseLedger(undefined, now)) })
+    .values({ key: ledgerKey(userId), value: serializeLedger(parseLedger(undefined, now)) })
     .onConflictDoNothing();
 
   return db.transaction(async (tx) => {
     const [row] = await tx
       .select()
       .from(appMeta)
-      .where(eq(appMeta.key, TWELVEDATA_QUOTA_KEY))
+      .where(eq(appMeta.key, ledgerKey(userId)))
       .for("update");
 
     const { granted, nextValue } = grantCredits(
@@ -52,7 +56,7 @@ export async function reserveTwelveDataCredits(
       await tx
         .update(appMeta)
         .set({ value: nextValue })
-        .where(eq(appMeta.key, TWELVEDATA_QUOTA_KEY));
+        .where(eq(appMeta.key, ledgerKey(userId)));
     }
     return granted;
   });
@@ -63,11 +67,14 @@ export interface TwelveDataUsage {
   day: { used: number; limit: number; remaining: number };
 }
 
-export async function twelveDataUsage(now: Date = new Date()): Promise<TwelveDataUsage> {
+export async function twelveDataUsage(
+  userId: string,
+  now: Date = new Date(),
+): Promise<TwelveDataUsage> {
   const [row] = await db
     .select()
     .from(appMeta)
-    .where(eq(appMeta.key, TWELVEDATA_QUOTA_KEY));
+    .where(eq(appMeta.key, ledgerKey(userId)));
   const ledger = parseLedger(row?.value, now);
   const minuteLimit = effectiveLimit(TWELVEDATA_MINUTE_LIMIT, MINUTE_RESERVE);
   const dayLimit = effectiveLimit(TWELVEDATA_DAY_LIMIT, DAY_RESERVE);
@@ -87,5 +94,9 @@ export async function twelveDataUsage(now: Date = new Date()): Promise<TwelveDat
 
 /** Test hook: clears the ledger so a suite starts from a known state. */
 export async function __resetTwelveDataLedgerForTests(): Promise<void> {
-  await db.delete(appMeta).where(eq(appMeta.key, TWELVEDATA_QUOTA_KEY));
+  await db
+    .delete(appMeta)
+    .where(
+      or(eq(appMeta.key, TWELVEDATA_QUOTA_KEY), like(appMeta.key, `${TWELVEDATA_QUOTA_KEY}:%`)),
+    );
 }

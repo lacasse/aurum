@@ -2,7 +2,6 @@ import { and, asc, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   accounts,
-  appMeta,
   users,
   budgets,
   categories,
@@ -784,18 +783,18 @@ export async function setUserPassword(id: string, passwordHash: string): Promise
 const API_KEYS_KEY = "api_keys";
 
 /**
- * The market-data keys saved in settings, if any.
+ * One user's market-data keys, if they have saved any.
  *
- * Secrets, kept beside the record they belong to. Nothing here decides which
+ * Secrets, kept with the record of the person they belong to. Nothing here decides which
  * key is used — that is `src/db/api-keys.ts`, which weighs these against the
  * environment — and nothing here reaches the browser: the settings route sends
  * a description of a key, never a key.
  */
-export async function getSavedApiKeys(): Promise<Partial<ApiKeys>> {
-  const [row] = await db.select().from(appMeta).where(eq(appMeta.key, API_KEYS_KEY));
-  if (!row) return {};
+export async function getSavedApiKeys(userId: string): Promise<Partial<ApiKeys>> {
+  const raw = await getSetting(userId, API_KEYS_KEY);
+  if (raw === null) return {};
   try {
-    const parsed = JSON.parse(row.value) as Partial<ApiKeys>;
+    const parsed = JSON.parse(raw) as Partial<ApiKeys>;
     const out: Partial<ApiKeys> = {};
     for (const provider of PROVIDERS) {
       const value = parsed?.[provider];
@@ -808,8 +807,8 @@ export async function getSavedApiKeys(): Promise<Partial<ApiKeys>> {
 }
 
 /** Saves the keys given, and removes the ones set to an empty string. */
-export async function setSavedApiKeys(next: Partial<ApiKeys>): Promise<void> {
-  const current = await getSavedApiKeys();
+export async function setSavedApiKeys(userId: string, next: Partial<ApiKeys>): Promise<void> {
+  const current = await getSavedApiKeys(userId);
   const merged: Partial<ApiKeys> = { ...current };
   for (const provider of PROVIDERS) {
     if (!(provider in next)) continue;
@@ -817,11 +816,7 @@ export async function setSavedApiKeys(next: Partial<ApiKeys>): Promise<void> {
     if (value === "") delete merged[provider];
     else merged[provider] = value;
   }
-  const value = JSON.stringify(merged);
-  await db
-    .insert(appMeta)
-    .values({ key: API_KEYS_KEY, value })
-    .onConflictDoUpdate({ target: appMeta.key, set: { value } });
+  await setSetting(userId, API_KEYS_KEY, JSON.stringify(merged));
 }
 
 const EXPENSE_SETTINGS_KEY = "expense_settings";

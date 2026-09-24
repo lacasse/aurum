@@ -31,6 +31,7 @@ export const dynamic = "force-dynamic";
 /* ── Twelve Data (US equities + crypto + FX, batch endpoint, free 800/day) ── */
 
 async function fetchTwelveData(
+  userId: string,
   items: { ticker: string; symbol: string }[],
   key: string,
   force = false,
@@ -42,7 +43,7 @@ async function fetchTwelveData(
   const CHUNK = 8;
   for (let start = 0; start < items.length; start += CHUNK) {
     const chunk = items.slice(start, start + CHUNK);
-    if (!(await reserveTwelveDataCredits(chunk.length, new Date(), force))) {
+    if (!(await reserveTwelveDataCredits(userId, chunk.length, new Date(), force))) {
       console.warn(
         `[prices] Twelve Data skipped (rate/quota): ${chunk.length} credit(s)`,
       );
@@ -166,8 +167,8 @@ const CACHE_TTL: Record<string, number> = {
 /* ── GET handler ── */
 
 export async function GET(req: Request) {
-  return handle(async () => {
-    const keys = await apiKeys();
+  return handle(async (user) => {
+    const keys = await apiKeys(user.id);
     const url = new URL(req.url);
     const tickers = (url.searchParams.get("tickers") ?? "")
       .split(",")
@@ -255,12 +256,12 @@ export async function GET(req: Request) {
     // never been priced at all.
     const budget =
       afterClose || force
-        ? await reserveEodhdCalls(eodhdDue.length, nowDate, undefined, force)
+        ? await reserveEodhdCalls(user.id, eodhdDue.length, nowDate, undefined, force)
         : 0;
     const eodhdToFetch = eodhdDue.slice(0, budget);
 
     const [twelvePrices, eodhdPrices] = await Promise.all([
-      fetchTwelveData(twelveDataItems, keys.twelvedata, force),
+      fetchTwelveData(user.id, twelveDataItems, keys.twelvedata, force),
       fetchEodhd(eodhdToFetch, keys.eodhd),
     ]);
 
@@ -274,8 +275,9 @@ export async function GET(req: Request) {
       (i) => i.assetClass === "Crypto" && i.currency === "CAD" && !twelvePrices.has(i.ticker),
     );
     if (cryptoMissing.length > 0) {
-      const { rate } = await usdCadRate();
+      const { rate } = await usdCadRate(user.id);
       const usdPrices = await fetchTwelveData(
+        user.id,
         cryptoMissing.map((i) => ({ ...i, symbol: toUsdCryptoSymbol(i.ticker) })),
         keys.twelvedata,
         force,
@@ -301,8 +303,8 @@ export async function GET(req: Request) {
     return {
       prices,
       stale,
-      quota: await eodhdUsage(nowDate),
-      twelveData: await twelveDataUsage(nowDate),
+      quota: await eodhdUsage(user.id, nowDate),
+      twelveData: await twelveDataUsage(user.id, nowDate),
       ts: now,
       afterClose,
       forced: force,

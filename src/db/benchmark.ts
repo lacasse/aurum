@@ -72,8 +72,12 @@ async function markAttempted(today: string): Promise<void> {
  *
  * Returns how many months were written.
  */
-export async function fillBenchmarkGap(now: Date = new Date()): Promise<number> {
-  const { eodhd: token } = await apiKeys();
+/*
+ * The series is shared — it is a public index — but topping it up is a call
+ * like any other, made with the asking user's key and from their allowance.
+ */
+export async function fillBenchmarkGap(userId: string, now: Date = new Date()): Promise<number> {
+  const { eodhd: token } = await apiKeys(userId);
   if (!token) return 0;
 
   const last = await lastBenchmarkMonth();
@@ -85,7 +89,7 @@ export async function fillBenchmarkGap(now: Date = new Date()): Promise<number> 
 
   // Reserved ceiling, not the full cap: the benchmark is a background nicety
   // and must never be the reason a holding shows a stale price.
-  if ((await reserveEodhdCalls(1, now, validateLimit())) < 1) return 0;
+  if ((await reserveEodhdCalls(userId, 1, now, validateLimit())) < 1) return 0;
   await markAttempted(today);
 
   const from = `${missing[0]}-01`;

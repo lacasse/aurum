@@ -83,6 +83,41 @@ export function invalidReason(key: string): string | null {
   return null;
 }
 
+/**
+ * The keys one user fetches with.
+ *
+ * A key is somebody's: it is tied to their account with the provider, and the
+ * provider's daily allowance is counted against it. So a user's saved keys are
+ * theirs alone, and the keys in the deployment's environment stand in only for
+ * the deployment's owner — the first account, whose installation it is and who
+ * put them there. Everybody else brings their own; an installation with keys in
+ * its environment does not hand them to whoever it invites.
+ */
+export function keysFor(
+  saved: Partial<ApiKeys>,
+  env: Partial<ApiKeys>,
+  isOwner: boolean,
+): ApiKeys {
+  const fallback = isOwner ? env : {};
+  return {
+    twelvedata: effectiveKey(saved.twelvedata, fallback.twelvedata),
+    eodhd: effectiveKey(saved.eodhd, fallback.eodhd),
+  };
+}
+
+/** The same rule, as the settings page is told it. */
+export function statesFor(
+  saved: Partial<ApiKeys>,
+  env: Partial<ApiKeys>,
+  isOwner: boolean,
+): KeyStates {
+  const fallback = isOwner ? env : {};
+  return {
+    twelvedata: stateOf(saved.twelvedata, fallback.twelvedata),
+    eodhd: stateOf(saved.eodhd, fallback.eodhd),
+  };
+}
+
 /** Whether prices can be fetched at all: neither provider has a key. */
 export function noKeysAtAll(states: KeyStates): boolean {
   return !states.twelvedata.set && !states.eodhd.set;

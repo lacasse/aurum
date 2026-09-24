@@ -31,14 +31,14 @@ interface BenchmarkData {
  * chart invents a comparison. Extending the series means editing a migration.
  */
 export async function GET(req: Request) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     /*
      * The shipped series is current on the day it is released and drifts from
      * there, so bring it up to date before reading. Costs nothing at all once
      * it is current, and one call at most on the day a month is missing.
      */
-    await fillBenchmarkGap();
+    await fillBenchmarkGap(user.id);
     const monthsParam = Number(new URL(req.url).searchParams.get("months") ?? 18);
     const months = lastMonthKeys(Math.min(Math.max(monthsParam, 3), 120));
 

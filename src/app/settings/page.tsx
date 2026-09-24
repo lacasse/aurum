@@ -45,7 +45,9 @@ function Status({ state }: { state: KeyState }) {
   return (
     <span className="text-xs text-ink-faint">
       <span className="font-medium text-positive">In use</span> · {state.hint}
-      {state.source === "environment" ? " · from this deployment's settings" : null}
+      {state.source === "environment"
+        ? " · from this installation's own settings, as its owner"
+        : null}
     </span>
   );
 }
@@ -119,6 +121,12 @@ export default function SettingsPage() {
                 daily allowance. Everything else in the app works without them:
                 what they add is today&rsquo;s price on a holding, so a portfolio
                 without keys is valued at the last prices it was given.
+              </p>
+              <p className="text-xs leading-relaxed">
+                These keys are yours. Other people using this installation add
+                their own, and every lookup is counted against the allowance of
+                the key that made it — yours are never spent on anyone
+                else&rsquo;s prices.
               </p>
               <p className="text-xs leading-relaxed">
                 A key is stored with your record, and is only ever sent from this

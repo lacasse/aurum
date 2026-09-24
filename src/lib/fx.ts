@@ -25,13 +25,18 @@ export interface FxResult {
   fallback?: boolean;
 }
 
-export async function usdCadRate(now = Date.now()): Promise<FxResult> {
+/**
+ * The USD/CAD rate. Cached for the whole server — it is a public figure, the
+ * same for everybody — and fetched, when the cache has gone stale, with the
+ * asking user's key and against their allowance.
+ */
+export async function usdCadRate(userId: string, now = Date.now()): Promise<FxResult> {
   if (cachedRate && now - cachedAt < CACHE_TTL_MS) {
     return { rate: cachedRate, cached: true };
   }
 
-  const { twelvedata: key } = await apiKeys();
-  if (!key || !(await reserveTwelveDataCredits(1))) {
+  const { twelvedata: key } = await apiKeys(userId);
+  if (!key || !(await reserveTwelveDataCredits(userId, 1))) {
     if (cachedRate) return { rate: cachedRate, cached: true, stale: true };
     return { rate: FALLBACK_USD_CAD, cached: false, fallback: true };
   }
