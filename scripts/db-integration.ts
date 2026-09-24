@@ -806,6 +806,32 @@ async function main() {
     });
     const other = "second-user";
 
+    // The first user's record was emptied by the demo tests above, so give it
+    // an account and a transaction of its own to be protected.
+    await repo.insertAccount(
+      uid,
+      {
+        id: "owner-chequing",
+        name: "Owner chequing",
+        institution: "Example Bank",
+        kind: "checking",
+        balance: 1000,
+        history: [],
+      },
+      await repo.nextPosition(uid, (await import("../src/db/schema")).accounts),
+    );
+    await repo.insertTransaction(uid, {
+      id: "owner-expense-1",
+      date: new Date().toISOString().slice(0, 10),
+      type: "expense",
+      amount: 10,
+      category: "Groceries",
+      sourceAccountId: "owner-chequing",
+      payee: "Example market",
+    });
+    await repo.insertCategory(uid, "Groceries", 0);
+    await repo.upsertBudget(uid, "Groceries", 300);
+
     const mine = await repo.getState(uid);
     const theirs = await repo.getState(other);
     expect(theirs.accounts.length === 0, "a new user sees none of the first user's accounts");
@@ -814,8 +840,7 @@ async function main() {
     expect(theirs.budgets.length === 0 && theirs.categories.length === 0, "…none of their budgets or categories");
     expect(Object.keys(await repo.getSnapshotHistory(other)).length === 0, "…and none of their month-end values");
 
-    const target = mine.accounts.find((a) => a.kind === "checking") ?? mine.accounts[0];
-    if (!target) throw new Error("the first user needs an account for these checks");
+    const target = mine.accounts.find((a) => a.id === "owner-chequing")!;
     const targetBefore = (await repo.getState(uid)).accounts.find((a) => a.id === target.id)!;
 
     // A write aimed at somebody else's id does nothing.
@@ -846,7 +871,8 @@ async function main() {
     );
 
     // Deleting or editing somebody else's transaction by id does nothing.
-    const someTxn = (await repo.getState(uid)).transactions[0];
+    const someTxn = (await repo.getState(uid)).transactions.find((t) => t.id === "owner-expense-1");
+    expect(someTxn !== undefined, "the first user's transaction exists before the checks");
     if (someTxn) {
       await repo.removeTransaction(other, someTxn.id);
       await repo.updateTransactionRow(other, someTxn.id, { ...someTxn, amount: someTxn.amount + 1 });
@@ -862,7 +888,7 @@ async function main() {
     await repo.renameCategoryEverywhere(other, "Groceries", "Food");
     const myAfterRename = await repo.getState(uid);
     expect(
-      myAfterRename.categories.includes("Groceries") || !mine.categories.includes("Groceries"),
+      myAfterRename.categories.includes("Groceries") && !myAfterRename.categories.includes("Food"),
       "renaming a category renames only your own",
     );
     expect(
@@ -870,6 +896,50 @@ async function main() {
         (myBudget?.limit ?? null),
       "a budget of the same name in another record is untouched",
     );
+
+    // One figure per month per kind is a rule about one person's record. The
+    // guard used to compare everyone's rows, so one user's monthly import
+    // refused another's receipts — and said how many rows the other held.
+    await repo.insertTransaction(uid, {
+      id: "owner-monthly-2025-03",
+      date: "2025-03-31",
+      type: "expense",
+      amount: 900,
+      category: "Groceries",
+      sourceAccountId: "owner-chequing",
+      payee: "Monthly total",
+      granularity: "monthly",
+    });
+    let refused: string | null = null;
+    try {
+      await repo.insertTransaction(other, {
+        id: "second-receipt-2025-03",
+        date: "2025-03-12",
+        type: "expense",
+        amount: 40,
+        category: "Groceries",
+        payee: "Example market",
+        granularity: "individual",
+      });
+    } catch (err) {
+      refused = err instanceof Error ? err.message : String(err);
+    }
+    expect(refused === null, "another user's monthly total does not refuse your receipts for that month");
+    let ownRefused = false;
+    try {
+      await repo.insertTransaction(uid, {
+        id: "owner-receipt-2025-03",
+        date: "2025-03-12",
+        type: "expense",
+        amount: 40,
+        category: "Groceries",
+        payee: "Example market",
+        granularity: "individual",
+      });
+    } catch {
+      ownRefused = true;
+    }
+    expect(ownRefused, "…while your own monthly total still refuses your own receipts");
 
     // Settings are per person.
     await repo.setExpenseSettings(other, { groups: { Food: "discretionary" }, car: null });
