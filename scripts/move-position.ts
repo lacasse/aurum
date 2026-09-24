@@ -9,20 +9,24 @@
  *
  * Usage:
  *   docker exec -e DATABASE_URL=... <container> \
- *     npx tsx scripts/move-position.ts <TICKER> <from account> <to account> [--commit]
+ *     npx tsx scripts/move-position.ts <TICKER> <from account> <to account> [--commit] [--user <name>]
+ *
+ * Only the named user's accounts and positions are looked at or moved.
  */
 import { db } from "@/db/index";
+import { scriptUser } from "@/db/script-user";
 import { accounts, holdings } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 
 async function main() {
-  const [ticker, fromName, toName, ...flags] = process.argv.slice(2);
+  const { user, args } = await scriptUser(process.argv.slice(2));
+  const [ticker, fromName, toName, ...flags] = args;
   if (!ticker || !fromName || !toName) {
     throw new Error("usage: move-position.ts <TICKER> <from account> <to account> [--commit]");
   }
   const commit = flags.includes("--commit");
 
-  const all = await db.select().from(accounts);
+  const all = await db.select().from(accounts).where(eq(accounts.userId, user.id));
   const from = all.find((a) => a.name === fromName);
   const to = all.find((a) => a.name === toName);
   if (!from || !to) throw new Error(`account not found: ${!from ? fromName : toName}`);
@@ -30,7 +34,13 @@ async function main() {
   const rows = await db
     .select()
     .from(holdings)
-    .where(and(eq(holdings.ticker, ticker.toUpperCase()), eq(holdings.accountId, from.id)));
+    .where(
+      and(
+        eq(holdings.userId, user.id),
+        eq(holdings.ticker, ticker.toUpperCase()),
+        eq(holdings.accountId, from.id),
+      ),
+    );
 
   if (rows.length === 0) {
     console.log(`no ${ticker} in ${fromName} — nothing to move`);
@@ -47,7 +57,10 @@ async function main() {
   }
 
   for (const h of rows) {
-    await db.update(holdings).set({ accountId: to.id }).where(eq(holdings.id, h.id));
+    await db
+      .update(holdings)
+      .set({ accountId: to.id })
+      .where(and(eq(holdings.id, h.id), eq(holdings.userId, user.id)));
   }
   console.log(`moved ${rows.length} position${rows.length === 1 ? "" : "s"}`);
   process.exit(0);

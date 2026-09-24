@@ -17,12 +17,12 @@ export const dynamic = "force-dynamic";
  * and account balances change too.
  */
 export async function POST(req: Request) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     const rule = parseRecurringRule(await readJson(req));
-    const position = await nextPosition(recurringTransactions);
-    await insertRecurringRule(rule, position);
-    await materializeRecurring();
-    return getState();
+    const position = await nextPosition(user.id, recurringTransactions);
+    await insertRecurringRule(user.id, rule, position);
+    await materializeRecurring(user.id);
+    return getState(user.id);
   });
 }

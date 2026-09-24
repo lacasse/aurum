@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { ensureDb } from "@/db/init";
+import { withUser } from "@/db/session";
 import { getExpenseSettings, setExpenseSettings } from "@/db/repo";
 import { SPEND_GROUPS } from "@/lib/expenses";
 
@@ -15,19 +15,21 @@ const bodySchema = z.object({
 });
 
 export async function GET() {
-  await ensureDb();
-  return NextResponse.json(await getExpenseSettings());
+  return withUser(async (user) => {
+    return NextResponse.json(await getExpenseSettings(user.id));
+  });
 }
 
 export async function PUT(request: Request) {
-  await ensureDb();
-  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Settings must name a group per category and a start month." },
-      { status: 400 },
-    );
-  }
-  await setExpenseSettings(parsed.data as Parameters<typeof setExpenseSettings>[0]);
-  return NextResponse.json(await getExpenseSettings());
+  return withUser(async (user) => {
+    const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Settings must name a group per category and a start month." },
+        { status: 400 },
+      );
+    }
+    await setExpenseSettings(user.id, parsed.data as Parameters<typeof setExpenseSettings>[1]);
+    return NextResponse.json(await getExpenseSettings(user.id));
+  });
 }

@@ -10,20 +10,23 @@
  *
  *   npx tsx scripts/mark-staking-rewards.ts SOL          # dry run
  *   npx tsx scripts/mark-staking-rewards.ts SOL --apply
+ *
+ * Add `--user <name>` where the installation has more than one account.
  */
 async function main() {
-  const [ticker, ...rest] = process.argv.slice(2);
+  const { ensureDb } = await import("../src/db/init");
+  const repo = await import("../src/db/repo");
+  const { scriptUser } = await import("../src/db/script-user");
+  await ensureDb();
+  const { user, args } = await scriptUser(process.argv.slice(2));
+  const [ticker, ...rest] = args;
   const apply = rest.includes("--apply");
   if (!ticker) {
     console.error("usage: mark-staking-rewards.ts <TICKER> [--apply]");
     process.exit(1);
   }
 
-  const { ensureDb } = await import("../src/db/init");
-  const repo = await import("../src/db/repo");
-  await ensureDb();
-
-  const { holdings } = await repo.getState();
+  const { holdings } = await repo.getState(user.id);
   const matches = holdings.filter(
     (h) => h.ticker.toUpperCase() === ticker.toUpperCase(),
   );
@@ -45,7 +48,7 @@ async function main() {
     console.log(`${h.ticker} (${h.id}): ${marked} awaiting a value`);
     for (const f of changed) console.log(`  ${f.date}  ${f.shares} units`);
     if (apply && changed.length > 0) {
-      await repo.replaceHolding({ ...h, flows });
+      await repo.replaceHolding(user.id, { ...h, flows });
       console.log("  written");
     }
   }

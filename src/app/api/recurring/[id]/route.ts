@@ -15,13 +15,13 @@ interface Ctx {
 }
 
 export async function PUT(req: Request, { params }: Ctx) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     const { id } = await params;
     const rule = parseRecurringRule(await readJson(req));
-    await replaceRecurringRule({ ...rule, id });
-    await materializeRecurring();
-    return getState();
+    await replaceRecurringRule(user.id, { ...rule, id });
+    await materializeRecurring(user.id);
+    return getState(user.id);
   });
 }
 
@@ -30,10 +30,10 @@ export async function PUT(req: Request, { params }: Ctx) {
  * money that moved, and their account balances have been adjusted for them.
  */
 export async function DELETE(_req: Request, { params }: Ctx) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     const { id } = await params;
-    await deleteRecurringRule(id);
+    await deleteRecurringRule(user.id, id);
     return { ok: true };
   });
 }

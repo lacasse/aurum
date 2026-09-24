@@ -52,8 +52,16 @@ async function main() {
      * generated arrives, whatever that is this week.
      */
     const sample = generateSampleData();
+    // The first account comes from these, as it does from .env on a real
+    // installation, and the demo data is seeded into its record.
+    process.env.AUTH_USERNAME = "owner";
+    process.env.AUTH_PASSWORD = "owner-password-for-tests";
     await ensureDb();
-    let state = await repo.getState();
+    const owner = await repo.firstAdmin();
+    if (!owner) throw new Error("no first account after ensureDb");
+    const uid = owner.id;
+    expect(owner.username === "owner", "the placeholder owner is claimed with the deployment's username");
+    let state = await repo.getState(uid);
     expect(
       state.accounts.length === sample.accounts.length,
       `every seeded account arrives (${sample.accounts.length}, got ${state.accounts.length})`,
@@ -83,7 +91,7 @@ async function main() {
 
     // ensureDb is idempotent
     await ensureDb();
-    state = await repo.getState();
+    state = await repo.getState(uid);
     expect(state.accounts.length === sample.accounts.length, "ensureDb does not double-seed");
 
     console.log("transaction balance side effects");
@@ -98,22 +106,22 @@ async function main() {
       sourceAccountId: checking.id,
       payee: "Test Cafe",
     };
-    await repo.insertTransaction(txn);
-    state = await repo.getState();
+    await repo.insertTransaction(uid, txn);
+    state = await repo.getState(uid);
     expect(
       Math.abs(state.accounts.find((a) => a.id === checking.id)!.balance - (before - 10)) < 0.01,
       "expense reduces account balance by 10",
     );
 
-    await repo.updateTransactionRow("test-txn-1", { ...txn, amount: 25 });
-    state = await repo.getState();
+    await repo.updateTransactionRow(uid, "test-txn-1", { ...txn, amount: 25 });
+    state = await repo.getState(uid);
     expect(
       Math.abs(state.accounts.find((a) => a.id === checking.id)!.balance - (before - 25)) < 0.01,
       "editing amount re-applies delta (now -25)",
     );
 
-    await repo.removeTransaction("test-txn-1");
-    state = await repo.getState();
+    await repo.removeTransaction(uid, "test-txn-1");
+    state = await repo.getState(uid);
     expect(
       Math.abs(state.accounts.find((a) => a.id === checking.id)!.balance - before) < 0.01,
       "deleting reverts balance",
@@ -128,7 +136,7 @@ async function main() {
       const toBefore = to.balance;
       const cardBefore = card.balance;
 
-      await repo.insertTransaction({
+      await repo.insertTransaction(uid, {
         id: "test-transfer-1",
         date: "2026-08-20",
         type: "transfer",
@@ -138,7 +146,7 @@ async function main() {
         destinationAccountId: to.id,
         payee: "TFSA contribution",
       });
-      state = await repo.getState();
+      state = await repo.getState(uid);
       const at = (id: string) => state.accounts.find((a) => a.id === id)!.balance;
       expect(
         Math.abs(at(from.id) - (fromBefore - 500)) < 0.01,
@@ -151,7 +159,7 @@ async function main() {
 
       // Paying a credit card is a transfer whose destination is a liability:
       // both the cash and the debt must go down.
-      await repo.insertTransaction({
+      await repo.insertTransaction(uid, {
         id: "test-transfer-2",
         date: "2026-08-21",
         type: "transfer",
@@ -161,15 +169,15 @@ async function main() {
         destinationAccountId: card.id,
         payee: "Card payment",
       });
-      state = await repo.getState();
+      state = await repo.getState(uid);
       expect(
         Math.abs(at(card.id) - (cardBefore - 200)) < 0.01,
         "paying a credit card reduces what is owed",
       );
 
-      await repo.removeTransaction("test-transfer-1");
-      await repo.removeTransaction("test-transfer-2");
-      state = await repo.getState();
+      await repo.removeTransaction(uid, "test-transfer-1");
+      await repo.removeTransaction(uid, "test-transfer-2");
+      state = await repo.getState(uid);
       expect(
         Math.abs(at(from.id) - fromBefore) < 0.01 &&
           Math.abs(at(to.id) - toBefore) < 0.01 &&
@@ -183,7 +191,7 @@ async function main() {
       const from = state.accounts.find((a) => a.name === "Everyday Checking")!;
       const before = from.balance;
       // Starts three months ago, so materializing must post the back payments.
-      await repo.insertRecurringRule(
+      await repo.insertRecurringRule(uid, 
         {
           id: "test-rule-1",
           type: "expense",
@@ -199,9 +207,9 @@ async function main() {
         0,
       );
 
-      const created = await repo.materializeRecurring("2026-08-27");
+      const created = await repo.materializeRecurring(uid, "2026-08-27");
       expect(created === 3, `posts the three payments already due (got ${created})`);
-      state = await repo.getState();
+      state = await repo.getState(uid);
       const posted = state.transactions.filter((t) => t.recurringId === "test-rule-1");
       expect(posted.length === 3, "generated transactions are tagged with the rule");
       expect(
@@ -219,23 +227,23 @@ async function main() {
 
       // The whole point of nextDate + the recurringId guard: running again on
       // the same day must not post a second copy of anything.
-      const again = await repo.materializeRecurring("2026-08-27");
+      const again = await repo.materializeRecurring(uid, "2026-08-27");
       expect(again === 0, `re-running posts nothing (got ${again})`);
-      state = await repo.getState();
+      state = await repo.getState(uid);
       expect(
         state.transactions.filter((t) => t.recurringId === "test-rule-1").length === 3,
         "no duplicates after a second run",
       );
 
-      await repo.deleteRecurringRule("test-rule-1");
-      state = await repo.getState();
+      await repo.deleteRecurringRule(uid, "test-rule-1");
+      state = await repo.getState(uid);
       expect(!state.recurring.some((r) => r.id === "test-rule-1"), "rule deleted");
       expect(
         state.transactions.filter((t) => t.recurringId === "test-rule-1").length === 3,
         "payments it already posted are kept",
       );
       for (const t of state.transactions.filter((t) => t.recurringId === "test-rule-1")) {
-        await repo.removeTransaction(t.id);
+        await repo.removeTransaction(uid, t.id);
       }
     }
 
@@ -414,16 +422,16 @@ async function main() {
     }
 
     console.log("budgets / categories");
-    await repo.upsertBudget("Coffee", 42.5);
-    state = await repo.getState();
+    await repo.upsertBudget(uid, "Coffee", 42.5);
+    state = await repo.getState(uid);
     expect(state.budgets.some((b) => b.category === "Coffee" && b.limit === 42.5), "budget upsert");
-    await repo.upsertBudget("Coffee", 60);
-    state = await repo.getState();
+    await repo.upsertBudget(uid, "Coffee", 60);
+    state = await repo.getState(uid);
     expect(state.budgets.find((b) => b.category === "Coffee")?.limit === 60, "budget update");
 
-    await repo.insertCategory("Coffee", 99);
-    await repo.renameCategoryEverywhere("Groceries", "Food");
-    state = await repo.getState();
+    await repo.insertCategory(uid, "Coffee", 99);
+    await repo.renameCategoryEverywhere(uid, "Groceries", "Food");
+    state = await repo.getState(uid);
     expect(state.categories.includes("Food") && !state.categories.includes("Groceries"), "category renamed");
     expect(state.budgets.some((b) => b.category === "Food"), "budget renamed with category");
     expect(
@@ -432,8 +440,8 @@ async function main() {
       "transactions renamed with category",
     );
 
-    await repo.deleteCategorySmart("Food");
-    state = await repo.getState();
+    await repo.deleteCategorySmart(uid, "Food");
+    state = await repo.getState(uid);
     expect(!state.categories.includes("Food"), "category deleted");
     expect(!state.budgets.some((b) => b.category === "Food"), "budget deleted with category");
     expect(
@@ -441,12 +449,12 @@ async function main() {
       "transactions moved off deleted category",
     );
 
-    await repo.upsertMerchantRule("test cafe", "Dining");
-    state = await repo.getState();
+    await repo.upsertMerchantRule(uid, "test cafe", "Dining");
+    state = await repo.getState(uid);
     expect(state.merchantRules["test cafe"] === "Dining", "merchant rule stored");
 
     console.log("accounts / holdings");
-    await repo.insertAccount(
+    await repo.insertAccount(uid, 
       {
         id: "test-acc-1",
         name: "Test Account",
@@ -458,13 +466,13 @@ async function main() {
       },
       99,
     );
-    state = await repo.getState();
+    state = await repo.getState(uid);
     expect(state.accounts.some((a) => a.id === "test-acc-1"), "account inserted");
     expect(
       state.accounts.find((a) => a.id === "test-acc-1")?.registration === "TFSA",
       "registration survives the insert",
     );
-    await repo.replaceAccount({
+    await repo.replaceAccount(uid, {
       id: "test-acc-1",
       name: "Renamed Account",
       institution: "Test Bank",
@@ -473,7 +481,7 @@ async function main() {
       history: [{ month: "2026-08", value: 750 }],
       registration: "RRSP",
     });
-    state = await repo.getState();
+    state = await repo.getState(uid);
     expect(state.accounts.find((a) => a.id === "test-acc-1")?.balance === 750, "account updated");
     expect(
       state.accounts.find((a) => a.id === "test-acc-1")?.registration === "RRSP",
@@ -486,7 +494,7 @@ async function main() {
      * the history array on the assumption that it was the current month: with
      * July the last month on record, August's spending overwrote July's close.
      */
-    await repo.insertAccount(
+    await repo.insertAccount(uid, 
       {
         id: "test-acc-months",
         name: "History Account",
@@ -500,7 +508,7 @@ async function main() {
       },
       98,
     );
-    await repo.insertTransaction({
+    await repo.insertTransaction(uid, {
       id: "test-txn-months",
       date: `${currentMonthKey()}-15`,
       type: "expense",
@@ -509,7 +517,7 @@ async function main() {
       sourceAccountId: "test-acc-months",
       payee: "Market",
     });
-    state = await repo.getState();
+    state = await repo.getState(uid);
     const withMonths = state.accounts.find((a) => a.id === "test-acc-months");
     expect(withMonths?.balance === 750, "the balance moved");
     expect(
@@ -526,7 +534,7 @@ async function main() {
     );
 
     // Crypto accounts hold positions like a brokerage does.
-    await repo.insertAccount(
+    await repo.insertAccount(uid, 
       {
         id: "test-crypto-1",
         name: "Ledger",
@@ -537,17 +545,17 @@ async function main() {
       },
       98,
     );
-    state = await repo.getState();
+    state = await repo.getState(uid);
     expect(
       state.accounts.find((a) => a.id === "test-crypto-1")?.kind === "crypto",
       "crypto account round-trips through the database",
     );
-    await repo.deleteAccountRow("test-crypto-1");
-    await repo.deleteAccountRow("test-acc-1");
-    state = await repo.getState();
+    await repo.deleteAccountRow(uid, "test-crypto-1");
+    await repo.deleteAccountRow(uid, "test-acc-1");
+    state = await repo.getState(uid);
     expect(!state.accounts.some((a) => a.id === "test-acc-1"), "account deleted");
 
-    await repo.insertHolding(
+    await repo.insertHolding(uid, 
       {
         id: "test-hold-1",
         ticker: "TEST",
@@ -571,7 +579,7 @@ async function main() {
       },
       99,
     );
-    state = await repo.getState();
+    state = await repo.getState(uid);
     expect(state.holdings.some((h) => h.id === "test-hold-1" && h.price === 110), "holding inserted");
     {
       // Flows are what realized gain and MWRR are derived from, so they have to
@@ -583,7 +591,7 @@ async function main() {
     {
       // The same security in a second account: a rename has to reach both, or
       // the holdings page stops pooling them into one row.
-      await repo.insertHolding(
+      await repo.insertHolding(uid, 
         {
           id: "test-hold-2",
           ticker: "test",
@@ -604,7 +612,7 @@ async function main() {
         },
         100,
       );
-      const changed = await repo.updateSecurity("TEST", {
+      const changed = await repo.updateSecurity(uid, "TEST", {
         ticker: "TSET",
         name: "Renamed ETF",
         assetClass: "Bonds",
@@ -613,7 +621,7 @@ async function main() {
         currency: "CAD",
       });
       expect(changed === 2, `rename touches every account (got ${changed})`);
-      state = await repo.getState();
+      state = await repo.getState(uid);
       const renamed = state.holdings.filter((h) => h.ticker === "TSET");
       expect(renamed.length === 2, "both lots carry the new ticker");
       expect(
@@ -628,16 +636,16 @@ async function main() {
         renamed.every((h) => h.history[h.history.length - 1] === 125),
         "the price history ends on the manual price, so the chart agrees",
       );
-      await repo.deleteHoldingRow("test-hold-2");
+      await repo.deleteHoldingRow(uid, "test-hold-2");
     }
 
-    await repo.deleteHoldingRow("test-hold-1");
-    state = await repo.getState();
+    await repo.deleteHoldingRow(uid, "test-hold-1");
+    state = await repo.getState(uid);
     expect(!state.holdings.some((h) => h.id === "test-hold-1"), "holding deleted");
 
     console.log("reset");
-    await repo.resetToSample(generateSampleData());
-    state = await repo.getState();
+    await repo.resetToSample(uid, generateSampleData());
+    state = await repo.getState(uid);
     expect(
       state.accounts.length === sample.accounts.length,
       "reset restores sample accounts",
@@ -646,11 +654,11 @@ async function main() {
     expect(!("test cafe" in state.merchantRules), "reset clears merchant rules");
 
     console.log("delete demo data");
-    state = await repo.getState();
+    state = await repo.getState(uid);
     expect(state.demoPresent, "demo data reported present while seeded");
 
     // A row the user created: it must survive the deletion untouched.
-    await repo.insertAccount(
+    await repo.insertAccount(uid, 
       {
         id: "user-account-1",
         name: "My Real Bank",
@@ -661,7 +669,7 @@ async function main() {
       },
       99,
     );
-    await repo.upsertBudget("Fees", 25);
+    await repo.upsertBudget(uid, "Fees", 25);
 
     console.log("monthly price history");
     {
@@ -754,8 +762,8 @@ async function main() {
       expect((await bm.fillBenchmarkGap()) === 0, "the gap fill spends nothing when the cap is zero");
     }
 
-    await repo.deleteDemoData();
-    state = await repo.getState();
+    await repo.deleteDemoData(uid);
+    state = await repo.getState(uid);
     expect(!state.demoPresent, "demo data reported absent after deletion");
     expect(
       state.accounts.length === 1 && state.accounts[0].id === "user-account-1",
@@ -771,15 +779,181 @@ async function main() {
       state.categories.length === sample.categories.length,
       "category list is kept",
     );
-    expect(await repo.isDemoDeleted(), "deletion is recorded in app_meta");
+    expect(await repo.isDemoDeleted(uid), "deletion is recorded in the user's settings");
 
     // The regression this marker exists for: an emptied database must not be
     // mistaken for a first run and re-seeded. ensureDb() memoises its first
     // run, so assert the two conditions it seeds on rather than calling it
     // again, which would return the cached promise and prove nothing.
-    await repo.deleteAccountRow("user-account-1");
-    expect(!(await repo.isSeeded()), "an emptied database looks unseeded…");
-    expect(await repo.isDemoDeleted(), "…but the demo-deleted marker suppresses re-seeding");
+    await repo.deleteAccountRow(uid, "user-account-1");
+    expect(!(await repo.isSeeded(uid)), "an emptied database looks unseeded…");
+    expect(await repo.isDemoDeleted(uid), "…but the demo-deleted marker suppresses re-seeding");
+
+    /*
+     * Two people, one installation. Everything above ran as the first account;
+     * this is the second, and the question is only ever "can they reach the
+     * first account's record?" — through a read, a write aimed at an id, a
+     * transaction that names somebody else's account, or a name they share.
+     */
+    console.log("isolation between users");
+    const { hashPassword } = await import("../src/lib/auth");
+    await repo.insertUser({
+      id: "second-user",
+      username: "second",
+      passwordHash: hashPassword("second-password-for-tests"),
+      role: "member",
+      createdAt: new Date().toISOString(),
+    });
+    const other = "second-user";
+
+    // The first user's record was emptied by the demo tests above, so give it
+    // an account and a transaction of its own to be protected.
+    await repo.insertAccount(
+      uid,
+      {
+        id: "owner-chequing",
+        name: "Owner chequing",
+        institution: "Example Bank",
+        kind: "checking",
+        balance: 1000,
+        history: [],
+      },
+      await repo.nextPosition(uid, (await import("../src/db/schema")).accounts),
+    );
+    await repo.insertTransaction(uid, {
+      id: "owner-expense-1",
+      date: new Date().toISOString().slice(0, 10),
+      type: "expense",
+      amount: 10,
+      category: "Groceries",
+      sourceAccountId: "owner-chequing",
+      payee: "Example market",
+    });
+    await repo.insertCategory(uid, "Groceries", 0);
+    await repo.upsertBudget(uid, "Groceries", 300);
+
+    const mine = await repo.getState(uid);
+    const theirs = await repo.getState(other);
+    expect(theirs.accounts.length === 0, "a new user sees none of the first user's accounts");
+    expect(theirs.transactions.length === 0, "…none of their transactions");
+    expect(theirs.holdings.length === 0, "…none of their holdings");
+    expect(theirs.budgets.length === 0 && theirs.categories.length === 0, "…none of their budgets or categories");
+    expect(Object.keys(await repo.getSnapshotHistory(other)).length === 0, "…and none of their month-end values");
+
+    const target = mine.accounts.find((a) => a.id === "owner-chequing")!;
+    const targetBefore = (await repo.getState(uid)).accounts.find((a) => a.id === target.id)!;
+
+    // A write aimed at somebody else's id does nothing.
+    await repo.replaceAccount(other, { ...targetBefore, name: "renamed by someone else", balance: 1 });
+    await repo.deleteAccountRow(other, target.id);
+    const afterWrite = (await repo.getState(uid)).accounts.find((a) => a.id === target.id);
+    expect(afterWrite?.name === targetBefore.name, "another user cannot rename an account by its id");
+    expect(afterWrite !== undefined, "…or delete it");
+
+    // A transaction naming somebody else's account does not move its balance.
+    await repo.insertTransaction(other, {
+      id: "second-user-expense",
+      date: new Date().toISOString().slice(0, 10),
+      type: "expense",
+      amount: 500,
+      category: "Groceries",
+      sourceAccountId: target.id,
+      payee: "Example market",
+    });
+    const afterTxn = (await repo.getState(uid)).accounts.find((a) => a.id === target.id)!;
+    expect(
+      afterTxn.balance === targetBefore.balance,
+      "a transaction naming another user's account leaves that balance alone",
+    );
+    expect(
+      !(await repo.getState(uid)).transactions.some((t) => t.id === "second-user-expense"),
+      "…and does not appear in their record",
+    );
+
+    // Deleting or editing somebody else's transaction by id does nothing.
+    const someTxn = (await repo.getState(uid)).transactions.find((t) => t.id === "owner-expense-1");
+    expect(someTxn !== undefined, "the first user's transaction exists before the checks");
+    if (someTxn) {
+      await repo.removeTransaction(other, someTxn.id);
+      await repo.updateTransactionRow(other, someTxn.id, { ...someTxn, amount: someTxn.amount + 1 });
+      const still = (await repo.getState(uid)).transactions.find((t) => t.id === someTxn.id);
+      expect(still?.amount === someTxn.amount, "another user cannot edit or delete a transaction by its id");
+    }
+
+    // The same name in two records is two rows.
+    await repo.insertCategory(other, "Groceries", 0);
+    await repo.upsertBudget(other, "Groceries", 1);
+    await repo.upsertMerchantRule(other, "example market", "Groceries");
+    const myBudget = (await repo.getState(uid)).budgets.find((b) => b.category === "Groceries");
+    await repo.renameCategoryEverywhere(other, "Groceries", "Food");
+    const myAfterRename = await repo.getState(uid);
+    expect(
+      myAfterRename.categories.includes("Groceries") && !myAfterRename.categories.includes("Food"),
+      "renaming a category renames only your own",
+    );
+    expect(
+      (myAfterRename.budgets.find((b) => b.category === "Groceries")?.limit ?? null) ===
+        (myBudget?.limit ?? null),
+      "a budget of the same name in another record is untouched",
+    );
+
+    // One figure per month per kind is a rule about one person's record. The
+    // guard used to compare everyone's rows, so one user's monthly import
+    // refused another's receipts — and said how many rows the other held.
+    await repo.insertTransaction(uid, {
+      id: "owner-monthly-2025-03",
+      date: "2025-03-31",
+      type: "expense",
+      amount: 900,
+      category: "Groceries",
+      sourceAccountId: "owner-chequing",
+      payee: "Monthly total",
+      granularity: "monthly",
+    });
+    let refused: string | null = null;
+    try {
+      await repo.insertTransaction(other, {
+        id: "second-receipt-2025-03",
+        date: "2025-03-12",
+        type: "expense",
+        amount: 40,
+        category: "Groceries",
+        payee: "Example market",
+        granularity: "individual",
+      });
+    } catch (err) {
+      refused = err instanceof Error ? err.message : String(err);
+    }
+    expect(refused === null, "another user's monthly total does not refuse your receipts for that month");
+    let ownRefused = false;
+    try {
+      await repo.insertTransaction(uid, {
+        id: "owner-receipt-2025-03",
+        date: "2025-03-12",
+        type: "expense",
+        amount: 40,
+        category: "Groceries",
+        payee: "Example market",
+        granularity: "individual",
+      });
+    } catch {
+      ownRefused = true;
+    }
+    expect(ownRefused, "…while your own monthly total still refuses your own receipts");
+
+    // Settings are per person.
+    await repo.setExpenseSettings(other, { groups: { Food: "discretionary" }, car: null });
+    expect(
+      (await repo.getExpenseSettings(uid)).groups.Food === undefined,
+      "one user's expense settings are not another's",
+    );
+
+    // Wiping a record wipes one record.
+    await repo.wipe(other);
+    expect(
+      (await repo.getState(uid)).accounts.length === myAfterRename.accounts.length,
+      "emptying one user's record leaves the other's",
+    );
 
     if (failures > 0) console.error(`\n${failures} test(s) failed`);
     else console.log("\nall db integration tests passed");
