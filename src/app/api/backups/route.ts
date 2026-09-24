@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { readdirSync } from "node:fs";
-import { handle } from "@/db/http";
+import { handle, requireAdmin } from "@/db/http";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,12 @@ const BACKUP_DIR = process.env.BACKUP_DIR || "/backups";
 const BACKUP_GLOB = /\.sql\.gz(\.enc)?$/;
 
 export async function GET() {
-  return handle(async () => {
+  return handle(async (user) => {
+    /*
+     * The backups are of the whole installation — every user's record in one
+     * file — so only an administrator is told they exist.
+     */
+    requireAdmin(user);
     const backups: {
       file: string;
       size: number;

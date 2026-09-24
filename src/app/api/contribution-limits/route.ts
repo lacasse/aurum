@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { ensureDb } from "@/db/init";
+import { withUser } from "@/db/session";
 import {
   getContributionLimits,
   getRoomDeferrals,
@@ -32,26 +32,28 @@ const bodySchema = z.object({
 });
 
 export async function GET() {
-  await ensureDb();
-  return NextResponse.json({
-    limits: await getContributionLimits(),
-    deferrals: await getRoomDeferrals(),
+  return withUser(async (user) => {
+    return NextResponse.json({
+      limits: await getContributionLimits(user.id),
+      deferrals: await getRoomDeferrals(user.id),
+    });
   });
 }
 
 export async function PUT(request: Request) {
-  await ensureDb();
-  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Contribution room must be a positive amount per plan, per year." },
-      { status: 400 },
-    );
-  }
-  await setContributionLimits(parsed.data.limits);
-  if (parsed.data.deferrals) await setRoomDeferrals(parsed.data.deferrals);
-  return NextResponse.json({
-    limits: await getContributionLimits(),
-    deferrals: await getRoomDeferrals(),
+  return withUser(async (user) => {
+    const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Contribution room must be a positive amount per plan, per year." },
+        { status: 400 },
+      );
+    }
+    await setContributionLimits(user.id, parsed.data.limits);
+    if (parsed.data.deferrals) await setRoomDeferrals(user.id, parsed.data.deferrals);
+    return NextResponse.json({
+      limits: await getContributionLimits(user.id),
+      deferrals: await getRoomDeferrals(user.id),
+    });
   });
 }

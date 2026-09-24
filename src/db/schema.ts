@@ -30,6 +30,8 @@ const quantity = (name: string) => numeric(name, { precision: 28, scale: 10, mod
 
 export const accounts = pgTable("accounts", {
   id: text("id").primaryKey(),
+  /** Whose row this is. Every read and write is scoped to it. */
+  userId: text("user_id").notNull(),
   name: text("name").notNull(),
   institution: text("institution").notNull().default("—"),
   kind: text("kind").notNull(),
@@ -61,6 +63,8 @@ export const transactions = pgTable(
   "transactions",
   {
     id: text("id").primaryKey(),
+    /** Whose row this is. Every read and write is scoped to it. */
+    userId: text("user_id").notNull(),
     date: date("date", { mode: "string" }).notNull(),
     type: text("type").notNull(),
     amount: money("amount").notNull(),
@@ -94,6 +98,8 @@ export const transactions = pgTable(
 
 export const recurringTransactions = pgTable("recurring_transactions", {
   id: text("id").primaryKey(),
+  /** Whose row this is. Every read and write is scoped to it. */
+  userId: text("user_id").notNull(),
   type: text("type").notNull(),
   amount: money("amount").notNull(),
   category: text("category").notNull(),
@@ -111,6 +117,8 @@ export const recurringTransactions = pgTable("recurring_transactions", {
 
 export const holdings = pgTable("holdings", {
   id: text("id").primaryKey(),
+  /** Whose row this is. Every read and write is scoped to it. */
+  userId: text("user_id").notNull(),
   ticker: text("ticker").notNull(),
   name: text("name").notNull(),
   assetClass: text("asset_class").notNull(),
@@ -131,20 +139,36 @@ export const holdings = pgTable("holdings", {
   position: integer("position").notNull().default(0),
 });
 
-export const budgets = pgTable("budgets", {
-  category: text("category").primaryKey(),
-  max: money("max").notNull(),
-});
+/* Keyed by owner and name: two people can both budget for "Groceries". */
+export const budgets = pgTable(
+  "budgets",
+  {
+    userId: text("user_id").notNull(),
+    category: text("category").notNull(),
+    max: money("max").notNull(),
+  },
+  (t) => [primaryKey({ name: "budgets_pkey", columns: [t.userId, t.category] })],
+);
 
-export const categories = pgTable("categories", {
-  name: text("name").primaryKey(),
-  position: integer("position").notNull().default(0),
-});
+export const categories = pgTable(
+  "categories",
+  {
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [primaryKey({ name: "categories_pkey", columns: [t.userId, t.name] })],
+);
 
-export const merchantRules = pgTable("merchant_rules", {
-  merchant: text("merchant").primaryKey(),
-  category: text("category").notNull(),
-});
+export const merchantRules = pgTable(
+  "merchant_rules",
+  {
+    userId: text("user_id").notNull(),
+    merchant: text("merchant").notNull(),
+    category: text("category").notNull(),
+  },
+  (t) => [primaryKey({ name: "merchant_rules_pkey", columns: [t.userId, t.merchant] })],
+);
 
 /*
  * Small key/value table for facts about the deployment itself rather than the
@@ -161,6 +185,7 @@ export const appMeta = pgTable("app_meta", {
 export const monthlySnapshots = pgTable(
   "monthly_snapshots",
   {
+    userId: text("user_id").notNull(),
     month: text("month").notNull(),
     holdingId: text("holding_id").notNull(),
     ticker: text("ticker").notNull(),
@@ -173,7 +198,7 @@ export const monthlySnapshots = pgTable(
   (t) => [
     primaryKey({
       name: "monthly_snapshots_pkey",
-      columns: [t.month, t.holdingId],
+      columns: [t.userId, t.month, t.holdingId],
     }),
   ],
 );
@@ -256,3 +281,19 @@ export const invites = pgTable("invites", {
   acceptedAt: text("accepted_at"),
   acceptedBy: text("accepted_by"),
 });
+
+/**
+ * Settings that belong to a person rather than to the installation — which
+ * categories are necessities, contribution room, allocation targets, whether
+ * they deleted the demo data. `app_meta` keeps only what is genuinely shared:
+ * price caches and provider allowances.
+ */
+export const userSettings = pgTable(
+  "user_settings",
+  {
+    userId: text("user_id").notNull(),
+    key: text("key").notNull(),
+    value: text("value").notNull(),
+  },
+  (t) => [primaryKey({ name: "user_settings_pkey", columns: [t.userId, t.key] })],
+);

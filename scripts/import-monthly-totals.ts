@@ -17,7 +17,11 @@
  *
  * Usage:
  *   docker exec -e DATABASE_URL=... <container> \
- *     npx tsx scripts/import-monthly-totals.ts <rows.json> --map <map.json> [--commit]
+ *     npx tsx scripts/import-monthly-totals.ts <rows.json> --map <map.json> [--commit] [--user <name>]
+ *
+ * Rows are written to the named user's record only. The ids are derived from
+ * the row itself so a re-run updates rather than duplicates; if an id is
+ * already held by somebody else's row, that row is left alone and reported.
  *
  * `rows.json` is an array of { date, kind: "income"|"expense", sheetCategory,
  * amount }. A negative amount means the money went the other way: a refund or
@@ -35,7 +39,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { db } from "@/db/index";
 import { accounts, categories, transactions } from "@/db/schema";
-import { asc, sql } from "drizzle-orm";
+import { scriptUser } from "@/db/script-user";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 
 interface SheetRow {
   date: string;
@@ -96,7 +101,7 @@ function loadMapping(path: string): Mapping {
 }
 
 async function main() {
-  const args = process.argv.slice(2);
+  const { user, args } = await scriptUser(process.argv.slice(2));
   const mapFlag = args.indexOf("--map");
   const mapPath = mapFlag === -1 ? null : args[mapFlag + 1];
   const commit = args.includes("--commit");
@@ -116,7 +121,7 @@ async function main() {
   const [cash] = await db
     .select()
     .from(accounts)
-    .where(sql`${accounts.kind} = 'checking'`)
+    .where(and(eq(accounts.userId, user.id), sql`${accounts.kind} = 'checking'`))
     .orderBy(asc(accounts.name))
     .limit(1);
   if (!cash) throw new Error("no chequing account to attach these to");
@@ -141,6 +146,7 @@ async function main() {
     if (!inflow) newExpenseCategories.add(category);
     prepared.push({
       id: idFor(row.date, category, row.sheetCategory),
+      userId: user.id,
       date: row.date,
       type: inflow ? "income" : "expense",
       amount,
@@ -172,12 +178,14 @@ async function main() {
   // Categories the transaction form offers for spending come from this table,
   // so a category that only exists on the transactions is one you cannot pick
   // again by hand.
-  const existing = new Set((await db.select().from(categories)).map((c) => c.name));
+  const existing = new Set(
+    (await db.select().from(categories).where(eq(categories.userId, user.id))).map((c) => c.name),
+  );
   const toAdd = [...newExpenseCategories].filter((c) => !existing.has(c)).sort();
   if (toAdd.length > 0) {
     await db
       .insert(categories)
-      .values(toAdd.map((name, i) => ({ name, position: existing.size + i })))
+      .values(toAdd.map((name, i) => ({ userId: user.id, name, position: existing.size + i })))
       .onConflictDoNothing();
     console.log(`added ${toAdd.length} categor${toAdd.length === 1 ? "y" : "ies"}: ${toAdd.join(", ")}`);
   }
@@ -188,6 +196,9 @@ async function main() {
       .values(row)
       .onConflictDoUpdate({
         target: transactions.id,
+        // Only ever this user's row. An id held by someone else is not theirs
+        // to overwrite; it is left as it is and reported below.
+        setWhere: eq(transactions.userId, user.id),
         set: {
           date: row.date,
           type: row.type,
@@ -200,7 +211,18 @@ async function main() {
         },
       });
   }
-  console.log(`wrote ${prepared.length} transactions (account balances untouched)`);
+  const clashes = await db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(and(inArray(transactions.id, prepared.map((p) => p.id!)), ne(transactions.userId, user.id)));
+  if (clashes.length > 0) {
+    console.log(
+      `skipped ${clashes.length} row${clashes.length === 1 ? "" : "s"} whose id belongs to another user's record`,
+    );
+  }
+  console.log(
+    `wrote ${prepared.length - clashes.length} transactions (account balances untouched)`,
+  );
   process.exit(0);
 }
 

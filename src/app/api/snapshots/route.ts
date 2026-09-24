@@ -11,21 +11,21 @@ import { monthKeySchema } from "@/lib/schemas";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     const url = new URL(req.url);
     const month = monthKeySchema.safeParse(url.searchParams.get("month"));
     if (!month.success) {
       throw new BadRequestError("month query param required (YYYY-MM)");
     }
-    return { snapshots: await getSnapshots(month.data) };
+    return { snapshots: await getSnapshots(user.id, month.data) };
   });
 }
 
 export async function POST(req: Request) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
-    await upsertSnapshots(parseSnapshotsBody(await readJson(req)));
+    await upsertSnapshots(user.id, parseSnapshotsBody(await readJson(req)));
     return { ok: true };
   });
 }

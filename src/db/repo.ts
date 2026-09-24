@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, like, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   accounts,
@@ -11,6 +11,7 @@ import {
   monthlySnapshots,
   recurringTransactions,
   transactions,
+  userSettings,
 } from "./schema";
 import {
   Account,
@@ -146,7 +147,7 @@ function toRecurringRule(
 /* Read                                                                */
 /* ------------------------------------------------------------------ */
 
-export async function getState(): Promise<
+export async function getState(userId: string): Promise<
   FinanceData & { merchantRules: Record<string, string>; demoPresent: boolean }
 > {
   const [
@@ -159,14 +160,26 @@ export async function getState(): Promise<
     recurringRows,
     demoPresent,
   ] = await Promise.all([
-    db.select().from(accounts).orderBy(asc(accounts.position)),
-    db.select().from(transactions).orderBy(desc(transactions.date), desc(transactions.id)),
-    db.select().from(holdings).orderBy(asc(holdings.position)),
-    db.select().from(budgets),
-    db.select().from(categories).orderBy(asc(categories.position)),
-    db.select().from(merchantRules),
-    db.select().from(recurringTransactions).orderBy(asc(recurringTransactions.position)),
-    hasDemoData(),
+    db.select().from(accounts).where(eq(accounts.userId, userId)).orderBy(asc(accounts.position)),
+    db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.userId, userId))
+      .orderBy(desc(transactions.date), desc(transactions.id)),
+    db.select().from(holdings).where(eq(holdings.userId, userId)).orderBy(asc(holdings.position)),
+    db.select().from(budgets).where(eq(budgets.userId, userId)),
+    db
+      .select()
+      .from(categories)
+      .where(eq(categories.userId, userId))
+      .orderBy(asc(categories.position)),
+    db.select().from(merchantRules).where(eq(merchantRules.userId, userId)),
+    db
+      .select()
+      .from(recurringTransactions)
+      .where(eq(recurringTransactions.userId, userId))
+      .orderBy(asc(recurringTransactions.position)),
+    hasDemoData(userId),
   ]);
 
   return {
@@ -181,10 +194,11 @@ export async function getState(): Promise<
   };
 }
 
-export async function isSeeded(): Promise<boolean> {
+export async function isSeeded(userId: string): Promise<boolean> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
-    .from(accounts);
+    .from(accounts)
+    .where(eq(accounts.userId, userId));
   return (row?.count ?? 0) > 0;
 }
 
@@ -193,6 +207,7 @@ export async function isSeeded(): Promise<boolean> {
 /* ------------------------------------------------------------------ */
 
 export async function seed(
+  userId: string,
   data: FinanceData,
   snapshotRows: SampleSnapshot[] = [],
 ): Promise<void> {
@@ -200,6 +215,7 @@ export async function seed(
     await db.insert(accounts).values(
       data.accounts.map((a, i) => ({
         id: a.id,
+        userId,
         name: a.name,
         institution: a.institution,
         kind: a.kind,
@@ -215,6 +231,7 @@ export async function seed(
     await db.insert(transactions).values(
       data.transactions.map((t) => ({
         id: t.id,
+        userId,
         date: t.date,
         type: t.type,
         amount: t.amount,
@@ -231,6 +248,7 @@ export async function seed(
     await db.insert(holdings).values(
       data.holdings.map((h, i) => ({
         id: h.id,
+        userId,
         ticker: h.ticker,
         name: h.name,
         assetClass: h.assetClass,
@@ -253,17 +271,17 @@ export async function seed(
   if (data.budgets.length > 0) {
     await db
       .insert(budgets)
-      .values(data.budgets.map((b) => ({ category: b.category, max: b.limit })));
+      .values(data.budgets.map((b) => ({ userId, category: b.category, max: b.limit })));
   }
   if (data.recurring.length > 0) {
     await db
       .insert(recurringTransactions)
-      .values(data.recurring.map((r, i) => recurringValues(r, i)));
+      .values(data.recurring.map((r, i) => ({ ...recurringValues(r, i), userId })));
   }
   if (data.categories.length > 0) {
     await db
       .insert(categories)
-      .values(data.categories.map((name, i) => ({ name, position: i })));
+      .values(data.categories.map((name, i) => ({ userId, name, position: i })));
   }
   /*
    * Month-end valuations for the sample portfolio.
@@ -275,23 +293,24 @@ export async function seed(
    * `deleteDemoData` along with the holdings they belong to.
    */
   if (snapshotRows.length > 0) {
-    await db.insert(monthlySnapshots).values(snapshotRows);
+    await db.insert(monthlySnapshots).values(snapshotRows.map((r) => ({ ...r, userId })));
   }
 }
 
-export async function wipe(): Promise<void> {
-  await db.delete(transactions);
-  await db.delete(recurringTransactions);
-  await db.delete(budgets);
-  await db.delete(merchantRules);
-  await db.delete(categories);
-  await db.delete(holdings);
-  await db.delete(accounts);
+/** Empties one user's record. Nobody else's rows are touched. */
+export async function wipe(userId: string): Promise<void> {
+  await db.delete(transactions).where(eq(transactions.userId, userId));
+  await db.delete(recurringTransactions).where(eq(recurringTransactions.userId, userId));
+  await db.delete(budgets).where(eq(budgets.userId, userId));
+  await db.delete(merchantRules).where(eq(merchantRules.userId, userId));
+  await db.delete(categories).where(eq(categories.userId, userId));
+  await db.delete(holdings).where(eq(holdings.userId, userId));
+  await db.delete(accounts).where(eq(accounts.userId, userId));
 }
 
-export async function resetToSample(data: FinanceData): Promise<void> {
-  await wipe();
-  await seed(data);
+export async function resetToSample(userId: string, data: FinanceData): Promise<void> {
+  await wipe(userId);
+  await seed(userId, data);
 }
 
 /* ------------------------------------------------------------------ */
@@ -318,24 +337,27 @@ function recurringValues(r: RecurringRule, position: number) {
 }
 
 export async function insertRecurringRule(
+  userId: string,
   rule: RecurringRule,
   position: number,
 ): Promise<void> {
-  await db.insert(recurringTransactions).values(recurringValues(rule, position));
+  await db.insert(recurringTransactions).values({ ...recurringValues(rule, position), userId });
 }
 
-export async function replaceRecurringRule(rule: RecurringRule): Promise<void> {
+export async function replaceRecurringRule(userId: string, rule: RecurringRule): Promise<void> {
   const { id: _id, position: _position, ...rest } = recurringValues(rule, 0);
   void _id;
   void _position;
   await db
     .update(recurringTransactions)
     .set(rest)
-    .where(eq(recurringTransactions.id, rule.id));
+    .where(and(eq(recurringTransactions.id, rule.id), eq(recurringTransactions.userId, userId)));
 }
 
-export async function deleteRecurringRule(id: string): Promise<void> {
-  await db.delete(recurringTransactions).where(eq(recurringTransactions.id, id));
+export async function deleteRecurringRule(userId: string, id: string): Promise<void> {
+  await db
+    .delete(recurringTransactions)
+    .where(and(eq(recurringTransactions.id, id), eq(recurringTransactions.userId, userId)));
 }
 
 /**
@@ -349,9 +371,12 @@ export async function deleteRecurringRule(id: string): Promise<void> {
  * so a re-run can never duplicate one that already exists.
  */
 export async function materializeRecurring(
+  userId: string,
   today = todayISO(),
 ): Promise<number> {
-  const rules = (await db.select().from(recurringTransactions)).map(toRecurringRule);
+  const rules = (
+    await db.select().from(recurringTransactions).where(eq(recurringTransactions.userId, userId))
+  ).map(toRecurringRule);
   let created = 0;
 
   for (const rule of rules) {
@@ -365,13 +390,13 @@ export async function materializeRecurring(
         await db
           .select({ date: transactions.date })
           .from(transactions)
-          .where(eq(transactions.recurringId, rule.id))
+          .where(and(eq(transactions.recurringId, rule.id), eq(transactions.userId, userId)))
       ).map((r) => r.date),
     );
 
     for (const date of due) {
       if (existing.has(date)) continue;
-      await insertTransaction({
+      await insertTransaction(userId, {
         id: `rec-${rule.id}-${date}`,
         date,
         type: rule.type,
@@ -390,7 +415,7 @@ export async function materializeRecurring(
     await db
       .update(recurringTransactions)
       .set({ nextDate, active })
-      .where(eq(recurringTransactions.id, rule.id));
+      .where(and(eq(recurringTransactions.id, rule.id), eq(recurringTransactions.userId, userId)));
   }
 
   return created;
@@ -400,7 +425,26 @@ export async function materializeRecurring(
 /* Demo data                                                           */
 /* ------------------------------------------------------------------ */
 
-/** `app_meta` key recording that the user deleted the seeded demo data. */
+/* ------------------------------------------------------------------ */
+/* Per-user settings                                                   */
+/* ------------------------------------------------------------------ */
+
+async function getSetting(userId: string, key: string): Promise<string | null> {
+  const [row] = await db
+    .select()
+    .from(userSettings)
+    .where(and(eq(userSettings.userId, userId), eq(userSettings.key, key)));
+  return row?.value ?? null;
+}
+
+async function setSetting(userId: string, key: string, value: string): Promise<void> {
+  await db
+    .insert(userSettings)
+    .values({ userId, key, value })
+    .onConflictDoUpdate({ target: [userSettings.userId, userSettings.key], set: { value } });
+}
+
+/** Setting key recording that the user deleted the seeded demo data. */
 const DEMO_DELETED_KEY = "demo_data_deleted";
 
 /** Escape LIKE wildcards so a prefix is matched literally. */
@@ -411,33 +455,31 @@ const startsWith = (prefix: string) =>
  * True once the user has deleted the demo data. Checked before first-run
  * seeding so an emptied database is not re-populated with samples.
  */
-export async function isDemoDeleted(): Promise<boolean> {
-  const [row] = await db
-    .select()
-    .from(appMeta)
-    .where(eq(appMeta.key, DEMO_DELETED_KEY));
-  return row !== undefined;
+export async function isDemoDeleted(userId: string): Promise<boolean> {
+  return (await getSetting(userId, DEMO_DELETED_KEY)) !== null;
 }
 
 /**
  * True while any seeded demo row survives. Drives the sidebar's "Delete demo
  * data" button, which is hidden once there is nothing left to delete.
  */
-export async function hasDemoData(): Promise<boolean> {
+export async function hasDemoData(userId: string): Promise<boolean> {
   const count = sql<number>`count(*)::int`;
   const [demoAccounts, demoHoldings, demoTransactions] = await Promise.all([
     db
       .select({ count })
       .from(accounts)
-      .where(like(accounts.id, startsWith(DEMO_ACCOUNT_ID_PREFIX))),
+      .where(and(eq(accounts.userId, userId), like(accounts.id, startsWith(DEMO_ACCOUNT_ID_PREFIX)))),
     db
       .select({ count })
       .from(holdings)
-      .where(like(holdings.id, startsWith(DEMO_HOLDING_ID_PREFIX))),
+      .where(and(eq(holdings.userId, userId), like(holdings.id, startsWith(DEMO_HOLDING_ID_PREFIX)))),
     db
       .select({ count })
       .from(transactions)
-      .where(like(transactions.id, startsWith(DEMO_TRANSACTION_ID_PREFIX))),
+      .where(
+        and(eq(transactions.userId, userId), like(transactions.id, startsWith(DEMO_TRANSACTION_ID_PREFIX))),
+      ),
   ]);
   return (
     (demoAccounts[0]?.count ?? 0) > 0 ||
@@ -457,27 +499,40 @@ export async function hasDemoData(): Promise<boolean> {
  * transactions are filed under, not sample data, and it is already editable
  * on the Budgets page.
  */
-export async function deleteDemoData(): Promise<void> {
+export async function deleteDemoData(userId: string): Promise<void> {
   await db.transaction(async (tx) => {
     await tx
       .delete(monthlySnapshots)
-      .where(like(monthlySnapshots.holdingId, startsWith(DEMO_HOLDING_ID_PREFIX)));
+      .where(
+        and(
+          eq(monthlySnapshots.userId, userId),
+          like(monthlySnapshots.holdingId, startsWith(DEMO_HOLDING_ID_PREFIX)),
+        ),
+      );
     await tx
       .delete(transactions)
-      .where(like(transactions.id, startsWith(DEMO_TRANSACTION_ID_PREFIX)));
+      .where(and(eq(transactions.userId, userId), like(transactions.id, startsWith(DEMO_TRANSACTION_ID_PREFIX))));
     await tx
       .delete(holdings)
-      .where(like(holdings.id, startsWith(DEMO_HOLDING_ID_PREFIX)));
+      .where(and(eq(holdings.userId, userId), like(holdings.id, startsWith(DEMO_HOLDING_ID_PREFIX))));
     await tx
       .delete(accounts)
-      .where(like(accounts.id, startsWith(DEMO_ACCOUNT_ID_PREFIX)));
+      .where(and(eq(accounts.userId, userId), like(accounts.id, startsWith(DEMO_ACCOUNT_ID_PREFIX))));
     await tx
       .delete(recurringTransactions)
-      .where(like(recurringTransactions.id, startsWith(DEMO_RECURRING_ID_PREFIX)));
+      .where(
+        and(
+          eq(recurringTransactions.userId, userId),
+          like(recurringTransactions.id, startsWith(DEMO_RECURRING_ID_PREFIX)),
+        ),
+      );
     await tx.delete(budgets).where(
-      inArray(
-        budgets.category,
-        SAMPLE_BUDGETS.map((b) => b.category),
+      and(
+        eq(budgets.userId, userId),
+        inArray(
+          budgets.category,
+          SAMPLE_BUDGETS.map((b) => b.category),
+        ),
       ),
     );
     /*
@@ -488,11 +543,17 @@ export async function deleteDemoData(): Promise<void> {
      * against room nobody has. A figure the app is not certain of, rendered as
      * though it were a fact.
      */
-    await tx.delete(appMeta).where(eq(appMeta.key, CONTRIBUTION_LIMITS_KEY));
-    await tx.delete(appMeta).where(eq(appMeta.key, ROOM_DEFERRALS_KEY));
     await tx
-      .insert(appMeta)
-      .values({ key: DEMO_DELETED_KEY, value: new Date().toISOString() })
+      .delete(userSettings)
+      .where(
+        and(
+          eq(userSettings.userId, userId),
+          inArray(userSettings.key, [CONTRIBUTION_LIMITS_KEY, ROOM_DEFERRALS_KEY]),
+        ),
+      );
+    await tx
+      .insert(userSettings)
+      .values({ userId, key: DEMO_DELETED_KEY, value: new Date().toISOString() })
       .onConflictDoNothing();
   });
 }
@@ -511,11 +572,11 @@ const TARGETS_KEY = "allocation_targets";
  * means no targets have been set, which is different from every target being
  * zero — the first draws no comparison, the second says sell everything.
  */
-export async function getAllocationTargets(): Promise<Record<string, number>> {
-  const [row] = await db.select().from(appMeta).where(eq(appMeta.key, TARGETS_KEY));
-  if (!row) return {};
+export async function getAllocationTargets(userId: string): Promise<Record<string, number>> {
+  const raw = await getSetting(userId, TARGETS_KEY);
+  if (raw === null) return {};
   try {
-    const parsed: unknown = JSON.parse(row.value);
+    const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
     const out: Record<string, number> = {};
     for (const [ticker, value] of Object.entries(parsed as Record<string, unknown>)) {
@@ -529,6 +590,7 @@ export async function getAllocationTargets(): Promise<Record<string, number>> {
 }
 
 export async function setAllocationTargets(
+  userId: string,
   targets: Record<string, number>,
 ): Promise<void> {
   const clean: Record<string, number> = {};
@@ -539,13 +601,7 @@ export async function setAllocationTargets(
       clean[ticker.trim().toUpperCase()] = Math.round(pct * 100) / 100;
     }
   }
-  await db
-    .insert(appMeta)
-    .values({ key: TARGETS_KEY, value: JSON.stringify(clean) })
-    .onConflictDoUpdate({
-      target: appMeta.key,
-      set: { value: JSON.stringify(clean) },
-    });
+  await setSetting(userId, TARGETS_KEY, JSON.stringify(clean));
 }
 
 /* ------------------------------------------------------------------ */
@@ -563,14 +619,11 @@ const CONTRIBUTION_LIMITS_KEY = "contribution_limits";
  * about a year — a figure entered for this year must not silently restate last
  * year's.
  */
-export async function getContributionLimits(): Promise<ContributionLimits> {
-  const [row] = await db
-    .select()
-    .from(appMeta)
-    .where(eq(appMeta.key, CONTRIBUTION_LIMITS_KEY));
-  if (!row) return {};
+export async function getContributionLimits(userId: string): Promise<ContributionLimits> {
+  const raw = await getSetting(userId, CONTRIBUTION_LIMITS_KEY);
+  if (raw === null) return {};
   try {
-    const parsed = JSON.parse(row.value) as ContributionLimits;
+    const parsed = JSON.parse(raw) as ContributionLimits;
     const out: ContributionLimits = {};
     for (const [year, plans] of Object.entries(parsed ?? {})) {
       if (!/^\d{4}$/.test(year) || typeof plans !== "object" || !plans) continue;
@@ -597,14 +650,11 @@ const ROOM_DEFERRALS_KEY = "contribution_deferrals";
  * looked up. Storing them together would mean a saved limit rewrites the
  * deferral record and vice versa.
  */
-export async function getRoomDeferrals(): Promise<RoomDeferrals> {
-  const [row] = await db
-    .select()
-    .from(appMeta)
-    .where(eq(appMeta.key, ROOM_DEFERRALS_KEY));
-  if (!row) return {};
+export async function getRoomDeferrals(userId: string): Promise<RoomDeferrals> {
+  const raw = await getSetting(userId, ROOM_DEFERRALS_KEY);
+  if (raw === null) return {};
   try {
-    const parsed = JSON.parse(row.value) as RoomDeferrals;
+    const parsed = JSON.parse(raw) as RoomDeferrals;
     const out: RoomDeferrals = {};
     for (const [year, plans] of Object.entries(parsed ?? {})) {
       if (!/^\d{4}$/.test(year) || typeof plans !== "object" || !plans) continue;
@@ -621,20 +671,15 @@ export async function getRoomDeferrals(): Promise<RoomDeferrals> {
   }
 }
 
-export async function setRoomDeferrals(deferrals: RoomDeferrals): Promise<void> {
-  const value = JSON.stringify(deferrals);
-  await db
-    .insert(appMeta)
-    .values({ key: ROOM_DEFERRALS_KEY, value })
-    .onConflictDoUpdate({ target: appMeta.key, set: { value } });
+export async function setRoomDeferrals(userId: string, deferrals: RoomDeferrals): Promise<void> {
+  await setSetting(userId, ROOM_DEFERRALS_KEY, JSON.stringify(deferrals));
 }
 
-export async function setContributionLimits(limits: ContributionLimits): Promise<void> {
-  const value = JSON.stringify(limits);
-  await db
-    .insert(appMeta)
-    .values({ key: CONTRIBUTION_LIMITS_KEY, value })
-    .onConflictDoUpdate({ target: appMeta.key, set: { value } });
+export async function setContributionLimits(
+  userId: string,
+  limits: ContributionLimits,
+): Promise<void> {
+  await setSetting(userId, CONTRIBUTION_LIMITS_KEY, JSON.stringify(limits));
 }
 
 /* ------------------------------------------------------------------ */
@@ -696,6 +741,36 @@ export async function insertUser(user: {
   sessionEpoch?: number;
 }): Promise<void> {
   await db.insert(users).values({ ...user, username: normaliseUsername(user.username) });
+}
+
+/** The account that owns an installation's first record: the earliest admin. */
+export async function firstAdmin(): Promise<UserRow | null> {
+  const [row] = await db
+    .select()
+    .from(users)
+    .where(eq(users.role, "admin"))
+    .orderBy(asc(users.createdAt), asc(users.id))
+    .limit(1);
+  return row ? asUser(row) : null;
+}
+
+/** The name migration 0027 gave the account it created to own existing rows. */
+export const PLACEHOLDER_USERNAME = "__unclaimed__";
+
+/**
+ * Turns the placeholder owner into the deployment's own account, if it is
+ * still waiting to be claimed. True when it was claimed by this call.
+ */
+export async function claimPlaceholderOwner(
+  username: string,
+  passwordHash: string,
+): Promise<boolean> {
+  const claimed = await db
+    .update(users)
+    .set({ username: normaliseUsername(username), passwordHash })
+    .where(eq(users.username, PLACEHOLDER_USERNAME))
+    .returning({ id: users.id });
+  return claimed.length > 0;
 }
 
 /** A new password ends every session the user had, by raising their epoch. */
@@ -764,15 +839,12 @@ export interface ExpenseSettings {
   car: { start: string; categories: string[] } | null;
 }
 
-export async function getExpenseSettings(): Promise<ExpenseSettings> {
+export async function getExpenseSettings(userId: string): Promise<ExpenseSettings> {
   const empty: ExpenseSettings = { groups: {}, car: null };
-  const [row] = await db
-    .select()
-    .from(appMeta)
-    .where(eq(appMeta.key, EXPENSE_SETTINGS_KEY));
-  if (!row) return empty;
+  const raw = await getSetting(userId, EXPENSE_SETTINGS_KEY);
+  if (raw === null) return empty;
   try {
-    const parsed = JSON.parse(row.value) as Partial<ExpenseSettings>;
+    const parsed = JSON.parse(raw) as Partial<ExpenseSettings>;
     const groups: Record<string, SpendGroup> = {};
     for (const [category, group] of Object.entries(parsed.groups ?? {})) {
       if (SPEND_GROUPS.includes(group as SpendGroup)) {
@@ -794,21 +866,18 @@ export async function getExpenseSettings(): Promise<ExpenseSettings> {
   }
 }
 
-export async function setExpenseSettings(s: ExpenseSettings): Promise<void> {
-  const value = JSON.stringify(s);
-  await db
-    .insert(appMeta)
-    .values({ key: EXPENSE_SETTINGS_KEY, value })
-    .onConflictDoUpdate({ target: appMeta.key, set: { value } });
+export async function setExpenseSettings(userId: string, s: ExpenseSettings): Promise<void> {
+  await setSetting(userId, EXPENSE_SETTINGS_KEY, JSON.stringify(s));
 }
 
 /* ------------------------------------------------------------------ */
 /* Accounts                                                            */
 /* ------------------------------------------------------------------ */
 
-export async function insertAccount(a: Account, position: number): Promise<void> {
+export async function insertAccount(userId: string, a: Account, position: number): Promise<void> {
   await db.insert(accounts).values({
     id: a.id,
+    userId,
     name: a.name,
     institution: a.institution,
     kind: a.kind,
@@ -823,7 +892,7 @@ export async function insertAccount(a: Account, position: number): Promise<void>
   });
 }
 
-export async function replaceAccount(a: Account): Promise<void> {
+export async function replaceAccount(userId: string, a: Account): Promise<void> {
   await db
     .update(accounts)
     .set({
@@ -838,14 +907,15 @@ export async function replaceAccount(a: Account): Promise<void> {
       pensionService: a.pensionService ?? null,
       balanceAsOf: a.balanceAsOf ?? null,
     })
-    .where(eq(accounts.id, a.id));
+    .where(and(eq(accounts.id, a.id), eq(accounts.userId, userId)));
 }
 
-export async function deleteAccountRow(id: string): Promise<void> {
-  await db.delete(accounts).where(eq(accounts.id, id));
+export async function deleteAccountRow(userId: string, id: string): Promise<void> {
+  await db.delete(accounts).where(and(eq(accounts.id, id), eq(accounts.userId, userId)));
 }
 
 export async function nextPosition(
+  userId: string,
   table:
     | typeof accounts
     | typeof holdings
@@ -854,7 +924,8 @@ export async function nextPosition(
 ): Promise<number> {
   const [row] = await db
     .select({ max: sql<number>`coalesce(max(${table.position}), -1)::int` })
-    .from(table);
+    .from(table)
+    .where(eq(table.userId, userId));
   return (row?.max ?? -1) + 1;
 }
 
@@ -872,13 +943,22 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 /** Move one account's balance, keeping the latest history point in step. */
 async function applyToAccount(
   tx: Tx,
+  userId: string,
   accountId: string,
   side: "source" | "destination",
   amount: number,
   sign: 1 | -1,
   date?: string,
 ): Promise<void> {
-  const [acc] = await tx.select().from(accounts).where(eq(accounts.id, accountId));
+  /*
+   * The owner is part of the lookup, not a check after it. A transaction names
+   * its accounts by id, and an id arrives in a request body: without this, a
+   * transaction naming somebody else's account would move their balance.
+   */
+  const [acc] = await tx
+    .select()
+    .from(accounts)
+    .where(and(eq(accounts.id, accountId), eq(accounts.userId, userId)));
   if (!acc) return;
   /*
    * A transaction dated on or before the balance the user last stated by hand
@@ -897,7 +977,10 @@ async function applyToAccount(
    * closed — August's spending was landing on July's recorded balance.
    */
   const { history } = withBalanceRecorded({ ...toAccount(acc), balance });
-  await tx.update(accounts).set({ balance, history }).where(eq(accounts.id, acc.id));
+  await tx
+    .update(accounts)
+    .set({ balance, history })
+    .where(and(eq(accounts.id, acc.id), eq(accounts.userId, userId)));
 }
 
 /**
@@ -905,21 +988,27 @@ async function applyToAccount(
  * and nets to zero across them; income and expenses touch only the one side
  * that is an account of yours. `sign=-1` reverses the effect.
  */
-async function applyTxnEffect(tx: Tx, txn: Transaction, sign: 1 | -1): Promise<void> {
+async function applyTxnEffect(
+  tx: Tx,
+  userId: string,
+  txn: Transaction,
+  sign: 1 | -1,
+): Promise<void> {
   if (txn.sourceAccountId) {
-    await applyToAccount(tx, txn.sourceAccountId, "source", txn.amount, sign, txn.date);
+    await applyToAccount(tx, userId, txn.sourceAccountId, "source", txn.amount, sign, txn.date);
   }
   if (txn.destinationAccountId) {
     await applyToAccount(
-      tx, txn.destinationAccountId, "destination", txn.amount, sign, txn.date,
+      tx, userId, txn.destinationAccountId, "destination", txn.amount, sign, txn.date,
     );
   }
 }
 
-export async function insertTransaction(txn: Transaction): Promise<void> {
+export async function insertTransaction(userId: string, txn: Transaction): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.insert(transactions).values({
       id: txn.id,
+      userId,
       date: txn.date,
       type: txn.type,
       amount: txn.amount,
@@ -931,18 +1020,22 @@ export async function insertTransaction(txn: Transaction): Promise<void> {
       recurringId: txn.recurringId ?? null,
       granularity: txn.granularity ?? "individual",
     });
-    await applyTxnEffect(tx, txn, 1);
+    await applyTxnEffect(tx, userId, txn, 1);
   });
 }
 
 export async function updateTransactionRow(
+  userId: string,
   id: string,
   input: Transaction,
 ): Promise<void> {
   await db.transaction(async (tx) => {
-    const [old] = await tx.select().from(transactions).where(eq(transactions.id, id));
+    const [old] = await tx
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
     if (!old) return;
-    await applyTxnEffect(tx, toTransaction(old), -1);
+    await applyTxnEffect(tx, userId, toTransaction(old), -1);
     const updated: Transaction = { ...toTransaction(old), ...input, id };
     await tx
       .update(transactions)
@@ -957,17 +1050,22 @@ export async function updateTransactionRow(
         note: updated.note ?? null,
         granularity: updated.granularity ?? "individual",
       })
-      .where(eq(transactions.id, id));
-    await applyTxnEffect(tx, updated, 1);
+      .where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
+    await applyTxnEffect(tx, userId, updated, 1);
   });
 }
 
-export async function removeTransaction(id: string): Promise<void> {
+export async function removeTransaction(userId: string, id: string): Promise<void> {
   await db.transaction(async (tx) => {
-    const [old] = await tx.select().from(transactions).where(eq(transactions.id, id));
+    const [old] = await tx
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
     if (!old) return;
-    await applyTxnEffect(tx, toTransaction(old), -1);
-    await tx.delete(transactions).where(eq(transactions.id, id));
+    await applyTxnEffect(tx, userId, toTransaction(old), -1);
+    await tx
+      .delete(transactions)
+      .where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
   });
 }
 
@@ -975,9 +1073,10 @@ export async function removeTransaction(id: string): Promise<void> {
 /* Holdings                                                            */
 /* ------------------------------------------------------------------ */
 
-export async function insertHolding(h: Holding, position: number): Promise<void> {
+export async function insertHolding(userId: string, h: Holding, position: number): Promise<void> {
   await db.insert(holdings).values({
     id: h.id,
+    userId,
     ticker: h.ticker,
     name: h.name,
     assetClass: h.assetClass,
@@ -1012,6 +1111,7 @@ export async function insertHolding(h: Holding, position: number): Promise<void>
  * Returns the number of rows changed, which is what the caller reports.
  */
 export async function updateSecurity(
+  userId: string,
   ticker: string,
   next: {
     ticker: string;
@@ -1022,7 +1122,7 @@ export async function updateSecurity(
     currency?: string;
   },
 ): Promise<number> {
-  const where = sql`upper(${holdings.ticker}) = upper(${ticker})`;
+  const where = and(eq(holdings.userId, userId), sql`upper(${holdings.ticker}) = upper(${ticker})`);
 
   const rows = await db
     .update(holdings)
@@ -1060,14 +1160,17 @@ export async function updateSecurity(
           ELSE ${holdings.historyCAD} END`,
       })
       .where(
-        sql`upper(${holdings.ticker}) = upper(${next.ticker}) and ${holdings.currency} = ${next.currency ?? "CAD"}`,
+        and(
+          eq(holdings.userId, userId),
+          sql`upper(${holdings.ticker}) = upper(${next.ticker}) and ${holdings.currency} = ${next.currency ?? "CAD"}`,
+        ),
       );
   }
 
   return rows.length;
 }
 
-export async function replaceHolding(h: Holding): Promise<void> {
+export async function replaceHolding(userId: string, h: Holding): Promise<void> {
   await db
     .update(holdings)
     .set({
@@ -1087,60 +1190,89 @@ export async function replaceHolding(h: Holding): Promise<void> {
       historyCAD: h.historyCAD ?? h.history,
       flows: h.flows ?? [],
     })
-    .where(eq(holdings.id, h.id));
+    .where(and(eq(holdings.id, h.id), eq(holdings.userId, userId)));
 }
 
-export async function deleteHoldingRow(id: string): Promise<void> {
-  await db.delete(holdings).where(eq(holdings.id, id));
+export async function deleteHoldingRow(userId: string, id: string): Promise<void> {
+  await db.delete(holdings).where(and(eq(holdings.id, id), eq(holdings.userId, userId)));
 }
 
 /* ------------------------------------------------------------------ */
 /* Budgets / categories / merchant rules                               */
 /* ------------------------------------------------------------------ */
 
-export async function upsertBudget(category: string, limit: number): Promise<void> {
+export async function upsertBudget(userId: string, category: string, limit: number): Promise<void> {
   await db
     .insert(budgets)
-    .values({ category, max: limit })
-    .onConflictDoUpdate({ target: budgets.category, set: { max: limit } });
+    .values({ userId, category, max: limit })
+    .onConflictDoUpdate({ target: [budgets.userId, budgets.category], set: { max: limit } });
 }
 
-export async function deleteBudgetRow(category: string): Promise<void> {
-  await db.delete(budgets).where(eq(budgets.category, category));
+export async function deleteBudgetRow(userId: string, category: string): Promise<void> {
+  await db
+    .delete(budgets)
+    .where(and(eq(budgets.userId, userId), eq(budgets.category, category)));
 }
 
-export async function insertCategory(name: string, position: number): Promise<void> {
-  await db.insert(categories).values({ name, position }).onConflictDoNothing();
+export async function insertCategory(userId: string, name: string, position: number): Promise<void> {
+  await db.insert(categories).values({ userId, name, position }).onConflictDoNothing();
 }
 
 export async function renameCategoryEverywhere(
+  userId: string,
   oldName: string,
   newName: string,
 ): Promise<void> {
-  await db.update(categories).set({ name: newName }).where(eq(categories.name, oldName));
-  await db.update(budgets).set({ category: newName }).where(eq(budgets.category, oldName));
-  await db.update(transactions).set({ category: newName }).where(eq(transactions.category, oldName));
+  await db
+    .update(categories)
+    .set({ name: newName })
+    .where(and(eq(categories.userId, userId), eq(categories.name, oldName)));
+  await db
+    .update(budgets)
+    .set({ category: newName })
+    .where(and(eq(budgets.userId, userId), eq(budgets.category, oldName)));
+  await db
+    .update(transactions)
+    .set({ category: newName })
+    .where(and(eq(transactions.userId, userId), eq(transactions.category, oldName)));
 }
 
-export async function deleteCategoryEverywhere(name: string, fallback: string): Promise<void> {
-  await db.delete(categories).where(eq(categories.name, name));
-  await db.delete(budgets).where(eq(budgets.category, name));
-  await db.update(transactions).set({ category: fallback }).where(eq(transactions.category, name));
+export async function deleteCategoryEverywhere(
+  userId: string,
+  name: string,
+  fallback: string,
+): Promise<void> {
+  await db
+    .delete(categories)
+    .where(and(eq(categories.userId, userId), eq(categories.name, name)));
+  await db.delete(budgets).where(and(eq(budgets.userId, userId), eq(budgets.category, name)));
+  await db
+    .update(transactions)
+    .set({ category: fallback })
+    .where(and(eq(transactions.userId, userId), eq(transactions.category, name)));
 }
 
 /** Deletes a category and re-homes its transactions ("Other" if available). */
-export async function deleteCategorySmart(name: string): Promise<void> {
-  const rows = await db.select().from(categories).orderBy(asc(categories.position));
+export async function deleteCategorySmart(userId: string, name: string): Promise<void> {
+  const rows = await db
+    .select()
+    .from(categories)
+    .where(eq(categories.userId, userId))
+    .orderBy(asc(categories.position));
   const rest = rows.map((r) => r.name).filter((n) => n !== name);
   const fallback = rest.includes("Other") ? "Other" : rest[0] ?? name;
-  await deleteCategoryEverywhere(name, fallback);
+  await deleteCategoryEverywhere(userId, name, fallback);
 }
 
-export async function upsertMerchantRule(merchant: string, category: string): Promise<void> {
+export async function upsertMerchantRule(
+  userId: string,
+  merchant: string,
+  category: string,
+): Promise<void> {
   await db
     .insert(merchantRules)
-    .values({ merchant, category })
-    .onConflictDoUpdate({ target: merchantRules.merchant, set: { category } });
+    .values({ userId, merchant, category })
+    .onConflictDoUpdate({ target: [merchantRules.userId, merchantRules.merchant], set: { category } });
 }
 
 /* ------------------------------------------------------------------ */
@@ -1221,7 +1353,7 @@ export function parseSnapshotInput(body: unknown): MonthlySnapshot {
  * the sheet figure is already the whole position, so summing the two would
  * count it twice.
  */
-export async function getSnapshotHistory(): Promise<
+export async function getSnapshotHistory(userId: string): Promise<
   Record<string, Record<string, number>>
 > {
   const rows = await db
@@ -1234,6 +1366,7 @@ export async function getSnapshotHistory(): Promise<
       )`,
     })
     .from(monthlySnapshots)
+    .where(eq(monthlySnapshots.userId, userId))
     .groupBy(monthlySnapshots.month, monthlySnapshots.ticker);
 
   const out: Record<string, Record<string, number>> = {};
@@ -1245,11 +1378,11 @@ export async function getSnapshotHistory(): Promise<
   return out;
 }
 
-export async function getSnapshots(month: string): Promise<MonthlySnapshot[]> {
+export async function getSnapshots(userId: string, month: string): Promise<MonthlySnapshot[]> {
   const rows = await db
     .select()
     .from(monthlySnapshots)
-    .where(eq(monthlySnapshots.month, month));
+    .where(and(eq(monthlySnapshots.userId, userId), eq(monthlySnapshots.month, month)));
   return rows.map((r) => ({
     month: r.month,
     holdingId: r.holdingId,
@@ -1262,12 +1395,13 @@ export async function getSnapshots(month: string): Promise<MonthlySnapshot[]> {
   }));
 }
 
-export async function upsertSnapshots(rows: MonthlySnapshot[]): Promise<void> {
+export async function upsertSnapshots(userId: string, rows: MonthlySnapshot[]): Promise<void> {
   if (rows.length === 0) return;
   await db
     .insert(monthlySnapshots)
     .values(
       rows.map((r) => ({
+        userId,
         month: r.month,
         holdingId: r.holdingId,
         ticker: r.ticker,
@@ -1279,7 +1413,7 @@ export async function upsertSnapshots(rows: MonthlySnapshot[]): Promise<void> {
       })),
     )
     .onConflictDoUpdate({
-      target: [monthlySnapshots.month, monthlySnapshots.holdingId],
+      target: [monthlySnapshots.userId, monthlySnapshots.month, monthlySnapshots.holdingId],
       set: {
         price: sql`excluded.price`,
         avgCost: sql`excluded.avg_cost`,

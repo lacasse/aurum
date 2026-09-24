@@ -12,20 +12,20 @@ import { handle, readJson } from "@/db/http";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     const { name } = parseCategory(await readJson(req));
-    const position = await nextPosition(categories);
-    await insertCategory(name, position);
+    const position = await nextPosition(user.id, categories);
+    await insertCategory(user.id, name, position);
     return { ok: true };
   });
 }
 
 export async function PUT(req: Request) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     const { oldName, newName } = parseRenameCategory(await readJson(req));
-    await renameCategoryEverywhere(oldName, newName);
+    await renameCategoryEverywhere(user.id, oldName, newName);
     return { ok: true };
   });
 }

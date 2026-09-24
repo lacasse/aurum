@@ -10,10 +10,10 @@ export const dynamic = "force-dynamic";
  * account holding it in one statement.
  */
 export async function PUT(req: Request) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     const { from, ...next } = parseSecurityUpdate(await readJson(req));
-    const updated = await updateSecurity(from, next);
+    const updated = await updateSecurity(user.id, from, next);
     return { ok: true, updated };
   });
 }

@@ -13,9 +13,9 @@ export const dynamic = "force-dynamic";
  * would mean two shapes behind one URL.
  */
 export async function GET() {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
-    const months = await getSnapshotHistory();
+    const months = await getSnapshotHistory(user.id);
     return { months, ts: Date.now() };
   });
 }

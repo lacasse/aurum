@@ -9,10 +9,10 @@ interface Ctx {
 }
 
 export async function DELETE(_req: Request, { params }: Ctx) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     const { category } = await params;
-    await deleteBudgetRow(decodeURIComponent(category));
+    await deleteBudgetRow(user.id, decodeURIComponent(category));
     return { ok: true };
   });
 }

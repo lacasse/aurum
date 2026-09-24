@@ -9,20 +9,20 @@ interface Ctx {
 }
 
 export async function PUT(req: Request, { params }: Ctx) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     const { id } = await params;
     const input = parseTransaction(await readJson(req));
-    await updateTransactionRow(id, { ...input, id });
+    await updateTransactionRow(user.id, id, { ...input, id });
     return { ok: true };
   });
 }
 
 export async function DELETE(_req: Request, { params }: Ctx) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     const { id } = await params;
-    await removeTransaction(id);
+    await removeTransaction(user.id, id);
     return { ok: true };
   });
 }

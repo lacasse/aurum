@@ -1,22 +1,30 @@
-import { cookies } from "next/headers";
-import { BadRequestError } from "./repo";
-import { getSessionCookieName, verifySession } from "@/lib/auth";
+import { BadRequestError, type UserRow } from "./repo";
+import { currentUser } from "./session";
 
 /**
  * Wraps a route handler with JSON error handling and an authentication
  * chokepoint. Every API route that goes through `handle` requires a valid
  * session, so protection does not depend on the proxy matcher alone.
  */
-export async function handle(fn: () => Promise<unknown>): Promise<Response> {
+/**
+ * Runs a route for whoever is signed in, and turns its result into a response.
+ *
+ * The handler is given the user. Everything in the repository takes that
+ * user's id, so a route cannot read or write a row without saying whose — and
+ * one that ignores the argument does not compile, because every query needs it.
+ */
+export async function handle(fn: (user: UserRow) => Promise<unknown>): Promise<Response> {
   try {
-    const cookieStore = await cookies();
-    const value = cookieStore.get(getSessionCookieName())?.value;
-    if (!verifySession(value)) {
+    const user = await currentUser();
+    if (!user) {
       return Response.json({ error: "Not authenticated" }, { status: 401 });
     }
-    const data = await fn();
+    const data = await fn(user);
     return Response.json(data ?? { ok: true });
   } catch (err) {
+    if (err instanceof ForbiddenError) {
+      return Response.json({ error: err.message }, { status: 403 });
+    }
     if (err instanceof BadRequestError) {
       return Response.json({ error: err.message }, { status: 400 });
     }
@@ -25,6 +33,17 @@ export async function handle(fn: () => Promise<unknown>): Promise<Response> {
     console.error("[api]", err);
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+/** A signed-in user asking for something only an admin may have. */
+export class ForbiddenError extends Error {
+  constructor(message = "Only an administrator can do that.") {
+    super(message);
+  }
+}
+
+export function requireAdmin(user: UserRow): void {
+  if (user.role !== "admin") throw new ForbiddenError();
 }
 
 export async function readJson(req: Request): Promise<unknown> {

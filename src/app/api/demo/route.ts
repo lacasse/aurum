@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * an explicit confirmation token in the body.
  */
 export async function DELETE(req: Request) {
-  return handle(async () => {
+  return handle(async (user) => {
     const body = deleteDemoSchema.safeParse((await readJson(req)) ?? {});
     if (!body.success) {
       throw new BadRequestError(
@@ -19,7 +19,7 @@ export async function DELETE(req: Request) {
       );
     }
     await ensureDb();
-    await deleteDemoData();
-    return getState();
+    await deleteDemoData(user.id);
+    return getState(user.id);
   });
 }

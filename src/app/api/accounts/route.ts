@@ -6,11 +6,11 @@ import { handle, readJson } from "@/db/http";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  return handle(async () => {
+  return handle(async (user) => {
     await ensureDb();
     const account = parseAccount(await readJson(req));
-    const position = await nextPosition(accounts);
-    await insertAccount(account, position);
+    const position = await nextPosition(user.id, accounts);
+    await insertAccount(user.id, account, position);
     return { ok: true };
   });
 }
