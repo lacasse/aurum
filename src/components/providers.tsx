@@ -45,7 +45,9 @@ export function Providers({ children }: { children: ReactNode }) {
    * has expired" to someone who had not tried to start one — over the demo
    * button, at that. Signing in loads the record itself, before it navigates.
    */
-  const onLoginPage = usePathname() === "/login";
+  const pathname = usePathname();
+  // An invitation is opened by someone with no account yet, so it is the same.
+  const onLoginPage = pathname === "/login" || pathname.startsWith("/invite/");
 
   useEffect(() => {
     if (!onLoginPage) void loadFromServer();

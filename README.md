@@ -40,8 +40,9 @@ These are the calls the app makes, so you can tell early whether they suit you:
 
 ## Scope, and what it is not
 
-- **Single user, self-hosted.** There are no accounts, no tenancy, no sharing. One person,
-  one database, one password.
+- **Self-hosted, for one person or a few.** Each account keeps a separate record: nobody
+  can see anyone else's, and there is no sharing between them. New accounts come only from
+  invitations an administrator creates — nobody can sign themselves up.
 - **Canadian by default** — registration types (TFSA, RRSP, FHSA), average-cost basis, CAD
   as the reporting currency with USD holdings converted at the rate you actually paid.
 - **Not a tax filing tool.** The tax page reports realized gains, dividends and interest by
@@ -113,24 +114,35 @@ the only thing between the network and a complete financial history.
 Nothing else changes: the proxy already terminates TLS, sets the security headers, and is
 the only way in.
 
-### Login
+### Accounts and login
 
 The app and its API are protected by a session-cookie login. Visiting any page (or hitting
 any `/api/*` route) without a valid session redirects to `/login` (pages) or returns `401`
 (API). After a successful login the session cookie lasts 7 days. Login attempts are rate
 limited per IP (5 failures → progressively longer lockout).
 
-Credentials are configured via environment variables **with no built-in defaults** — the
-app refuses to start if any are missing:
+**The first account comes from the environment.** On the first start, with no accounts in
+the database yet, the app creates one from `AUTH_USERNAME` and the password below, as an
+administrator. An installation that ran before accounts existed keeps its login exactly:
+the same username and password now sign into that first account, and every row already in
+the database belongs to it. After that the environment decides nothing about accounts —
+changing `AUTH_PASSWORD` in `.env` does not change anybody's password.
+
+**Everyone else is invited.** An administrator opens **Settings → People → Invite
+someone** and gets a link, shown once. It makes one account and stops working after seven
+days, or when revoked. Only a hash of its token is stored. The invited person picks a
+username and a password of at least 12 characters, and starts with an empty record of
+their own.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `AUTH_USERNAME` | yes | Login username |
-| `AUTH_PASSWORD` | yes* | Login password (plaintext, constant-time compared) |
-| `AUTH_PASSWORD_HASH` | no | scrypt `salt:hash` of the password — preferred over `AUTH_PASSWORD` |
+| `AUTH_USERNAME` | first start | Username of the first account |
+| `AUTH_PASSWORD` | first start* | Its password (hashed when the account is created) |
+| `AUTH_PASSWORD_HASH` | no | scrypt `salt:hash` of that password — preferred over `AUTH_PASSWORD` |
 | `AUTH_SECRET` | yes | HMAC key used to sign session cookies |
 
-*One of `AUTH_PASSWORD` or `AUTH_PASSWORD_HASH` is required (the hash takes precedence).
+*One of `AUTH_PASSWORD` or `AUTH_PASSWORD_HASH` creates the first account (the hash takes
+precedence).
 
 Generate a password hash and set it in `.env`:
 
@@ -145,8 +157,8 @@ npm run hash-password -- 'your-password'   # prints salt:hash hex
 AUTH_USERNAME=you AUTH_PASSWORD=... AUTH_SECRET=a-long-random-secret docker compose up -d --build
 ```
 
-Rotating `AUTH_PASSWORD`, `AUTH_PASSWORD_HASH`, or `AUTH_SECRET` immediately revokes every
-existing session cookie (they are signed with a key derived from the current credentials).
+Rotating `AUTH_SECRET` immediately revokes every session cookie for every account. A
+session also stops working if its account's password is changed.
 
 The session cookie is `HttpOnly`, `Secure` (when NODE_ENV=production), and `SameSite=Lax`.
 
