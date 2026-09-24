@@ -1,36 +1,31 @@
-import { getSavedApiKeys } from "./repo";
-import { effectiveKey, PROVIDERS, stateOf, type ApiKeys, type KeyStates } from "@/lib/api-keys";
+import { firstAdmin, getSavedApiKeys } from "./repo";
+import { keysFor, statesFor, type ApiKeys, type KeyStates } from "@/lib/api-keys";
 
 /**
- * Which market-data keys this installation actually uses.
+ * Which market-data keys a user fetches with.
  *
- * Read per request rather than at import, which is the point of moving them
- * out of the environment: a key saved in settings takes effect on the next
- * refresh, not on the next deployment.
+ * Their own, as saved on the settings page. The deployment's environment is
+ * consulted only for its owner — the first account — so an installation that
+ * has always carried its keys in `.env` upgrades with nothing to do, and the
+ * people it invites do not spend its owner's allowance. The rule itself is
+ * `keysFor` in lib/api-keys, where it is tested.
  *
- * The environment is still consulted, and still wins where nothing has been
- * saved, so a stack that has always carried its keys in `.env` keeps working
- * after this upgrade with nothing to do.
+ * Read per request, so a key saved in settings is in use at the next refresh.
  */
 const fromEnvironment = (): Partial<ApiKeys> => ({
   twelvedata: process.env.TWELVEDATA_API_KEY ?? "",
   eodhd: process.env.EODHD_API_KEY ?? "",
 });
 
-export async function apiKeys(): Promise<ApiKeys> {
-  const saved = await getSavedApiKeys();
-  const env = fromEnvironment();
-  return {
-    twelvedata: effectiveKey(saved.twelvedata, env.twelvedata),
-    eodhd: effectiveKey(saved.eodhd, env.eodhd),
-  };
+async function isOwner(userId: string): Promise<boolean> {
+  return (await firstAdmin())?.id === userId;
+}
+
+export async function apiKeys(userId: string): Promise<ApiKeys> {
+  return keysFor(await getSavedApiKeys(userId), fromEnvironment(), await isOwner(userId));
 }
 
 /** What the settings page is told: set or not, from where, and the last four. */
-export async function apiKeyStates(): Promise<KeyStates> {
-  const saved = await getSavedApiKeys();
-  const env = fromEnvironment();
-  return Object.fromEntries(
-    PROVIDERS.map((p) => [p, stateOf(saved[p], env[p])]),
-  ) as KeyStates;
+export async function apiKeyStates(userId: string): Promise<KeyStates> {
+  return statesFor(await getSavedApiKeys(userId), fromEnvironment(), await isOwner(userId));
 }

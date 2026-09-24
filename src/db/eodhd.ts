@@ -26,7 +26,15 @@ const LAST_FETCH_KEY = "eodhd_last_fetch";
  * price refresh. It never raises the cap: the ledger it writes is shared, so a
  * limit above `EODHD_DAY_LIMIT` would let the next caller overspend.
  */
+/*
+ * The allowance is the key's, and a key is one user's, so the ledger is kept
+ * per user: `eodhd_quota:<user id>`. One person spending their lookups leaves
+ * everyone else's untouched.
+ */
+const ledgerKey = (userId: string) => `${EODHD_QUOTA_KEY}:${userId}`;
+
 export async function reserveEodhdCalls(
+  userId: string,
   want: number,
   now: Date = new Date(),
   limit: number = EODHD_DAY_LIMIT,
@@ -50,14 +58,14 @@ export async function reserveEodhdCalls(
 
   await db
     .insert(appMeta)
-    .values({ key: EODHD_QUOTA_KEY, value: `${today}:0` })
+    .values({ key: ledgerKey(userId), value: `${today}:0` })
     .onConflictDoNothing();
 
   return db.transaction(async (tx) => {
     const [row] = await tx
       .select()
       .from(appMeta)
-      .where(eq(appMeta.key, EODHD_QUOTA_KEY))
+      .where(eq(appMeta.key, ledgerKey(userId)))
       .for("update");
 
     const { granted, nextValue } = grant(row?.value, today, want, cap, force);
@@ -65,7 +73,7 @@ export async function reserveEodhdCalls(
       await tx
         .update(appMeta)
         .set({ value: nextValue })
-        .where(eq(appMeta.key, EODHD_QUOTA_KEY));
+        .where(eq(appMeta.key, ledgerKey(userId)));
     }
     return granted;
   });
@@ -79,11 +87,11 @@ export interface EodhdUsage {
   resetsAt: string;
 }
 
-export async function eodhdUsage(now: Date = new Date()): Promise<EodhdUsage> {
+export async function eodhdUsage(userId: string, now: Date = new Date()): Promise<EodhdUsage> {
   const [row] = await db
     .select()
     .from(appMeta)
-    .where(eq(appMeta.key, EODHD_QUOTA_KEY));
+    .where(eq(appMeta.key, ledgerKey(userId)));
   const used = usedFrom(row?.value, utcDay(now));
   return {
     used,
@@ -129,5 +137,9 @@ export async function recordEodhdFetched(
 
 /** Reset the ledger. Test-support only; never called by the app. */
 export async function __resetEodhdLedgerForTests(): Promise<void> {
-  await db.delete(appMeta).where(sql`${appMeta.key} IN (${EODHD_QUOTA_KEY}, ${LAST_FETCH_KEY})`);
+  await db
+    .delete(appMeta)
+    .where(
+      sql`${appMeta.key} IN (${EODHD_QUOTA_KEY}, ${LAST_FETCH_KEY}) OR ${appMeta.key} LIKE ${`${EODHD_QUOTA_KEY}:%`}`,
+    );
 }

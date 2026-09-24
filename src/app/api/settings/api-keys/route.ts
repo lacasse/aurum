@@ -19,11 +19,11 @@ const bodySchema = z.object({
 });
 
 export async function GET() {
-  return withUser(async () => NextResponse.json(await apiKeyStates()));
+  return withUser(async (user) => NextResponse.json(await apiKeyStates(user.id)));
 }
 
 export async function PUT(request: Request) {
-  return withUser(async () => {
+  return withUser(async (user) => {
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json({ error: "Send a key for each provider to change." }, { status: 400 });
@@ -34,7 +34,7 @@ export async function PUT(request: Request) {
       const reason = invalidReason(value);
       if (reason) return NextResponse.json({ error: reason }, { status: 400 });
     }
-    await setSavedApiKeys(parsed.data);
-    return NextResponse.json(await apiKeyStates());
+    await setSavedApiKeys(user.id, parsed.data);
+    return NextResponse.json(await apiKeyStates(user.id));
   });
 }

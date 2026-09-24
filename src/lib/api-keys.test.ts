@@ -1,6 +1,8 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
+  keysFor,
+  statesFor,
   effectiveKey,
   hint,
   invalidReason,
@@ -91,5 +93,26 @@ describe("having no keys at all", () => {
       noKeysAtAll({ ...none, eodhd: { set: true, source: "account", hint: "••••5678" } }),
       false,
     );
+  });
+});
+
+describe("whose keys a user fetches with", () => {
+  const env = { twelvedata: ENV_KEY, eodhd: ENV_KEY };
+
+  test("two users with their own keys use their own", () => {
+    const a = keysFor({ twelvedata: ACCOUNT_KEY, eodhd: ACCOUNT_KEY }, env, true);
+    const b = keysFor({ twelvedata: "zzzz1111yyyy2222", eodhd: "zzzz1111yyyy2222" }, env, false);
+    assert.equal(a.twelvedata, ACCOUNT_KEY);
+    assert.equal(b.twelvedata, "zzzz1111yyyy2222");
+  });
+
+  test("the deployment's keys stand in for its owner, so an upgrade needs nothing", () => {
+    assert.deepEqual(keysFor({}, env, true), { twelvedata: ENV_KEY, eodhd: ENV_KEY });
+  });
+
+  test("…and for nobody else: an invited user brings their own", () => {
+    assert.deepEqual(keysFor({}, env, false), { twelvedata: "", eodhd: "" });
+    assert.equal(statesFor({}, env, false).eodhd.set, false);
+    assert.equal(statesFor({}, env, true).eodhd.source, "environment");
   });
 });

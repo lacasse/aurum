@@ -263,31 +263,31 @@ async function main() {
       const day = new Date("2026-08-28T12:00:00Z");
       await eodhd.__resetEodhdLedgerForTests();
 
-      const first = await eodhd.reserveEodhdCalls(5, day);
+      const first = await eodhd.reserveEodhdCalls(uid, 5, day);
       expect(first === opening, `grants ${opening} of ${cap} (got ${first})`);
 
       // The ledger is in the database, so this is what a container restart
       // sees — an in-memory counter would have reset to zero here.
-      const usage = await eodhd.eodhdUsage(day);
+      const usage = await eodhd.eodhdUsage(uid, day);
       expect(
         usage.used === opening && usage.remaining === cap - opening,
         "usage persists to the database",
       );
 
-      const rest = await eodhd.reserveEodhdCalls(219, day);
+      const rest = await eodhd.reserveEodhdCalls(uid, 219, day);
       expect(
         rest === cap - opening,
         `a 219-ticker refresh gets only the ${cap - opening} left (got ${rest})`,
       );
-      expect((await eodhd.reserveEodhdCalls(1, day)) === 0, "further calls are refused");
+      expect((await eodhd.reserveEodhdCalls(uid, 1, day)) === 0, "further calls are refused");
 
-      const spent = (await eodhd.eodhdUsage(day)).used;
+      const spent = (await eodhd.eodhdUsage(uid, day)).used;
       expect(spent === cap, `exactly ${cap} calls were ever granted (got ${spent})`);
 
       // Concurrent refreshes must not both see the same headroom.
       await eodhd.__resetEodhdLedgerForTests();
       const races = await Promise.all(
-        Array.from({ length: 10 }, () => eodhd.reserveEodhdCalls(4, day)),
+        Array.from({ length: 10 }, () => eodhd.reserveEodhdCalls(uid, 4, day)),
       );
       const totalGranted = races.reduce((a, b) => a + b, 0);
       expect(
@@ -297,11 +297,11 @@ async function main() {
 
       const nextDay = new Date("2026-08-29T00:00:01Z");
       expect(
-        (await eodhd.eodhdUsage(nextDay)).used === 0,
+        (await eodhd.eodhdUsage(uid, nextDay)).used === 0,
         "the allowance resets at 00:00 GMT",
       );
       expect(
-        (await eodhd.reserveEodhdCalls(cap, nextDay)) === cap,
+        (await eodhd.reserveEodhdCalls(uid, cap, nextDay)) === cap,
         "a full allowance is available the next day",
       );
 
@@ -311,11 +311,11 @@ async function main() {
       await eodhd.__resetEodhdLedgerForTests();
       const validateCap = validateLimit();
       expect(
-        (await eodhd.reserveEodhdCalls(cap, day, validateCap)) === validateCap,
+        (await eodhd.reserveEodhdCalls(uid, cap, day, validateCap)) === validateCap,
         `validation stops at ${validateCap} of ${cap}`,
       );
       expect(
-        (await eodhd.reserveEodhdCalls(cap, day)) === cap - validateCap,
+        (await eodhd.reserveEodhdCalls(uid, cap, day)) === cap - validateCap,
         "the refresh can still spend what validation left",
       );
 
@@ -384,26 +384,26 @@ async function main() {
       await td.__resetTwelveDataLedgerForTests();
 
       expect(
-        (await td.reserveTwelveDataCredits(minuteCap, at)) === spendable,
+        (await td.reserveTwelveDataCredits(uid, minuteCap, at)) === spendable,
         `a full minute's credits are granted (${minuteCap})`,
       );
       expect(
-        !(await td.reserveTwelveDataCredits(1, at)),
+        !(await td.reserveTwelveDataCredits(uid, 1, at)),
         "one more in the same minute is refused",
       );
       expect(
-        (await td.twelveDataUsage(at)).minute.remaining === 0,
+        (await td.twelveDataUsage(uid, at)).minute.remaining === 0,
         "the minute is reported as spent",
       );
 
       // The next minute restores the per-minute allowance but not the day's.
       const nextMinute = new Date(at.getTime() + 60_000);
       expect(
-        (await td.reserveTwelveDataCredits(1, nextMinute)) === spendable,
+        (await td.reserveTwelveDataCredits(uid, 1, nextMinute)) === spendable,
         "a new minute restores the allowance",
       );
       expect(
-        (await td.twelveDataUsage(nextMinute)).day.used === minuteCap + (spendable ? 1 : 0),
+        (await td.twelveDataUsage(uid, nextMinute)).day.used === minuteCap + (spendable ? 1 : 0),
         "the daily count carries across minutes",
       );
 
@@ -411,7 +411,7 @@ async function main() {
       // not both see the same remaining allowance.
       await td.__resetTwelveDataLedgerForTests();
       const results = await Promise.all(
-        Array.from({ length: 10 }, () => td.reserveTwelveDataCredits(2, at)),
+        Array.from({ length: 10 }, () => td.reserveTwelveDataCredits(uid, 2, at)),
       );
       const grantedCredits = results.filter(Boolean).length * 2;
       expect(
@@ -759,7 +759,7 @@ async function main() {
       expect(after?.close === 46.5, `a provider cannot clobber a benchmark close (got ${after?.close})`);
 
       // With the day's allowance pinned to zero, no call can be made.
-      expect((await bm.fillBenchmarkGap()) === 0, "the gap fill spends nothing when the cap is zero");
+      expect((await bm.fillBenchmarkGap(uid)) === 0, "the gap fill spends nothing when the cap is zero");
     }
 
     await repo.deleteDemoData(uid);

@@ -4,5 +4,5 @@ import { usdCadRate } from "@/lib/fx";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return handle(async () => usdCadRate());
+  return handle(async (user) => usdCadRate(user.id));
 }
