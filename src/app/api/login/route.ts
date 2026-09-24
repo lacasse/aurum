@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createSession, verifyCredentials } from "@/lib/auth";
+import { createSession, verifyPassword } from "@/lib/auth";
 import {
   isLoginLocked,
   recordLoginFailure,
@@ -8,6 +8,13 @@ import {
 } from "@/lib/login-rate-limit";
 import { loginSchema } from "@/lib/schemas";
 import { DEMO_COOKIE } from "@/lib/demo";
+import { ensureDb } from "@/db/init";
+import { findUserByUsername } from "@/db/repo";
+
+/* A real hash to compare against when the username is unknown, so that an
+ * unknown name and a wrong password cost the same. */
+const DUMMY_HASH =
+  "00000000000000000000000000000000:" + "0".repeat(128);
 
 function clientIp(request: Request): string | undefined {
   // Prefer X-Real-IP: nginx sets it to the real peer address (not spoofable
@@ -57,15 +64,27 @@ export async function POST(request: Request) {
   }
   const { username, password } = parsed.data;
 
-  const valid = verifyCredentials(username, password);
-  if (!valid) {
+  /*
+   * Against the users table, not the environment.
+   *
+   * The answer is the same whether the name is unknown or the password is
+   * wrong, and the work done is as close to the same as it can be: a missing
+   * user still costs a hash comparison, so the response time does not say
+   * which names exist.
+   */
+  await ensureDb();
+  const user = await findUserByUsername(username);
+  const valid = user
+    ? verifyPassword(user.passwordHash, password)
+    : verifyPassword(DUMMY_HASH, password) && false;
+  if (!valid || !user) {
     recordLoginFailure(ip);
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
   resetLoginFailures(ip);
 
-  const session = createSession();
+  const session = createSession(user.id, user.sessionEpoch);
   (await cookies()).set(session.name, session.value, {
     httpOnly: session.httpOnly,
     secure: session.secure,

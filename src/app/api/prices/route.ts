@@ -18,19 +18,24 @@ import {
 import { usdCadRate } from "@/lib/fx";
 import { reserveTwelveDataCredits, twelveDataUsage } from "@/db/twelvedata";
 import type { AssetClass, Currency } from "@/lib/types";
+import { apiKeys } from "@/db/api-keys";
 
 export const dynamic = "force-dynamic";
 
-const TWELVE_DATA_KEY = process.env.TWELVEDATA_API_KEY ?? "";
-const EODHD_TOKEN = process.env.EODHD_API_KEY ?? "";
+/*
+ * The keys are read per request, not at import: they are settings now, so a
+ * key saved on the settings page takes effect on the next refresh rather than
+ * the next deployment. See src/db/api-keys.ts.
+ */
 
 /* ── Twelve Data (US equities + crypto + FX, batch endpoint, free 800/day) ── */
 
 async function fetchTwelveData(
   items: { ticker: string; symbol: string }[],
+  key: string,
   force = false,
 ): Promise<Map<string, number>> {
-  if (items.length === 0 || !TWELVE_DATA_KEY) return new Map();
+  if (items.length === 0 || !key) return new Map();
   const out = new Map<string, number>();
   // Batch in chunks that fit the remaining per-minute Quota; reserve credits
   // only for what we actually send, so a burst never exceeds 8/min.
@@ -47,7 +52,7 @@ async function fetchTwelveData(
     let prices: Map<string, number>;
     try {
       const res = await fetch(
-        `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbols)}&apikey=${TWELVE_DATA_KEY}`,
+        `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbols)}&apikey=${encodeURIComponent(key)}`,
         { signal: AbortSignal.timeout(10_000) },
       );
       if (!res.ok) {
@@ -78,8 +83,9 @@ async function fetchTwelveData(
 
 async function fetchEodhd(
   items: { ticker: string; symbol: string }[],
+  token: string,
 ): Promise<Map<string, number>> {
-  if (items.length === 0 || !EODHD_TOKEN) return new Map();
+  if (items.length === 0 || !token) return new Map();
   const out = new Map<string, number>();
 
   const to = new Date();
@@ -101,7 +107,7 @@ async function fetchEodhd(
   for (const item of items) {
     attempted.push(item.ticker);
     try {
-      const url = `https://eodhd.com/api/eod/${encodeURIComponent(item.symbol)}?api_token=${EODHD_TOKEN}&fmt=json&period=1d&from=${fmt(from)}&to=${fmt(to)}`;
+      const url = `https://eodhd.com/api/eod/${encodeURIComponent(item.symbol)}?api_token=${encodeURIComponent(token)}&fmt=json&period=1d&from=${fmt(from)}&to=${fmt(to)}`;
       const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
       if (!res.ok) {
         console.warn(`[prices] EODHD ${res.status} for ${item.symbol}`);
@@ -161,6 +167,7 @@ const CACHE_TTL: Record<string, number> = {
 
 export async function GET(req: Request) {
   return handle(async () => {
+    const keys = await apiKeys();
     const url = new URL(req.url);
     const tickers = (url.searchParams.get("tickers") ?? "")
       .split(",")
@@ -253,8 +260,8 @@ export async function GET(req: Request) {
     const eodhdToFetch = eodhdDue.slice(0, budget);
 
     const [twelvePrices, eodhdPrices] = await Promise.all([
-      fetchTwelveData(twelveDataItems, force),
-      fetchEodhd(eodhdToFetch),
+      fetchTwelveData(twelveDataItems, keys.twelvedata, force),
+      fetchEodhd(eodhdToFetch, keys.eodhd),
     ]);
 
     /*
@@ -270,6 +277,7 @@ export async function GET(req: Request) {
       const { rate } = await usdCadRate();
       const usdPrices = await fetchTwelveData(
         cryptoMissing.map((i) => ({ ...i, symbol: toUsdCryptoSymbol(i.ticker) })),
+        keys.twelvedata,
         force,
       );
       for (const [ticker, usd] of usdPrices) {

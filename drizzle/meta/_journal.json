@@ -176,6 +176,20 @@
       "when": 1789986600000,
       "tag": "0024_transaction_granularity_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790073000000,
+      "tag": "0025_users_and_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790076600000,
+      "tag": "0026_user_session_epoch",
+      "breakpoints": true
     }
   ]
 }

@@ -61,12 +61,18 @@ function safeEqual(a: string, b: string): boolean {
  * Derive a signing key from the current credentials so that rotating the
  * password (or secret) invalidates every already-issued session cookie.
  */
+/*
+ * The secret alone signs sessions now.
+ *
+ * It used to be the secret mixed with the one user's password hash, which gave
+ * a useful property for free: changing the password invalidated the session.
+ * With several users that key would have to be looked up per request, and the
+ * route guard that checks every page cannot reach the database. So the token
+ * names its user and is signed with the secret, and signing everybody out is
+ * done by changing AUTH_SECRET.
+ */
 function signingKey(): string {
-  const { username, passwordHash, passwordPlain } = getCredentials();
-  const credential = passwordHash ?? passwordPlain!;
-  return createHmac("sha256", getSecret())
-    .update(`${username}\0${credential}`)
-    .digest("base64url");
+  return getSecret();
 }
 
 function sign(value: string): string {
@@ -90,6 +96,27 @@ function verifyScrypt(stored: string, password: string): boolean {
   return timingSafeEqual(expected, actual);
 }
 
+/**
+ * Whether a password matches a stored hash.
+ *
+ * The same comparison the single-user login used, with the hash passed in
+ * rather than read from the environment: users are rows now.
+ */
+export function verifyPassword(storedHash: string, password: string): boolean {
+  try {
+    return verifyScrypt(storedHash, password);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The old single-user check, kept for the first-run bootstrap only.
+ *
+ * Nothing signs in through this any more — the login reads the users table —
+ * but the credentials in the environment still create the first account, and
+ * the tests that cover that path use this.
+ */
 export function verifyCredentials(
   username: string,
   password: string,
@@ -130,13 +157,27 @@ function cookieAttrs(maxAge: number, secure: boolean): Omit<SessionCookie, "valu
   };
 }
 
-/** Create an authenticated session cookie. */
-export function createSession(): SessionCookie {
+/**
+ * An authenticated session, for one user.
+ *
+ * The cookie carries the user's session epoch as well as their id. The guard
+ * cannot check it — that would be a query per page — so it only proves the
+ * cookie was issued here and has not expired; the routes, which query anyway,
+ * compare the epoch with the user's row and refuse a cookie from before a
+ * password change.
+ *
+ * The user's id travels in the cookie and is signed with it, so a request can
+ * be attributed without a database lookup — which is what lets the route guard
+ * stay in front of every page without becoming a query per page. It is an id
+ * rather than a username: renaming a user must not sign them out, and an id
+ * says nothing about who they are if the cookie is ever seen.
+ */
+export function createSession(userId: string, epoch = 0): SessionCookie {
   const expiresAt = Date.now() + SESSION_TTL_MS;
-  const token = sign(String(expiresAt));
+  const payload = `${userId}.${epoch}.${expiresAt}`;
   return {
     ...cookieAttrs(SESSION_TTL_MS / 1000, process.env.NODE_ENV === "production"),
-    value: `${expiresAt}.${token}`,
+    value: `${payload}.${sign(payload)}`,
   };
 }
 
@@ -145,21 +186,36 @@ export function clearSession(): SessionCookie {
   return { ...cookieAttrs(0, process.env.NODE_ENV === "production"), value: "" };
 }
 
-/** Verify an incoming session cookie value. Returns true if valid. */
-export function verifySession(value: string | undefined): boolean {
-  if (!value) return false;
-  const sep = value.indexOf(".");
-  if (sep < 0) return false;
-  const expiresAt = value.slice(0, sep);
-  const token = value.slice(sep + 1);
+/**
+ * Who a session cookie says it belongs to, or null.
+ *
+ * Null covers every way a cookie can fail to prove anything: absent,
+ * malformed, expired, tampered with, or signed with another secret. Callers
+ * cannot tell those apart, which is deliberate — an unauthenticated request is
+ * one answer, not a diagnosis.
+ */
+export function sessionUser(
+  value: string | undefined,
+): { userId: string; epoch: number } | null {
+  if (!value) return null;
+  const parts = value.split(".");
+  if (parts.length !== 4) return null;
+  const [userId, epochText, expiresAt, token] = parts;
+  if (!userId || !/^\d+$/.test(epochText) || !expiresAt) return null;
   const expires = Number(expiresAt);
-  if (!Number.isFinite(expires) || expires <= Date.now()) return false;
+  if (!Number.isFinite(expires) || expires <= Date.now()) return null;
   try {
-    return safeEqual(token, sign(expiresAt));
+    const ok = safeEqual(token, sign(`${userId}.${epochText}.${expiresAt}`));
+    return ok ? { userId, epoch: Number(epochText) } : null;
   } catch {
-    // Missing/misconfigured env: treat as unauthenticated.
-    return false;
+    // Missing or misconfigured secret: treat as unauthenticated.
+    return null;
   }
+}
+
+/** Whether a session cookie is valid at all. The route guard needs no more. */
+export function verifySession(value: string | undefined): boolean {
+  return sessionUser(value) !== null;
 }
 
 export function getSessionCookieName(): string {

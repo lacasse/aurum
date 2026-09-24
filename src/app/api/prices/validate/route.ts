@@ -10,11 +10,11 @@ import {
 import { usdCadRate } from "@/lib/fx";
 import { reserveTwelveDataCredits } from "@/db/twelvedata";
 import type { AssetClass, Currency } from "@/lib/types";
+import { apiKeys } from "@/db/api-keys";
 
 export const dynamic = "force-dynamic";
 
-const TWELVE_DATA_KEY = process.env.TWELVEDATA_API_KEY ?? "";
-const EODHD_TOKEN = process.env.EODHD_API_KEY ?? "";
+/* Read per request: the keys are settings now. See src/db/api-keys.ts. */
 
 /**
  * A lookup either answered, or never happened.
@@ -30,12 +30,12 @@ interface Lookup {
 
 const unchecked: Lookup = { price: null, checked: false };
 
-async function fetchTwelveDataPrice(symbol: string): Promise<Lookup> {
-  if (!TWELVE_DATA_KEY) return unchecked;
+async function fetchTwelveDataPrice(symbol: string, key: string): Promise<Lookup> {
+  if (!key) return unchecked;
   if (!(await reserveTwelveDataCredits(1))) return unchecked; // over rate/quota budget
   try {
     const res = await fetch(
-      `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${TWELVE_DATA_KEY}`,
+      `https://api.twelvedata.com/price?symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(key)}`,
       { signal: AbortSignal.timeout(8_000) },
     );
     if (!res.ok) return unchecked;
@@ -51,8 +51,8 @@ async function fetchTwelveDataPrice(symbol: string): Promise<Lookup> {
   }
 }
 
-async function fetchEodhdPrice(symbol: string): Promise<Lookup> {
-  if (!EODHD_TOKEN) return unchecked;
+async function fetchEodhdPrice(symbol: string, token: string): Promise<Lookup> {
+  if (!token) return unchecked;
   /*
    * Validating spends one of the 20 daily calls, but draws against a lower
    * ceiling than the price refresh does: somebody typing a ticker must not be
@@ -65,7 +65,7 @@ async function fetchEodhdPrice(symbol: string): Promise<Lookup> {
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
   try {
     const res = await fetch(
-      `https://eodhd.com/api/eod/${encodeURIComponent(symbol)}?api_token=${EODHD_TOKEN}&fmt=json&period=1d&from=${fmt(from)}&to=${fmt(to)}`,
+      `https://eodhd.com/api/eod/${encodeURIComponent(symbol)}?api_token=${encodeURIComponent(token)}&fmt=json&period=1d&from=${fmt(from)}&to=${fmt(to)}`,
       { signal: AbortSignal.timeout(8_000) },
     );
     // A 404 is EODHD's answer for an unknown symbol, and that is a real
@@ -88,6 +88,7 @@ async function fetchEodhdPrice(symbol: string): Promise<Lookup> {
 
 export async function GET(req: Request) {
   return handle(async () => {
+    const keys = await apiKeys();
     const url = new URL(req.url);
     const ticker = (url.searchParams.get("ticker") ?? "").trim().toUpperCase();
     const ac = (url.searchParams.get("class") ?? "US Equity") as AssetClass;
@@ -101,16 +102,16 @@ export async function GET(req: Request) {
     let result: Lookup;
 
     if (usesEodhd) {
-      result = await fetchEodhdPrice(toEodhdSymbol(ticker));
+      result = await fetchEodhdPrice(toEodhdSymbol(ticker), keys.eodhd);
       // Only a ticker that spelled out its exchange reaches EODHD now, so a
       // rejection here is a verdict on the symbol rather than on a guessed
       // ".TO" suffix, and there is nothing to second-guess with another feed.
       if (result.price != null) await recordEodhdFetched([ticker]);
     } else {
-      result = await fetchTwelveDataPrice(toTwelveDataSymbol(ticker, ac, cu));
+      result = await fetchTwelveDataPrice(toTwelveDataSymbol(ticker, ac, cu), keys.twelvedata);
       // Same reason as the price route: a coin may not carry a CAD pair.
       if (result.price == null && ac === "Crypto" && cu === "CAD") {
-        const usd = await fetchTwelveDataPrice(toUsdCryptoSymbol(ticker));
+        const usd = await fetchTwelveDataPrice(toUsdCryptoSymbol(ticker), keys.twelvedata);
         if (usd.price != null) {
           const { rate } = await usdCadRate();
           result = { price: Math.round(usd.price * rate * 100) / 100, checked: true };

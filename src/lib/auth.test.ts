@@ -13,6 +13,7 @@ before(() => {
 import {
   clearSession,
   createSession,
+  sessionUser,
   getSessionCookieName,
   hashPassword,
   verifyCredentials,
@@ -61,49 +62,64 @@ describe("verifyCredentials", () => {
 });
 
 describe("sessions", () => {
-  test("a freshly issued cookie verifies", () => {
-    const session = createSession();
+  const USER = "user-1111";
+  const OTHER = "user-2222";
+
+  test("a freshly issued cookie verifies, and names its user and epoch", () => {
+    const session = createSession(USER, 3);
     assert.equal(session.name, getSessionCookieName());
     assert.equal(session.httpOnly, true);
     assert.equal(session.sameSite, "lax");
     assert.equal(verifySession(session.value), true);
+    assert.deepEqual(sessionUser(session.value), { userId: USER, epoch: 3 });
+  });
+
+  test("the epoch is signed, so an old cookie cannot claim a new one", () => {
+    const session = createSession(USER, 1);
+    const [id, , expiry, signature] = session.value.split(".");
+    assert.equal(sessionUser(`${id}.2.${expiry}.${signature}`), null);
+  });
+
+  test("one user's cookie is never read as another's", () => {
+    /*
+     * The whole of multi-user rests on this: the id is signed with the rest of
+     * the cookie, so swapping it in an otherwise valid cookie proves nothing.
+     */
+    const session = createSession(USER);
+    const [, epoch, expiry, signature] = session.value.split(".");
+    assert.equal(sessionUser(`${OTHER}.${epoch}.${expiry}.${signature}`), null);
+    assert.notEqual(sessionUser(createSession(OTHER).value)?.userId, USER);
   });
 
   test("rejects missing, malformed and tampered cookies", () => {
     assert.equal(verifySession(undefined), false);
     assert.equal(verifySession(""), false);
     assert.equal(verifySession("no-separator"), false);
+    assert.equal(verifySession("two.parts"), false);
+    assert.equal(verifySession("three.part.cookie"), false);
+    assert.equal(sessionUser(undefined), null);
 
-    const session = createSession();
-    const [expiry, signature] = session.value.split(".");
-    assert.equal(verifySession(`${expiry}.${signature}tampered`), false);
+    const session = createSession(USER);
+    const [id, epoch, expiry, signature] = session.value.split(".");
+    assert.equal(verifySession(`${id}.${epoch}.${expiry}.${signature}tampered`), false);
     // Extending the expiry invalidates the signature it was computed over.
-    assert.equal(verifySession(`${Number(expiry) + 60_000}.${signature}`), false);
+    assert.equal(verifySession(`${id}.${epoch}.${Number(expiry) + 60_000}.${signature}`), false);
   });
 
   test("rejects an expired cookie even with a valid signature", () => {
-    const session = createSession();
-    const [, signature] = session.value.split(".");
+    const session = createSession(USER);
+    const [id, epoch, , signature] = session.value.split(".");
     const past = Date.now() - 1000;
-    assert.equal(verifySession(`${past}.${signature}`), false);
+    assert.equal(verifySession(`${id}.${epoch}.${past}.${signature}`), false);
   });
 
-  test("rotating the password invalidates already-issued cookies", () => {
-    const session = createSession();
-    assert.equal(verifySession(session.value), true);
-
-    const previous = process.env.AUTH_PASSWORD;
-    process.env.AUTH_PASSWORD = "a-different-password";
-    try {
-      assert.equal(verifySession(session.value), false);
-    } finally {
-      process.env.AUTH_PASSWORD = previous;
-    }
-    assert.equal(verifySession(session.value), true, "restoring the password restores the session");
+  test("an empty user id proves nothing", () => {
+    assert.equal(sessionUser(`.0.${Date.now() + 1000}.signature`), null);
+    assert.equal(sessionUser(`${USER}.x.${Date.now() + 1000}.signature`), null);
   });
 
   test("rotating AUTH_SECRET invalidates already-issued cookies", () => {
-    const session = createSession();
+    const session = createSession("user-1111");
     const previous = process.env.AUTH_SECRET;
     process.env.AUTH_SECRET = "a-different-secret";
     try {
@@ -114,7 +130,7 @@ describe("sessions", () => {
   });
 
   test("treats a misconfigured environment as unauthenticated, not an error", () => {
-    const session = createSession();
+    const session = createSession("user-1111");
     const previous = process.env.AUTH_SECRET;
     delete process.env.AUTH_SECRET;
     try {

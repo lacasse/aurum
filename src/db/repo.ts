@@ -3,6 +3,7 @@ import { db } from "./index";
 import {
   accounts,
   appMeta,
+  users,
   budgets,
   categories,
   holdings,
@@ -58,6 +59,8 @@ import {
   snapshotsBodySchema,
   transactionSchema,
 } from "@/lib/schemas";
+import { PROVIDERS, type ApiKeys } from "@/lib/api-keys";
+import { normaliseUsername } from "@/lib/usernames";
 
 type AccountRow = typeof accounts.$inferSelect;
 type HoldingRow = typeof holdings.$inferSelect;
@@ -631,6 +634,118 @@ export async function setContributionLimits(limits: ContributionLimits): Promise
   await db
     .insert(appMeta)
     .values({ key: CONTRIBUTION_LIMITS_KEY, value })
+    .onConflictDoUpdate({ target: appMeta.key, set: { value } });
+}
+
+/* ------------------------------------------------------------------ */
+/* Users                                                               */
+/* ------------------------------------------------------------------ */
+
+export interface UserRow {
+  id: string;
+  username: string;
+  role: "admin" | "member";
+  createdAt: string;
+  sessionEpoch: number;
+}
+
+const asUser = (r: typeof users.$inferSelect): UserRow => ({
+  id: r.id,
+  username: r.username,
+  role: r.role === "admin" ? "admin" : "member",
+  createdAt: r.createdAt,
+  sessionEpoch: r.sessionEpoch,
+});
+
+export async function countUsers(): Promise<number> {
+  const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(users);
+  return row?.n ?? 0;
+}
+
+/** Usernames are held lowercase, so signing in is not case-sensitive. */
+export async function findUserByUsername(username: string): Promise<
+  (UserRow & { passwordHash: string }) | null
+> {
+  const [row] = await db
+    .select()
+    .from(users)
+    .where(eq(users.username, normaliseUsername(username)));
+  return row ? { ...asUser(row), passwordHash: row.passwordHash } : null;
+}
+
+export async function findUser(id: string): Promise<UserRow | null> {
+  const [row] = await db.select().from(users).where(eq(users.id, id));
+  return row ? asUser(row) : null;
+}
+
+export async function listUsers(): Promise<UserRow[]> {
+  const rows = await db.select().from(users).orderBy(users.createdAt);
+  return rows.map(asUser);
+}
+
+/**
+ * Adds a user. Fails rather than overwrites when the name is taken: the unique
+ * index is the authority, so two people signing up at once cannot both win.
+ */
+export async function insertUser(user: {
+  id: string;
+  username: string;
+  passwordHash: string;
+  role: "admin" | "member";
+  createdAt: string;
+  sessionEpoch?: number;
+}): Promise<void> {
+  await db.insert(users).values({ ...user, username: normaliseUsername(user.username) });
+}
+
+/** A new password ends every session the user had, by raising their epoch. */
+export async function setUserPassword(id: string, passwordHash: string): Promise<void> {
+  await db
+    .update(users)
+    .set({ passwordHash, sessionEpoch: sql`${users.sessionEpoch} + 1` })
+    .where(eq(users.id, id));
+}
+
+const API_KEYS_KEY = "api_keys";
+
+/**
+ * The market-data keys saved in settings, if any.
+ *
+ * Secrets, kept beside the record they belong to. Nothing here decides which
+ * key is used — that is `src/db/api-keys.ts`, which weighs these against the
+ * environment — and nothing here reaches the browser: the settings route sends
+ * a description of a key, never a key.
+ */
+export async function getSavedApiKeys(): Promise<Partial<ApiKeys>> {
+  const [row] = await db.select().from(appMeta).where(eq(appMeta.key, API_KEYS_KEY));
+  if (!row) return {};
+  try {
+    const parsed = JSON.parse(row.value) as Partial<ApiKeys>;
+    const out: Partial<ApiKeys> = {};
+    for (const provider of PROVIDERS) {
+      const value = parsed?.[provider];
+      if (typeof value === "string" && value.trim() !== "") out[provider] = value.trim();
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Saves the keys given, and removes the ones set to an empty string. */
+export async function setSavedApiKeys(next: Partial<ApiKeys>): Promise<void> {
+  const current = await getSavedApiKeys();
+  const merged: Partial<ApiKeys> = { ...current };
+  for (const provider of PROVIDERS) {
+    if (!(provider in next)) continue;
+    const value = (next[provider] ?? "").trim();
+    if (value === "") delete merged[provider];
+    else merged[provider] = value;
+  }
+  const value = JSON.stringify(merged);
+  await db
+    .insert(appMeta)
+    .values({ key: API_KEYS_KEY, value })
     .onConflictDoUpdate({ target: appMeta.key, set: { value } });
 }
 
