@@ -27,6 +27,13 @@ export function decideRoute(
     if (pathname === "/login") return { kind: "redirect", to: "/", endDemo };
     return { kind: "next", endDemo };
   }
+  /*
+   * Accepting an invitation is the one thing besides signing in that has to
+   * work without an account, because the person doing it has none yet. Both
+   * the page and its endpoint are named exactly; nothing else under /api opens.
+   */
+  if (pathname === "/api/invites/accept") return { kind: "next", endDemo: false };
+  if (/^\/invite\/[^/]+$/.test(pathname)) return { kind: "next", endDemo: false };
   if (pathname === "/api" || pathname.startsWith("/api/")) return { kind: "unauthorized" };
   if (pathname === "/login") return { kind: "next", endDemo: false };
   if (visitor.demo) return { kind: "next", endDemo: false };

@@ -86,3 +86,22 @@ describe("signed in", () => {
     assert.deepEqual(decideRoute("/login", both), { kind: "redirect", to: "/", endDemo: true });
   });
 });
+
+describe("accepting an invitation, without an account", () => {
+  test("the invitation page and its endpoint open to anyone", () => {
+    assert.deepEqual(decideRoute("/invite/abc123", nobody), { kind: "next", endDemo: false });
+    assert.deepEqual(decideRoute("/api/invites/accept", nobody), { kind: "next", endDemo: false });
+  });
+
+  test("…and nothing next to them does", () => {
+    assert.deepEqual(decideRoute("/api/invites", nobody), { kind: "unauthorized" });
+    assert.deepEqual(decideRoute("/api/invites/some-id", nobody), { kind: "unauthorized" });
+    assert.deepEqual(decideRoute("/api/invites/accept/extra", nobody), { kind: "unauthorized" });
+    assert.equal(decideRoute("/invite", nobody).kind, "redirect");
+    assert.equal(decideRoute("/invite/a/b", nobody).kind, "redirect");
+  });
+
+  test("the demo gets no further through them than anyone else", () => {
+    assert.deepEqual(decideRoute("/api/invites", inDemo), { kind: "unauthorized" });
+  });
+});

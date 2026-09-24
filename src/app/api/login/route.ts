@@ -10,27 +10,13 @@ import { loginSchema } from "@/lib/schemas";
 import { DEMO_COOKIE } from "@/lib/demo";
 import { ensureDb } from "@/db/init";
 import { findUserByUsername } from "@/db/repo";
+import { clientIp } from "@/lib/client-ip";
 
 /* A real hash to compare against when the username is unknown, so that an
  * unknown name and a wrong password cost the same. */
 const DUMMY_HASH =
   "00000000000000000000000000000000:" + "0".repeat(128);
 
-function clientIp(request: Request): string | undefined {
-  // Prefer X-Real-IP: nginx sets it to the real peer address (not spoofable
-  // from outside). If we must use X-Forwarded-For, take the last entry, which
-  // nginx appends and is therefore the true originating address — the leading
-  // entries are client-supplied and can be spoofed to dodge the lockout.
-  const real = request.headers.get("x-real-ip");
-  if (real) return real;
-  const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) {
-    const parts = forwarded.split(",").map((s) => s.trim());
-    const last = parts[parts.length - 1];
-    if (last) return last;
-  }
-  return undefined;
-}
 
 export async function POST(request: Request) {
   const ip = clientIp(request);

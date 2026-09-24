@@ -955,6 +955,71 @@ async function main() {
       "emptying one user's record leaves the other's",
     );
 
+    console.log("invitations");
+    const inv = await import("../src/lib/invites");
+    const token = inv.newInviteToken();
+    const hash = inv.hashInviteToken(token);
+    await repo.insertInvite({
+      id: "invite-1",
+      tokenHash: hash,
+      createdBy: uid,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + inv.INVITE_TTL_MS).toISOString(),
+    });
+    expect(await repo.inviteIsUsable(hash), "a fresh invitation can be used");
+
+    let takenRefused = false;
+    try {
+      await repo.acceptInvite(hash, {
+        id: "invited-clash",
+        username: "owner",
+        passwordHash: hashPassword("irrelevant-password"),
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      takenRefused = err instanceof repo.UsernameTakenError;
+    }
+    expect(takenRefused, "a taken username is refused…");
+    expect(await repo.inviteIsUsable(hash), "…and the invitation is still good afterwards");
+
+    await repo.acceptInvite(hash, {
+      id: "invited-user",
+      username: "Invited",
+      passwordHash: hashPassword("invited-password-for-tests"),
+      createdAt: new Date().toISOString(),
+    });
+    const invited = await repo.findUserByUsername("invited");
+    expect(invited?.role === "member", "an invitation makes a member, not an admin");
+    expect(!(await repo.inviteIsUsable(hash)), "an invitation works once");
+    let reused = false;
+    try {
+      await repo.acceptInvite(hash, {
+        id: "invited-again",
+        username: "again",
+        passwordHash: hashPassword("irrelevant-password"),
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      reused = err instanceof repo.InviteUnusableError;
+    }
+    expect(reused, "…and a second use is refused");
+    expect((await repo.getState("invited-user")).accounts.length === 0, "the new account starts empty");
+
+    const revokedToken = inv.newInviteToken();
+    await repo.insertInvite({
+      id: "invite-2",
+      tokenHash: inv.hashInviteToken(revokedToken),
+      createdBy: uid,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + inv.INVITE_TTL_MS).toISOString(),
+    });
+    expect(await repo.revokeInvite("invite-2"), "a pending invitation can be revoked");
+    expect(!(await repo.inviteIsUsable(inv.hashInviteToken(revokedToken))), "…and then cannot be used");
+    expect(
+      (await repo.listInvites()).every((i) => !("tokenHash" in i)),
+      "listing invitations never returns a token hash",
+    );
+
     if (failures > 0) console.error(`\n${failures} test(s) failed`);
     else console.log("\nall db integration tests passed");
   } finally {

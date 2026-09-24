@@ -5,6 +5,7 @@ import { KeyRound } from "lucide-react";
 import { Shell } from "@/components/shell";
 import { Button, Card, CardHeader, Field, Input } from "@/components/ui";
 import { useFinance } from "@/lib/store";
+import { PeopleSettings } from "@/components/people-settings";
 import { PROVIDERS, invalidReason, type KeyState, type KeyStates, type Provider } from "@/lib/api-keys";
 
 /**
@@ -59,6 +60,21 @@ export default function SettingsPage() {
   const [error, setError] = useState<Record<Provider, string>>({ twelvedata: "", eodhd: "" });
   const [saving, setSaving] = useState<Provider | null>(null);
   const [saved, setSaved] = useState<Provider | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (demo) return;
+    let cancelled = false;
+    fetch("/api/me", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me: { role?: string } | null) => {
+        if (!cancelled) setIsAdmin(me?.role === "admin");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [demo]);
 
   useEffect(() => {
     if (demo) return;
@@ -109,8 +125,9 @@ export default function SettingsPage() {
   );
 
   return (
-    <Shell title="Settings" subtitle="How this installation fetches prices">
+    <Shell title="Settings" subtitle="Your market-data keys, and the people who use this installation">
       <div className="space-y-4">
+        {isAdmin && !demo ? <PeopleSettings /> : null}
         <Card className="p-5">
           <div className="flex items-start gap-3">
             <KeyRound size={18} className="mt-0.5 shrink-0 text-ink-faint" />

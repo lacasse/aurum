@@ -487,6 +487,44 @@ pre-prod. Production runs the same `docker-compose.yml`, unmodified, with a
 host-specific override beside it, and is operated there through its own
 backup service in exactly the same way.
 
+# Several People, One Installation — CRITICAL RULES
+
+Each account's record is private to it, and the code is arranged so that
+staying private is the default rather than something to remember.
+
+- **Every repository function that touches a record takes the user's id**, and
+  every read filters by it. Every update and delete matches the owner *as well
+  as* the id: an id arrives in a request body, and matching on it alone lets one
+  user change another's row. This includes side effects — a transaction moves
+  account balances, and the balance lookup is scoped too.
+- **Routes learn who is asking from `handle()` or `withUser()`**, which check
+  that the account still exists and that the session's epoch is current. A route
+  never reads the session cookie itself.
+- **Names that were keys include the owner** — budgets, categories, merchant
+  rules, month-end values. Two people can both have "Groceries".
+- **Personal settings live in `user_settings`.** `app_meta` is for what is
+  genuinely the installation's: price caches, and ledgers keyed per user.
+- **Public figures may be shared** — prices, the exchange rate, the benchmark —
+  because they say nothing about anyone. Which tickers a person holds is not a
+  public figure; never let a shared cache answer with more than was asked.
+- **A key and its allowance belong to one user.** The environment's keys stand
+  in for the first account only.
+- **Only three things answer without a session:** signing in, the invitation
+  page, and accepting an invitation. They are named one by one in
+  `src/lib/route-guard.ts` with tests; adding a fourth needs the same.
+- **Anything reaching across accounts is admin-only**, and says why — listing
+  backups, which hold everyone's record, and managing people and invitations.
+- **A database trigger or constraint that compares rows must compare one
+  owner's rows.** The granularity guard compared everyone's, which both refused
+  honest entries and disclosed another account's row count in its error.
+- **Maintenance scripts take `--user`** (see `src/db/script-user.ts`), and an
+  upsert keyed on a derived id sets `setWhere` to the owner so it can never
+  overwrite someone else's row.
+
+The integration suite (`npm run test:db`) has a section that signs in as a
+second user and tries each of these doors. Extend it when adding a table or a
+route that writes.
+
 # Data Safety — CRITICAL RULES
 
 The PostgreSQL database is the single source of truth for all personal finance data. Data

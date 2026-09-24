@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, inArray, like, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   accounts,
+  invites,
   users,
   budgets,
   categories,
@@ -61,6 +62,7 @@ import {
 } from "@/lib/schemas";
 import { PROVIDERS, type ApiKeys } from "@/lib/api-keys";
 import { normaliseUsername } from "@/lib/usernames";
+import type { InviteRow } from "@/lib/invites";
 
 type AccountRow = typeof accounts.$inferSelect;
 type HoldingRow = typeof holdings.$inferSelect;
@@ -778,6 +780,101 @@ export async function setUserPassword(id: string, passwordHash: string): Promise
     .update(users)
     .set({ passwordHash, sessionEpoch: sql`${users.sessionEpoch} + 1` })
     .where(eq(users.id, id));
+}
+
+/* ------------------------------------------------------------------ */
+/* Invitations                                                         */
+/* ------------------------------------------------------------------ */
+
+export async function insertInvite(invite: {
+  id: string;
+  tokenHash: string;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+}): Promise<void> {
+  await db.insert(invites).values(invite);
+}
+
+/** Every invitation, newest first. Never the token or its hash. */
+export async function listInvites(): Promise<InviteRow[]> {
+  return db
+    .select({
+      id: invites.id,
+      createdBy: invites.createdBy,
+      createdAt: invites.createdAt,
+      expiresAt: invites.expiresAt,
+      acceptedAt: invites.acceptedAt,
+      acceptedBy: invites.acceptedBy,
+    })
+    .from(invites)
+    .orderBy(desc(invites.createdAt));
+}
+
+/**
+ * Stops an invitation working by moving its expiry to now. The row stays, as a
+ * record of who was invited and when; only the link stops.
+ */
+export async function revokeInvite(id: string, now = new Date()): Promise<boolean> {
+  const done = await db
+    .update(invites)
+    .set({ expiresAt: now.toISOString() })
+    .where(and(eq(invites.id, id), isNull(invites.acceptedAt)))
+    .returning({ id: invites.id });
+  return done.length > 0;
+}
+
+/** Whether a token belongs to an invitation that could still be accepted. */
+export async function inviteIsUsable(tokenHash: string, now = new Date()): Promise<boolean> {
+  const [row] = await db
+    .select({ id: invites.id })
+    .from(invites)
+    .where(
+      and(
+        eq(invites.tokenHash, tokenHash),
+        isNull(invites.acceptedAt),
+        gt(invites.expiresAt, now.toISOString()),
+      ),
+    );
+  return row !== undefined;
+}
+
+export class InviteUnusableError extends Error {}
+export class UsernameTakenError extends Error {}
+
+/**
+ * Turns an invitation into an account, once.
+ *
+ * The invitation is claimed and the user created in one transaction. The claim
+ * is a conditional update — only an unused, unexpired invitation matches — so
+ * two people using the same link at the same moment cannot both succeed: one
+ * update wins and the other finds nothing to claim. If creating the account
+ * fails, a taken username say, the whole transaction rolls back and the
+ * invitation is still good for another try.
+ */
+export async function acceptInvite(
+  tokenHash: string,
+  user: { id: string; username: string; passwordHash: string; createdAt: string },
+  now = new Date(),
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const claimed = await tx
+      .update(invites)
+      .set({ acceptedAt: now.toISOString(), acceptedBy: user.id })
+      .where(
+        and(
+          eq(invites.tokenHash, tokenHash),
+          isNull(invites.acceptedAt),
+          gt(invites.expiresAt, now.toISOString()),
+        ),
+      )
+      .returning({ id: invites.id });
+    if (claimed.length === 0) throw new InviteUnusableError();
+    const username = normaliseUsername(user.username);
+    const [taken] = await tx.select({ id: users.id }).from(users).where(eq(users.username, username));
+    if (taken) throw new UsernameTakenError();
+    await tx.insert(users).values({ ...user, username, role: "member" });
+  });
 }
 
 const API_KEYS_KEY = "api_keys";
