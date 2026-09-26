@@ -1,5 +1,5 @@
 import { handle, requireAdmin } from "@/db/http";
-import { insertInvite, listInvites, listUsers } from "@/db/repo";
+import { firstAdmin, insertInvite, listInvites, listUsers } from "@/db/repo";
 import { INVITE_TTL_MS, hashInviteToken, inviteStatus, newInviteToken } from "@/lib/invites";
 import { uid } from "@/lib/ids";
 
@@ -12,15 +12,19 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   return handle(async (user) => {
     requireAdmin(user);
-    const [people, invites] = await Promise.all([listUsers(), listInvites()]);
+    const [people, invites, owner] = await Promise.all([listUsers(), listInvites(), firstAdmin()]);
     const nameOf = new Map(people.map((p) => [p.id, p.username]));
     const now = new Date();
     return {
       people: people.map((p) => ({
+        id: p.id,
         username: p.username,
         role: p.role,
         createdAt: p.createdAt,
         you: p.id === user.id,
+        // The same two refusals the delete route makes, so the page offers
+        // only what the server will do.
+        deletable: p.id !== user.id && p.id !== owner?.id,
       })),
       invites: invites.map((i) => ({
         id: i.id,

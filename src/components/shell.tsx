@@ -40,6 +40,8 @@ import { cn } from "./ui";
  *
  * Import and the guide sit at the foot, below the pages that answer something:
  * one is a thing you do a few times a month, the other a thing you read once.
+ * Settings is not a page about the money at all, so it sits in the footer with
+ * the theme and signing out.
  */
 const NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
@@ -49,7 +51,6 @@ const NAV = [
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/year", label: "Year", icon: CalendarRange },
-  { href: "/settings", label: "Settings", icon: Settings },
   { href: "/tax", label: "Tax", icon: Receipt, unreleased: true },
   { href: "/guide", label: "Guide", icon: BookOpen, unreleased: true },
   /* Temporary: the colour-picking bench. Delete this line with the page. */
@@ -415,6 +416,20 @@ function SidebarContent({
           </span>
           <ThemeToggle />
         </div>
+        <Link
+          href="/settings"
+          onClick={onNavigate}
+          title="Settings"
+          className={cn(
+            "flex h-7 w-full items-center gap-2.5 rounded-lg px-3 text-xs font-medium transition-colors",
+            pathname === "/settings"
+              ? "bg-brand/10 text-brand"
+              : "text-ink-faint hover:bg-elevated hover:text-ink-dim",
+          )}
+        >
+          <Settings size={14} className="shrink-0" />
+          <span className="nav-label whitespace-nowrap">Settings</span>
+        </Link>
         <DeleteDemo />
         <button
           onClick={logout}

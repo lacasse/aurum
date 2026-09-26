@@ -1,14 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Copy, UserPlus, Users } from "lucide-react";
-import { Badge, Button, Card, CardHeader } from "@/components/ui";
+import { Copy, Trash2, UserPlus, Users } from "lucide-react";
+import { Badge, Button, Card, CardHeader, Field, Input, Modal } from "@/components/ui";
 
 interface Person {
+  id: string;
   username: string;
   role: "admin" | "member";
   createdAt: string;
   you: boolean;
+  /** False for yourself and for the installation's owner; the server agrees. */
+  deletable: boolean;
 }
 
 interface Invite {
@@ -93,6 +96,8 @@ export function PeopleSettings() {
     }
   };
 
+  const [removing, setRemoving] = useState<Person | null>(null);
+
   const pending = invites.filter((i) => i.status === "pending");
   const past = invites.filter((i) => i.status !== "pending").slice(0, 5);
 
@@ -139,6 +144,16 @@ export function PeopleSettings() {
                 {p.role === "admin" ? <Badge>Admin</Badge> : null}
                 {p.you ? <span className="text-xs text-ink-faint">you</span> : null}
                 <span className="ml-auto text-xs text-ink-faint">since {day(p.createdAt)}</span>
+                {p.deletable ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title={`Delete ${p.username}`}
+                    onClick={() => setRemoving(p)}
+                  >
+                    <Trash2 size={13} /> Delete
+                  </Button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -182,6 +197,112 @@ export function PeopleSettings() {
           </div>
         ) : null}
       </div>
+      <DeletePerson
+        person={removing}
+        onClose={() => setRemoving(null)}
+        onDeleted={() => {
+          setRemoving(null);
+          void load();
+        }}
+      />
     </Card>
+  );
+}
+
+/**
+ * Deleting someone else's account takes their whole record with it, so it asks
+ * for their username typed out and the administrator's own password.
+ */
+function DeletePerson({
+  person,
+  onClose,
+  onDeleted,
+}: {
+  person: Person | null;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [confirm, setConfirm] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const close = () => {
+    if (busy) return;
+    setConfirm("");
+    setPassword("");
+    setError("");
+    onClose();
+  };
+
+  const matches = person !== null && confirm.trim().toLowerCase() === person.username;
+
+  const remove = async () => {
+    if (!person) return;
+    setBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/users/${encodeURIComponent(person.id)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm, password }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? "Nothing was deleted. Please try again.");
+        return;
+      }
+      setConfirm("");
+      setPassword("");
+      onDeleted();
+    } catch {
+      setError("Nothing was deleted. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open={person !== null} onClose={close} title={`Delete ${person?.username ?? ""}`}>
+      <form
+        className="space-y-4 text-sm text-ink-dim"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (matches && password) void remove();
+        }}
+      >
+        <p>
+          This deletes the account <span className="font-medium text-ink">{person?.username}</span>{" "}
+          and everything in it — accounts, transactions, holdings, settings and keys. They
+          are signed out at once and cannot sign in again. There is no undo.
+        </p>
+        <Field label={`Type ${person?.username ?? "the username"} to confirm`}>
+          <Input
+            autoFocus
+            autoComplete="off"
+            spellCheck={false}
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+        </Field>
+        <Field label="Your password">
+          <Input
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </Field>
+        {error ? <p className="text-xs text-negative">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={close} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="danger" disabled={busy || !matches || !password}>
+            {busy ? "Deleting…" : "Delete account"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

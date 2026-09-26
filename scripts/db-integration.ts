@@ -1020,6 +1020,67 @@ async function main() {
       "listing invitations never returns a token hash",
     );
 
+    /*
+     * Starting over, and deleting an account. Both delete a whole record, so
+     * the question is the same as above: does anything of anybody else's go?
+     */
+    console.log("starting over and deleting accounts");
+    const { accounts: accountsTable } = await import("../src/db/schema");
+    const bystander = "erase-bystander";
+    await repo.insertUser({
+      id: bystander,
+      username: "bystander",
+      passwordHash: hashPassword("bystander-password-for-tests"),
+      role: "member",
+      createdAt: new Date().toISOString(),
+    });
+    await repo.insertAccount(
+      bystander,
+      { id: "bystander-cash", name: "Bystander cash", institution: "Example Bank", kind: "checking", balance: 100, history: [] },
+      await repo.nextPosition(bystander, accountsTable),
+    );
+    await repo.insertCategory(bystander, "Groceries", 0);
+    await repo.setSavedApiKeys(other, { eodhd: "example-key-for-tests-0000" });
+    const ownerBefore = await repo.getState(uid);
+
+    await repo.eraseUserRecord(other);
+    const erased = await repo.getState(other);
+    expect(
+      erased.accounts.length === 0 && erased.transactions.length === 0 && erased.categories.length === 0,
+      "starting over empties that user's record",
+    );
+    expect(await repo.isDemoDeleted(other), "…marks it so the demo is not seeded into it");
+    expect(
+      (await repo.getSavedApiKeys(other)).eodhd === "example-key-for-tests-0000",
+      "…keeps their market-data keys",
+    );
+    expect((await repo.findUser(other)) !== null, "…and keeps their account");
+    const ownerAfter = await repo.getState(uid);
+    expect(
+      ownerAfter.accounts.length === ownerBefore.accounts.length &&
+        ownerAfter.transactions.length === ownerBefore.transactions.length &&
+        ownerAfter.categories.length === ownerBefore.categories.length,
+      "starting over leaves another user's record untouched",
+    );
+
+    await repo.deleteUser(bystander);
+    expect((await repo.findUser(bystander)) === null, "deleting an account removes the user");
+    expect((await repo.getState(bystander)).accounts.length === 0, "…and every row they owned");
+    expect(
+      (await repo.getState(uid)).accounts.length === ownerBefore.accounts.length,
+      "…and nobody else's",
+    );
+
+    await repo.renameUser(other, "Second-Renamed");
+    expect((await repo.findUser(other))?.username === "second-renamed", "a username can be changed");
+    let clash = false;
+    try {
+      await repo.renameUser(other, (await repo.findUser(uid))!.username);
+    } catch (err) {
+      clash = err instanceof repo.UsernameTakenError;
+    }
+    expect(clash, "…but not to one already taken");
+
     if (failures > 0) console.error(`\n${failures} test(s) failed`);
     else console.log("\nall db integration tests passed");
   } finally {
