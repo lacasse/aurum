@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, like, sql } from "drizzle-orm"
 import { db } from "./index";
 import {
   accounts,
+  appMeta,
   invites,
   users,
   budgets,
@@ -774,12 +775,90 @@ export async function claimPlaceholderOwner(
   return claimed.length > 0;
 }
 
+/** The stored hash, for checking a password someone typed. Never sent anywhere. */
+export async function passwordHashOf(id: string): Promise<string | null> {
+  const [row] = await db.select({ h: users.passwordHash }).from(users).where(eq(users.id, id));
+  return row?.h ?? null;
+}
+
 /** A new password ends every session the user had, by raising their epoch. */
 export async function setUserPassword(id: string, passwordHash: string): Promise<void> {
   await db
     .update(users)
     .set({ passwordHash, sessionEpoch: sql`${users.sessionEpoch} + 1` })
     .where(eq(users.id, id));
+}
+
+/**
+ * Gives a user a new name. The unique index is the authority on whether it is
+ * free; the check before it only turns the common case into a clear answer.
+ */
+export async function renameUser(id: string, username: string): Promise<void> {
+  const name = normaliseUsername(username);
+  await db.transaction(async (tx) => {
+    const [taken] = await tx.select({ id: users.id }).from(users).where(eq(users.username, name));
+    if (taken && taken.id !== id) throw new UsernameTakenError();
+    await tx.update(users).set({ username: name }).where(eq(users.id, id));
+  }).catch((err: unknown) => {
+    // Someone took the name between the check and the update: the unique
+    // index refused it, and that is the same answer.
+    if ((err as { code?: unknown })?.code === "23505") throw new UsernameTakenError();
+    throw err;
+  });
+}
+
+/**
+ * Every row of one user's financial record, and nothing of anybody else's.
+ *
+ * One list, used by both "start over" and "delete this account", so the two
+ * cannot disagree about what a record is made of. A table added to the record
+ * belongs here, and the integration suite checks that nothing is left behind.
+ */
+async function deleteRecordRows(tx: Tx, userId: string): Promise<void> {
+  await tx.delete(monthlySnapshots).where(eq(monthlySnapshots.userId, userId));
+  await tx.delete(transactions).where(eq(transactions.userId, userId));
+  await tx.delete(recurringTransactions).where(eq(recurringTransactions.userId, userId));
+  await tx.delete(budgets).where(eq(budgets.userId, userId));
+  await tx.delete(merchantRules).where(eq(merchantRules.userId, userId));
+  await tx.delete(categories).where(eq(categories.userId, userId));
+  await tx.delete(holdings).where(eq(holdings.userId, userId));
+  await tx.delete(accounts).where(eq(accounts.userId, userId));
+}
+
+/**
+ * Empties one user's record so they can start over.
+ *
+ * Their account stays, and so do their market-data keys — those are how they
+ * sign in and fetch prices, not part of the record. Every other personal
+ * setting goes. The demo is marked as deleted in the same transaction, because
+ * an empty record is otherwise what tells the app to seed one: starting over
+ * must leave nothing, not a fresh set of invented accounts.
+ */
+export async function eraseUserRecord(userId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await deleteRecordRows(tx, userId);
+    await tx
+      .delete(userSettings)
+      .where(and(eq(userSettings.userId, userId), sql`${userSettings.key} <> ${API_KEYS_KEY}`));
+    await tx
+      .insert(userSettings)
+      .values({ userId, key: DEMO_DELETED_KEY, value: new Date().toISOString() });
+  });
+}
+
+/**
+ * Removes an account and everything it owned: its record, its settings and
+ * keys, its provider allowances, and any invitation it made that nobody used.
+ * Used invitations stay as the record of who joined when.
+ */
+export async function deleteUser(id: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await deleteRecordRows(tx, id);
+    await tx.delete(userSettings).where(eq(userSettings.userId, id));
+    await tx.delete(appMeta).where(like(appMeta.key, `%:${id.replace(/([%_\\])/g, "\\$1")}`));
+    await tx.delete(invites).where(and(eq(invites.createdBy, id), isNull(invites.acceptedAt)));
+    await tx.delete(users).where(eq(users.id, id));
+  });
 }
 
 /* ------------------------------------------------------------------ */
