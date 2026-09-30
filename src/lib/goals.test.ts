@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   cleanGoals,
   describe as describeGoal,
+  dollarsOf,
   measure,
   newlyMet,
   progressOf,
@@ -373,6 +374,78 @@ describe("every goal as a percentage", () => {
   });
 });
 
+describe("a percentage goal in dollars", () => {
+  test("a goal set in dollars has no second reading", () => {
+    const g = goal({ metric: "saved", basis: "amount" });
+    const m = measure(g, inputs({ transactions: [txn("2026-01-31", "income", 4000, "Salary")] }));
+    assert.equal(dollarsOf(g, m), null);
+  });
+
+  test("a share of income: what was saved, and the target at the income so far", () => {
+    const g = goal({ metric: "saved", basis: "percent", target: 20 });
+    const transactions = [
+      txn("2026-01-31", "income", 5000, "Salary"),
+      txn("2026-01-10", "expense", 4000),
+    ];
+    const d = dollarsOf(g, measure(g, inputs({ transactions })));
+    assert.deepEqual(
+      d && { amount: d.amount, target: d.target, base: d.base, noun: d.noun },
+      { amount: 1000, target: 1000, base: 5000, noun: "income so far" },
+    );
+  });
+
+  test("growth is on top of last December, not a part of it", () => {
+    const g = goal({ metric: "netWorth", basis: "percent", target: 10 });
+    const netWorth = [point("2025-12", 50000), point("2026-04", 53000)];
+    const d = dollarsOf(g, measure(g, inputs({ netWorth })));
+    assert.equal(d?.amount, 53000, "net worth as it stands");
+    assert.equal(d?.target, 55000, "last December's, grown by ten percent");
+    assert.equal(d?.lead, "from");
+  });
+
+  test("debt paid down is the dollars paid, against a share of what was owed", () => {
+    const g = goal({ metric: "debt", basis: "percent", target: 50 });
+    const netWorth = [
+      point("2025-12", 0, { liabilities: 8000 }),
+      point("2026-03", 0, { liabilities: 6000 }),
+    ];
+    const d = dollarsOf(g, measure(g, inputs({ netWorth })));
+    assert.equal(d?.amount, 2000);
+    assert.equal(d?.target, 4000);
+  });
+
+  test("a share of room is the contributions against the room", () => {
+    const g = goal({ metric: "contribution", plan: "TFSA", basis: "percent", target: 100 });
+    const d = dollarsOf(
+      g,
+      measure(
+        g,
+        inputs({
+          transactions: [txn("2026-02-01", "transfer", 1500, "Transfer", { destinationAccountId: "tfsa" })],
+          limits: { "2026": { TFSA: 6000 } },
+        }),
+      ),
+    );
+    assert.equal(d?.amount, 1500);
+    assert.equal(d?.target, 6000);
+  });
+
+  test("a return in dollars is the market's part, and says it is approximate", () => {
+    const port = (key: string, value: number) => ({ key, label: key, value, cost: 0 }) as PortfolioPoint;
+    const g = goal({ metric: "portfolio", basis: "percent", target: 10 });
+    const d = dollarsOf(
+      g,
+      measure(
+        g,
+        inputs({ portfolio: [port("2025-12", 10000), port("2026-01", 16000)], flowsByMonth: { "2026-01": 5000 } }),
+      ),
+    );
+    assert.equal(d?.amount, 1000, "six thousand of rise, five of it deposited");
+    assert.equal(d?.target, 1000);
+    assert.equal(d?.approx, true);
+  });
+});
+
 describe("contributions to every plan, or one", () => {
   const rrsp = { ...tfsa, id: "rrsp", name: "RRSP", registration: "RRSP" } as unknown as Account;
   const transactions = [
@@ -448,6 +521,36 @@ describe("met once, met for good", () => {
   });
 });
 
+describe("a goal of your own", () => {
+  const custom = (over: Partial<Goal> = {}) =>
+    goal({ metric: "custom", title: "Write a will", target: 0, ...over });
+
+  test("nothing measures it, so the record can never meet it", () => {
+    const p = progressOf(custom(), inputs());
+    assert.equal(p.metNow, false);
+    assert.equal(p.status, "open");
+    assert.deepEqual(newlyMet([custom()], inputs()), []);
+  });
+
+  test("checked off is met, for good", () => {
+    assert.equal(progressOf(custom({ metOn: "2026-05-02" }), inputs()).status, "met");
+  });
+
+  test("a month passed without the tick is missed, and can still be ticked", () => {
+    assert.equal(progressOf(custom({ by: "2026-03" }), inputs()).status, "missed");
+    assert.equal(progressOf(custom({ by: "2026-03", metOn: "2026-06-01" }), inputs()).status, "met");
+  });
+
+  test("it reads as its own words", () => {
+    assert.equal(describeGoal(custom({ by: "2026-06" }), String), "Write a will by the end of June");
+  });
+
+  test("stored without words, there is nothing to check off", () => {
+    const kept = cleanGoals([custom({ id: "ok" }), custom({ id: "blank", title: "  " })]);
+    assert.deepEqual(kept.map((g) => g.id), ["ok"]);
+  });
+});
+
 describe("goals read back from storage", () => {
   test("malformed goals are dropped rather than trusted", () => {
     const clean = cleanGoals([
@@ -493,6 +596,15 @@ describe("a goal reads as a sentence", () => {
 
   test("a year-long goal names the year", () => {
     assert.equal(describeGoal(goal({ metric: "saved", target: 500 }), fmt), "Save 500 dollars in 2026");
+  });
+
+  test("the year can be left to the page that already shows it", () => {
+    assert.equal(describeGoal(goal({ metric: "saved", target: 500 }), fmt, { year: false }), "Save 500 dollars");
+    assert.equal(
+      describeGoal(goal({ metric: "saved", target: 500, by: "2026-06" }), fmt, { year: false }),
+      "Save 500 dollars by the end of June",
+      "a month other than December is still said",
+    );
   });
 
   test("a contribution names the plan and the month it is due", () => {

@@ -39,7 +39,9 @@ export type GoalMetric =
   | "passive"
   | "contribution"
   | "spending"
-  | "donations";
+  | "donations"
+  /** A goal of the owner's own, which nothing measures and they check off by hand. */
+  | "custom";
 
 /** Every goal can be set as an amount, or as the percentage that suits it. */
 export type GoalBasis = "amount" | "percent";
@@ -75,6 +77,8 @@ interface MetricDef {
   metric: GoalMetric;
   /** What the dropdown calls it. */
   label: string;
+  /** Checked off by hand rather than measured. */
+  manual?: boolean;
   amount: Reading;
   percent: Reading;
 }
@@ -297,7 +301,31 @@ export const METRICS: readonly MetricDef[] = [
   },
 ];
 
+/**
+ * A goal the record cannot measure — read a book on investing, write a will,
+ * open the FHSA — set as words and checked off by hand. It has the shape of
+ * the others so that it sits in the same list, is due by a month like them and
+ * is celebrated the same way; it simply never has a figure.
+ */
+const MANUAL: Reading = {
+  unit: "cad",
+  shape: "flow",
+  judge: "reach",
+  option: "Checked off by hand",
+  field: "What will you do?",
+  source: "A goal of your own. Nothing measures it: check it off on the Goals page when it is done.",
+};
+
+export const CUSTOM: MetricDef = {
+  metric: "custom",
+  label: "Custom goal",
+  manual: true,
+  amount: MANUAL,
+  percent: MANUAL,
+};
+
 export function specOf(metric: GoalMetric, basis: GoalBasis = "amount"): MetricSpec {
+  if (metric === "custom") return { metric, label: CUSTOM.label, basis: "amount", ...MANUAL };
   const def = METRICS.find((m) => m.metric === metric) ?? METRICS[0];
   return { metric: def.metric, label: def.label, basis, ...def[basis] };
 }
@@ -319,6 +347,8 @@ export interface Goal {
   by: string;
   /** One plan, for a contribution goal; absent means every plan. */
   plan?: RegisteredPlan;
+  /** What a custom goal is, in the owner's words. */
+  title?: string;
   /** One category, for a spending goal; absent means all spending. */
   category?: string;
   /** Why it matters, in the owner's words. */
@@ -416,6 +446,38 @@ function levelAt(metric: GoalMetric, point: NetWorthPoint, accounts: readonly Ac
   }
 }
 
+/**
+ * A percentage goal's figures in dollars: what the percentage is made of.
+ *
+ * A share means little without the money it is a share of — "18% growth" says
+ * less than a net worth that has to reach a figure — so every percentage keeps
+ * the two amounts it was worked out from. The target in dollars follows from
+ * these and the goal's own percentage, in `dollarsOf`.
+ */
+export interface Dollars {
+  /** The dollars the percentage measures: saved, paid off, net worth now. */
+  amount: number;
+  /** What it is a share of: income so far, last December's balance, the room. */
+  base: number;
+  /**
+   * How the base reads beside its amount: "of" $… "income so far", "from" $…
+   * "last December". Words only, so the page formats the money its own way.
+   */
+  lead: "of" | "from" | "on";
+  noun: string;
+  /**
+   * Growth is measured on top of its base — a net worth that must reach the
+   * base plus the percentage — where every other share is a part of it.
+   */
+  growth?: boolean;
+  /**
+   * The figure is an approximation, and says so. A time-weighted return does
+   * not convert exactly to dollars: the dollars depend on when money arrived,
+   * which is precisely what the return is built to ignore.
+   */
+  approx?: boolean;
+}
+
 export interface Measure {
   /** The figure as it stands. Null when the record has nothing to measure. */
   value: number | null;
@@ -426,9 +488,11 @@ export interface Measure {
   best: number | null;
   /** Where a level started the window, for pacing it. */
   start: number | null;
+  /** A percentage goal's figures in dollars. Null for a goal set in dollars. */
+  dollars: Dollars | null;
 }
 
-const NOTHING: Measure = { value: null, best: null, start: null };
+const NOTHING: Measure = { value: null, best: null, start: null, dollars: null };
 
 /** The levels in the window, with the one they are measured from. */
 function levels(
@@ -441,22 +505,41 @@ function levels(
 
   /*
    * The return is chained exactly as the Year page chains a year's: from the
-   * December before, month by month, with the flows taken out.
+   * December before, month by month, with the flows taken out. Its dollars are
+   * the market's part of the change — what the holdings are worth, less what
+   * they were worth in December, less the money put in since.
    */
   if (goal.metric === "portfolio" && goal.basis === "percent") {
     const points = inputs.portfolio.filter((p) => inWindow(p.key, w) || p.key === decKey);
     if (points.length < 2) return NOTHING;
     const returns = chainedReturns(points, inputs.flowsByMonth).slice(1).map(oneDecimal);
-    return { value: returns[returns.length - 1], best: Math.max(...returns), start: 0 };
+    let flowCents = 0;
+    for (const p of points.slice(1)) flowCents += toCents(inputs.flowsByMonth[p.key] ?? 0);
+    const first = points[0].value;
+    const last = points[points.length - 1].value;
+    return {
+      value: returns[returns.length - 1],
+      best: Math.max(...returns),
+      start: 0,
+      dollars: {
+        amount: fromCents(toCents(last) - toCents(first) - flowCents),
+        base: first,
+        lead: "on",
+        noun: points[0].key === decKey ? "last December" : "at the start",
+        approx: true,
+      },
+    };
   }
 
   const points = inputs.netWorth.filter((p) => inWindow(p.key, w));
   if (points.length === 0) return NOTHING;
   const before = inputs.netWorth.find((p) => p.key === decKey) ?? null;
   const raw = (p: NetWorthPoint) => levelAt(goal.metric, p, inputs.accounts);
+  const latest = points[points.length - 1];
 
   let values: number[];
   let start: number;
+  let dollars: Dollars | null = null;
   if (goal.basis === "amount") {
     values = points.map(raw);
     start = before ? raw(before) : values[0];
@@ -466,6 +549,10 @@ function levels(
     values = points.map(share).filter((v): v is number => v !== null);
     if (values.length === 0) return NOTHING;
     start = (before && share(before)) ?? values[0];
+    // The target moves with net worth, so it is stated against today's.
+    if (latest.net > 0) {
+      dollars = { amount: raw(latest), base: latest.net, lead: "of", noun: "net worth now" };
+    }
   } else {
     // Growth, or debt paid down: measured against the December before.
     const base = before ? raw(before) : raw(points[0]);
@@ -474,9 +561,14 @@ function levels(
       oneDecimal(goal.metric === "debt" ? ((base - raw(p)) / base) * 100 : ((raw(p) - base) / base) * 100),
     );
     start = 0;
+    const when = before ? "last December" : "at the start";
+    dollars =
+      goal.metric === "debt"
+        ? { amount: roundMoney(base - raw(latest)), base, lead: "of", noun: `owed ${when}` }
+        : { amount: raw(latest), base, lead: "from", noun: when, growth: true };
   }
   const best = spec.judge === "reduceTo" ? Math.min(...values) : Math.max(...values);
-  return { value: values[values.length - 1], best, start };
+  return { value: values[values.length - 1], best, start, dollars };
 }
 
 /**
@@ -491,7 +583,7 @@ export function measure(
   inputs: GoalInputs,
 ): Measure {
   const w = windowOf(goal.year, goal.by, inputs.today);
-  if (!w) return NOTHING;
+  if (!w || goal.metric === "custom") return NOTHING;
   const spec = specOf(goal.metric, goal.basis);
   if (spec.shape === "level") return levels(goal, w, inputs);
 
@@ -499,9 +591,20 @@ export function measure(
   const within = () =>
     inputs.transactions.filter((t) => inWindow(t.date.slice(0, 7), w)) as Transaction[];
   const totals = flowTotals(goal, w, inputs);
-  const ofIncome = (cents: number) =>
-    totals.income > 0 ? oneDecimal((cents / totals.income) * 100) : null;
-  const flat = (value: number | null): Measure => ({ value, best: value, start: null });
+  const flat = (value: number | null, dollars: Dollars | null = null): Measure => ({
+    value,
+    best: value,
+    start: null,
+    dollars: value === null ? null : dollars,
+  });
+  /** A sum as a share of the income so far, with its dollars. */
+  const ofIncome = (cents: number): Measure =>
+    flat(totals.income > 0 ? oneDecimal((cents / totals.income) * 100) : null, {
+      amount: fromCents(cents),
+      base: fromCents(totals.income),
+      lead: "of",
+      noun: "income so far",
+    });
 
   switch (goal.metric) {
     case "invested": {
@@ -509,7 +612,7 @@ export function measure(
       for (const [month, amount] of Object.entries(inputs.flowsByMonth)) {
         if (inWindow(month, w)) cents += toCents(amount);
       }
-      return flat(pct ? ofIncome(cents) : fromCents(cents));
+      return pct ? ofIncome(cents) : flat(fromCents(cents));
     }
     case "contribution": {
       /*
@@ -526,23 +629,59 @@ export function measure(
       const measured = plans.filter((p) => (room[p] ?? 0) > 0);
       if (measured.length === 0) return NOTHING;
       const limit = measured.reduce((sum, p) => sum + (room[p] ?? 0), 0);
-      const used = measured.reduce((sum, p) => sum + paid(p), 0);
-      return flat(oneDecimal((used / limit) * 100));
+      const used = roundMoney(measured.reduce((sum, p) => sum + paid(p), 0));
+      return flat(oneDecimal((used / limit) * 100), {
+        amount: used,
+        base: limit,
+        lead: "of",
+        noun: "room",
+      });
     }
     case "passive": {
       if (!pct) return flat(fromCents(totals.passive));
       const covered = coverage(totals.passive, totals.expenses);
-      return flat(covered === null ? null : oneDecimal(covered));
+      return flat(covered === null ? null : oneDecimal(covered), {
+        amount: fromCents(totals.passive),
+        base: fromCents(totals.expenses),
+        lead: "of",
+        noun: "spending so far",
+      });
     }
     case "spending":
-      return flat(pct ? ofIncome(totals.spending) : fromCents(totals.spending));
+      return pct ? ofIncome(totals.spending) : flat(fromCents(totals.spending));
     case "donations":
-      return flat(pct ? ofIncome(totals.donations) : fromCents(totals.donations));
+      return pct ? ofIncome(totals.donations) : flat(fromCents(totals.donations));
     default:
-      return flat(
-        pct ? ofIncome(totals.income - totals.expenses) : fromCents(totals.income - totals.expenses),
-      );
+      return pct
+        ? ofIncome(totals.income - totals.expenses)
+        : flat(fromCents(totals.income - totals.expenses));
   }
+}
+
+/**
+ * A percentage goal as dollars: what the record shows, and what the target
+ * comes to at today's base. Null for a goal set in dollars, or with nothing to
+ * measure yet.
+ *
+ * The target is worked out, not stored: a share of income so far grows as the
+ * income does, so "20% of income" is a different number of dollars in March
+ * than in December, and the page says which it is by naming the base.
+ */
+export function dollarsOf(
+  goal: Pick<Goal, "target">,
+  m: Measure,
+): { amount: number; target: number; base: number; lead: string; noun: string; approx: boolean } | null {
+  const d = m.dollars;
+  if (!d) return null;
+  const share = d.base * (goal.target / 100);
+  return {
+    amount: d.amount,
+    target: roundMoney(d.growth ? d.base + share : share),
+    base: d.base,
+    lead: d.lead,
+    noun: d.noun,
+    approx: d.approx ?? false,
+  };
 }
 
 /* ── Progress ── */
@@ -555,7 +694,9 @@ export type GoalStatus =
   /** A whole-window goal whose window is over, waiting for its last month to be closed. */
   | "awaiting"
   | "upcoming"
-  | "no-data";
+  | "no-data"
+  /** A custom goal still to be checked off. */
+  | "open";
 
 export interface GoalProgress {
   goal: Goal;
@@ -595,6 +736,23 @@ export function progressOf(goal: Goal, inputs: GoalInputs): GoalProgress {
   const spec = specOf(goal.metric, goal.basis);
   const m = measure(goal, inputs);
   const now = inputs.today.slice(0, 7);
+
+  /*
+   * Done when the owner says so, and never before: nothing is measured, so
+   * nothing can be met on its own. A month passing without a tick is missed,
+   * but it can still be ticked — late is still done.
+   */
+  if (goal.metric === "custom") {
+    const status: GoalStatus = goal.metOn
+      ? "met"
+      : now < `${goal.year}-01`
+        ? "upcoming"
+        : now > goal.by
+          ? "missed"
+          : "open";
+    return { goal, spec, measure: m, fraction: goal.metOn ? 1 : 0, status, metNow: false };
+  }
+
   const over = now > goal.by;
   const closed = over && inputs.isClosed(goal.by);
   const elapsed = elapsedOf(goal, inputs.today);
@@ -699,19 +857,31 @@ export function monthName(month: string): string {
  * The amount is formatted by the caller, so the sentence reads in the same
  * money format as the page around it.
  */
-export function describe(goal: Goal, fmtMoney: (n: number) => string): string {
+export function describe(
+  goal: Goal,
+  fmtMoney: (n: number) => string,
+  /**
+   * Whether to name the year. A page already showing one year's goals leaves
+   * it out rather than repeat it on every card; a message on its own keeps it.
+   */
+  { year = true }: { year?: boolean } = {},
+): string {
   const spec = specOf(goal.metric, goal.basis);
   const pct = goal.basis === "percent";
   const x = pct ? `${goal.target}%` : fmtMoney(goal.target);
   const when = goal.by.endsWith("-12")
-    ? ` in ${goal.year}`
+    ? year
+      ? ` in ${goal.year}`
+      : ""
     : isWholeWindow(spec.judge)
       ? ` through ${monthName(goal.by)}`
       : ` by the end of ${monthName(goal.by)}`;
   const plan = goal.plan ? `the ${goal.plan}` : "registered plans";
   const spending = goal.category ? `${goal.category} spending` : "spending";
 
-  const sentence: Record<GoalMetric, [string, string]> = {
+  if (goal.metric === "custom") return `${goal.title ?? "A goal of my own"}${when}`;
+
+  const sentence: Record<Exclude<GoalMetric, "custom">, [string, string]> = {
     netWorth: [`Reach a net worth of ${x}`, `Grow net worth by ${x}`],
     portfolio: [`Grow the portfolio to ${x}`, `Earn a ${x} return on the portfolio`],
     cash: [`Hold cash of at least ${x}`, `Keep at least ${x} of net worth in cash`],
@@ -731,7 +901,7 @@ export function describe(goal: Goal, fmtMoney: (n: number) => string): string {
 
 /* ── Checking what is stored ── */
 
-const METRIC_KEYS = new Set<string>(METRICS.map((m) => m.metric));
+const METRIC_KEYS = new Set<string>([...METRICS.map((m) => m.metric), CUSTOM.metric]);
 
 /**
  * Goals as stored, with anything malformed dropped rather than trusted.
@@ -761,6 +931,10 @@ export function cleanGoals(raw: unknown): Goal[] {
       basis = "percent";
     }
     if (typeof metric !== "string" || !METRIC_KEYS.has(metric)) continue;
+    // A custom goal is its words: without them there is nothing to check off.
+    const title = typeof g.title === "string" ? g.title.trim().slice(0, 120) : "";
+    if (metric === "custom" && !title) continue;
+    if (metric === "custom") basis = "amount";
 
     const spec = specOf(metric as GoalMetric, basis);
     const target = Number(g.target);
@@ -785,6 +959,10 @@ export function cleanGoals(raw: unknown): Goal[] {
     }
     if (metric === "spending" && typeof g.category === "string" && g.category.trim()) {
       goal.category = g.category.trim().slice(0, 80);
+    }
+    if (metric === "custom") {
+      goal.title = title;
+      goal.target = 0;
     }
     if (typeof g.why === "string" && g.why.trim()) goal.why = g.why.trim().slice(0, 280);
     if (typeof g.metOn === "string" && /^\d{4}-\d{2}-\d{2}$/.test(g.metOn)) goal.metOn = g.metOn;

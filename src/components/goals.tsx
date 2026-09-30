@@ -1,10 +1,30 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
-import { PartyPopper, Plus, Target, Trash2 } from "lucide-react";
-import { Badge, Button, Field, Input, Modal, Progress, Select, cn } from "./ui";
+import {
+  Check,
+  Coins,
+  CreditCard,
+  HeartHandshake,
+  Landmark,
+  PartyPopper,
+  PenLine,
+  Pencil,
+  PiggyBank,
+  Plus,
+  ShieldCheck,
+  ShoppingBag,
+  Sprout,
+  Star,
+  Trash2,
+  TrendingUp,
+  Trophy,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
+import { Button, Field, Input, Modal, Select, cn } from "./ui";
 import { useFinance } from "@/lib/store";
 import { getSettings, saveSettings } from "@/lib/api";
 import { useIncomeTransactions, useSpendGroups } from "@/lib/hooks";
@@ -17,9 +37,12 @@ import {
 } from "@/lib/contributions";
 import { fmtCAD, todayISO } from "@/lib/format";
 import { uid } from "@/lib/ids";
+import { isLiability } from "@/lib/types";
 import {
+  CUSTOM,
   METRICS,
   describe,
+  dollarsOf,
   measure,
   monthName,
   newlyMet,
@@ -45,6 +68,8 @@ interface GoalStore {
   celebrating: Goal[];
   /** Stamps these goals met today and puts them on screen. */
   celebrate: (met: Goal[], today: string) => void;
+  /** Shows a met goal's celebration again, for the fun of it. Stores nothing. */
+  replay: (goal: Goal) => void;
   dismiss: () => void;
 }
 
@@ -77,6 +102,7 @@ export const useGoals = create<GoalStore>()((set, get) => ({
     get().save(get().goals.map((g) => (ids.has(g.id) ? { ...g, metOn: today } : g)));
     set({ celebrating: [...get().celebrating, ...met] });
   },
+  replay: (goal) => set({ celebrating: [goal] }),
   dismiss: () => set({ celebrating: [] }),
 }));
 
@@ -153,93 +179,285 @@ export function fmtTarget(goal: Pick<Goal, "metric" | "basis">, n: number): stri
   return specOf(goal.metric, goal.basis).unit === "pct" ? `${Math.round(n * 10) / 10}%` : fmtCAD(n);
 }
 
-const STATUS: Record<GoalStatus, { label: string; tone: "neutral" | "positive" | "negative" | "brand" }> = {
-  met: { label: "Met", tone: "positive" },
-  "on-track": { label: "On track", tone: "brand" },
-  behind: { label: "Behind", tone: "negative" },
-  missed: { label: "Missed", tone: "negative" },
-  awaiting: { label: "Awaiting the checklist", tone: "neutral" },
-  upcoming: { label: "Not started", tone: "neutral" },
-  "no-data": { label: "No figures yet", tone: "neutral" },
+/** What each status is called; its colour comes from `goalTone`. */
+const STATUS: Record<GoalStatus, string> = {
+  met: "Met",
+  "on-track": "On track",
+  behind: "Behind",
+  missed: "Missed",
+  awaiting: "Awaiting the checklist",
+  upcoming: "Not started",
+  "no-data": "No figures yet",
+  open: "To do",
 };
 
 /* ── One goal ── */
 
-export function GoalRow({
+/**
+ * The one line under a goal that the rest of its card does not already say.
+ *
+ * The badge gives the status and the bar gives the progress, so this gives
+ * what they cannot: the date it was met, what it takes from here, or — for a
+ * percentage — the dollars behind it. Null when there is nothing to add; a
+ * line that restated the badge would be the repetition this card exists to
+ * avoid.
+ */
+function footerLine(p: GoalProgress, today: string): string | null {
+  const { goal, spec, measure: m, status } = p;
+  if (goal.metric === "custom") {
+    if (goal.metOn) return `Done on ${goal.metOn}.`;
+    return status === "missed" ? "It can still be checked off." : null;
+  }
+  if (goal.metOn) return `Met on ${goal.metOn}.`;
+  if (status === "met") return "Met — celebrating now.";
+  if (status === "no-data" && goal.metric === "contribution" && goal.basis === "percent") {
+    return `Needs ${goal.year}'s contribution room — set it on the Year page.`;
+  }
+  if (spec.unit === "pct" || m.value === null) return null;
+  if (status !== "on-track" && status !== "behind") return null;
+
+  const thisMonth = today.slice(0, 7);
+  const monthsLeft = Math.max(
+    1,
+    Number(goal.by.slice(5)) - (goal.year === thisMonth.slice(0, 4) ? Number(thisMonth.slice(5)) - 1 : 0),
+  );
+  const gap = goal.target - m.value;
+  switch (spec.judge) {
+    case "reach":
+      return spec.shape === "flow"
+        ? `About ${fmtCAD(gap / monthsLeft)} a month to go.`
+        : `${fmtCAD(gap)} to go.`;
+    case "reduceTo":
+      return `${fmtCAD(m.value - goal.target)} left to pay down.`;
+    case "stayUnder":
+      return `${fmtCAD(gap)} left — about ${fmtCAD(gap / monthsLeft)} a month.`;
+    default:
+      return null;
+  }
+}
+
+/**
+ * One icon per measure, used wherever a goal appears — its card and its idea —
+ * so a goal is recognised by its shape before it is read.
+ */
+const GOAL_ICONS: Record<GoalMetric, LucideIcon> = {
+  netWorth: Landmark,
+  portfolio: TrendingUp,
+  cash: Wallet,
+  debt: CreditCard,
+  saved: PiggyBank,
+  invested: Coins,
+  passive: Sprout,
+  contribution: ShieldCheck,
+  spending: ShoppingBag,
+  donations: HeartHandshake,
+  custom: Star,
+};
+
+/**
+ * A goal's colour, from its status and nothing else, so the same state reads
+ * the same everywhere: green met, red behind or missed, the brand on course.
+ * A cap going well is on course; a cap nearly spent is behind.
+ */
+function goalTone(p: GoalProgress): "positive" | "negative" | "brand" | "neutral" {
+  if (p.status === "met") return "positive";
+  if (p.status === "behind" || p.status === "missed") return "negative";
+  if (p.status === "on-track" || p.status === "open") return "brand";
+  return "neutral";
+}
+
+const TONE_ICON = {
+  positive: "bg-positive/15 text-positive",
+  negative: "bg-negative/15 text-negative",
+  brand: "bg-brand/10 text-brand",
+  neutral: "bg-elevated text-ink-faint",
+} as const;
+
+const TONE_BAR = {
+  positive: "bg-positive",
+  negative: "bg-negative",
+  brand: "bg-brand-strong",
+  neutral: "bg-ink-faint/50",
+} as const;
+
+const STATUS_TEXT = {
+  positive: "text-positive",
+  negative: "text-negative",
+  brand: "text-brand",
+  neutral: "text-ink-faint",
+} as const;
+
+export function GoalCard({
   progress,
+  onEdit,
   onDelete,
   highlight = false,
 }: {
   progress: GoalProgress;
+  onEdit?: () => void;
   onDelete?: () => void;
   /** The goal a celebration linked to, picked out when the page opens on it. */
   highlight?: boolean;
 }) {
-  const { goal, spec, measure: m, fraction, status } = progress;
-  const s = STATUS[status];
-  const bar =
-    status === "met"
-      ? "positive"
-      : status === "missed" ||
-          ((spec.judge === "stayUnder" || spec.judge === "rateAtMost") && status === "behind")
-        ? "negative"
-        : undefined;
+  const replay = useGoals((s) => s.replay);
+  const celebrate = useGoals((s) => s.celebrate);
+  const save = useGoals((s) => s.save);
+  const { goal, measure: m, fraction, status } = progress;
+  const manual = goal.metric === "custom";
+  const met = status === "met";
+  const tone = goalTone(progress);
+  const Icon = met ? Trophy : GOAL_ICONS[goal.metric];
+  const title = describe(goal, fmtCAD, { year: false });
+  const today = todayISO();
+  const line = footerLine(progress, today);
+  // A percentage's dollars, when nothing more pressing takes the line.
+  const money = line === null ? dollarsOf(goal, m) : null;
+  const statusWord = (
+    <span className={cn("shrink-0 text-xs font-medium", STATUS_TEXT[tone])}>{STATUS[status]}</span>
+  );
+
   return (
     <div
       id={`goal-${goal.id}`}
       className={cn(
-        "scroll-mt-24 rounded-xl border border-line bg-elevated/40 p-4 transition-shadow",
+        "group flex scroll-mt-24 flex-col rounded-2xl border p-4 transition-colors",
+        met ? "border-positive/30 bg-positive/5" : "border-line bg-elevated/30",
         highlight && "ring-2 ring-positive",
       )}
     >
-      <div className="flex items-start gap-3">
-        <div
-          className={cn(
-            "mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full",
-            status === "met" ? "bg-positive/15 text-positive" : "bg-brand/10 text-brand",
-          )}
-        >
-          {status === "met" ? <PartyPopper size={15} /> : <Target size={15} />}
+      <div className="flex items-center gap-3">
+        <div className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-full", TONE_ICON[tone])}>
+          <Icon size={15} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-medium text-ink">{describe(goal, fmtCAD)}</p>
-            <Badge tone={s.tone}>{s.label}</Badge>
-          </div>
-          {goal.why ? <p className="mt-0.5 text-xs text-ink-faint">{goal.why}</p> : null}
-          <div className="mt-3 flex items-center gap-3">
-            <Progress value={fraction} max={1} tone={bar ?? "brand"} className="h-2 flex-1" />
-            <span className="shrink-0 text-xs tabular-nums text-ink-dim">
-              {m.value === null ? "—" : fmtTarget(goal, m.value)}
-              <span className="text-ink-faint"> / {fmtTarget(goal, goal.target)}</span>
-            </span>
-          </div>
-          <p className="mt-1.5 text-[0.6875rem] text-ink-faint">
-            {goal.metOn
-              ? `Met on ${goal.metOn}.`
-              : status === "no-data" && goal.metric === "contribution" && goal.basis === "percent"
-                ? `Needs ${goal.year}'s contribution room — set it on the Year page.`
-                : status === "awaiting"
-                  ? `Judged once ${monthName(goal.by)} is closed through the monthly checklist.`
-                  : spec.judge === "stayUnder"
-                    ? `Spent so far · judged over the whole of it, once ${monthName(goal.by)} is closed.`
-                    : spec.judge === "rateAtLeast" || spec.judge === "rateAtMost"
-                      ? `So far · judged over the whole of it, once ${monthName(goal.by)} is closed.`
-                      : spec.shape === "level"
-                        ? "Where it stands now. Met the first month-end it reaches the target."
-                        : "Counted so far. Met the moment it reaches the target."}
-          </p>
+          <p className="text-sm font-medium leading-snug text-ink">{title}</p>
+          {goal.why ? <p className="mt-0.5 truncate text-xs text-ink-faint">{goal.why}</p> : null}
         </div>
-        {onDelete ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onDelete}
-            aria-label={`Delete goal: ${describe(goal, fmtCAD)}`}
-            title="Delete goal"
-          >
-            <Trash2 size={14} />
-          </Button>
+        {/*
+          * Out of the way until wanted: shown on hover or keyboard focus where
+          * there is a pointer, always on a touch screen, which has no hover.
+          */}
+        <div className="-mr-1.5 flex shrink-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:hover)]:opacity-0">
+          {onEdit ? (
+            <Button variant="ghost" size="icon" onClick={onEdit} aria-label={`Edit goal: ${title}`} title="Edit goal">
+              <Pencil size={14} />
+            </Button>
+          ) : null}
+          {onDelete ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onDelete}
+              aria-label={`Delete goal: ${title}`}
+              title="Delete goal"
+            >
+              <Trash2 size={14} />
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-auto pt-4">
+        {manual ? (
+          <div className="flex items-center justify-between gap-2">
+            {statusWord}
+            {met ? null : (
+              /*
+               * Checked off by hand, and celebrated like any other: the same
+               * stamp, the same confetti. Nothing else can tick it.
+               */
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  celebrate([goal], today);
+                  playChime();
+                }}
+              >
+                <Check size={13} /> Mark as done
+              </Button>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="flex items-baseline justify-between gap-2 text-xs">
+              <span className="tabular-nums text-ink-faint">
+                <span className="font-semibold text-ink">
+                  {m.value === null ? "—" : fmtTarget(goal, m.value)}
+                </span>{" "}
+                of {fmtTarget(goal, goal.target)}
+              </span>
+              {statusWord}
+            </div>
+            <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-elevated">
+              <div
+                className={cn("h-full rounded-full transition-all duration-700", TONE_BAR[tone])}
+                style={{ width: `${Math.round(fraction * 100)}%` }}
+              />
+            </div>
+          </>
+        )}
+
+        {line || money || met ? (
+          <div className="mt-2 flex items-center justify-between gap-3 text-[0.6875rem] text-ink-faint">
+            {money ? (
+              /*
+               * A percentage in dollars, with the base it is a share of named —
+               * a share of income so far is a different sum every month.
+               */
+              <p
+                className="min-w-0 tabular-nums"
+                title={
+                  money.approx
+                    ? "Approximate: a time-weighted return does not convert exactly to dollars, because the dollars depend on when money was added."
+                    : undefined
+                }
+              >
+                <span className="text-ink-dim">
+                  {money.approx ? "≈ " : ""}
+                  {fmtCAD(money.amount)} of {money.approx ? "≈ " : ""}
+                  {fmtCAD(money.target)}
+                </span>{" "}
+                · {money.lead === "of" ? "" : `${money.lead} `}
+                {fmtCAD(money.base)} {money.noun}
+              </p>
+            ) : (
+              <p className="min-w-0">{line}</p>
+            )}
+            {met ? (
+              <div className="flex shrink-0 items-center gap-3">
+                {manual ? (
+                  /* A box ticked by mistake has to be unticked by hand too. */
+                  <button
+                    type="button"
+                    onClick={() =>
+                      save(
+                        useGoals.getState().goals.map((g) => {
+                          if (g.id !== goal.id) return g;
+                          const { metOn: _metOn, ...open } = g;
+                          void _metOn;
+                          return open;
+                        }),
+                      )
+                    }
+                    className="hover:text-ink hover:underline"
+                  >
+                    Undo
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    replay(goal);
+                    playChime();
+                  }}
+                  className="inline-flex items-center gap-1 font-medium text-positive hover:underline"
+                >
+                  <PartyPopper size={12} /> Celebrate again
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>
@@ -259,26 +477,43 @@ const MONTH_KEYS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2
  * which is the difference between a target and a guess. Relevant is the reason,
  * optional and in the owner's words. Time-bound is the month it is due.
  */
+/** A starting point for the form: an idea picked from the list above it. */
+export type GoalPreset = Partial<Pick<Goal, "metric" | "basis" | "target" | "plan" | "category">>;
+
 export function GoalComposer({
   year,
   onAdd,
+  preset,
+  editing,
+  wide = false,
 }: {
   year: string;
+  /** Called with the new goal, or with the edited one in place of `editing`. */
   onAdd: (goal: Goal) => void;
+  /** Read once, when the form mounts; give it a new `key` to apply another. */
+  preset?: GoalPreset;
+  /** A goal to change rather than a new one to set. Read once, like `preset`. */
+  editing?: Goal;
+  /** Two columns of steps, for a card with the width for them. */
+  wide?: boolean;
 }) {
   const inputs = useGoalInputs();
   const accounts = useFinance((s) => s.accounts);
   const categories = useFinance((s) => s.categories);
-  const [metric, setMetric] = useState<GoalMetric>("saved");
+  const start = editing ?? preset;
+  const [metric, setMetric] = useState<GoalMetric>(start?.metric ?? "saved");
   // Empty is every plan, as an empty category is all spending.
-  const [plan, setPlan] = useState<RegisteredPlan | "">("");
-  const [category, setCategory] = useState("");
-  const [basis, setBasis] = useState<GoalBasis>("amount");
-  const [target, setTarget] = useState("");
-  const [by, setBy] = useState("12");
-  const [why, setWhy] = useState("");
+  const [plan, setPlan] = useState<RegisteredPlan | "">(start?.plan ?? "");
+  const [category, setCategory] = useState(start?.category ?? "");
+  const [basis, setBasis] = useState<GoalBasis>(start?.basis ?? "amount");
+  const [target, setTarget] = useState(start?.target !== undefined ? String(start.target) : "");
+  const [by, setBy] = useState(editing ? editing.by.slice(5) : "12");
+  const [why, setWhy] = useState(editing?.why ?? "");
+  const [title, setTitle] = useState(editing?.title ?? "");
   const [error, setError] = useState("");
 
+  // A goal of the owner's own: words and a month, checked off by hand.
+  const manual = metric === "custom";
   const spec = specOf(metric, basis);
   const def = METRICS.find((m) => m.metric === metric) ?? METRICS[0];
   const pct = spec.unit === "pct";
@@ -291,6 +526,8 @@ export function GoalComposer({
     by: `${year}-${by}`,
     plan: metric === "contribution" && plan ? plan : undefined,
     category: metric === "spending" && category ? category : undefined,
+    title: manual ? title.trim() : undefined,
+    ...(manual ? { basis: "amount" as GoalBasis } : {}),
   };
 
   /*
@@ -303,8 +540,10 @@ export function GoalComposer({
         .value
     : null;
 
-  const amount = Number(target.replace(/[$,\s%]/g, ""));
-  const valid = target.trim() !== "" && Number.isFinite(amount) && amount >= 0;
+  const amount = manual ? 0 : Number(target.replace(/[$,\s%]/g, ""));
+  const valid = manual
+    ? title.trim() !== ""
+    : target.trim() !== "" && Number.isFinite(amount) && amount >= 0;
   const monthsLeft = Math.max(
     1,
     Number(by) - (year === thisMonth.slice(0, 4) ? Number(thisMonth.slice(5)) - 1 : 0),
@@ -322,7 +561,7 @@ export function GoalComposer({
     !(draft.plan ? [draft.plan] : REGISTERED_PLANS).some((p) => (room[p] ?? 0) > 0);
 
   let pace: string | null = null;
-  if (valid) {
+  if (valid && !manual) {
     if (spec.judge === "reach" && soFar !== null && soFar >= amount) {
       pace = "Already there — the goal would be met the moment it is saved. Aim higher?";
     } else if (spec.judge === "reduceTo" && soFar !== null && soFar <= amount) {
@@ -342,25 +581,57 @@ export function GoalComposer({
 
   const add = () => {
     if (!valid) {
-      setError(pct ? "Enter the target as a percentage." : "Enter the target as an amount.");
+      setError(
+        manual
+          ? "Say what the goal is."
+          : pct
+            ? "Enter the target as a percentage."
+            : "Enter the target as an amount.",
+      );
       return;
     }
     if (pct && amount > (spec.max ?? 100)) {
       setError(`That cannot be more than ${spec.max ?? 100}%.`);
       return;
     }
-    if (amount === 0 && spec.judge !== "reduceTo") {
+    if (!manual && amount === 0 && spec.judge !== "reduceTo") {
       setError("A target of nothing is met before it starts.");
       return;
     }
-    onAdd({
-      id: uid(),
+    const next: Goal = {
+      id: editing?.id ?? uid(),
       ...draft,
       target: pct ? Math.round(amount * 10) / 10 : Math.round(amount * 100) / 100,
       why: why.trim() || undefined,
-      createdAt: today,
-    });
+      createdAt: editing?.createdAt ?? today,
+    };
+    if (editing) {
+      /*
+       * A goal met is met for what it was. Change the reason and it stays met;
+       * change what it measures, the target or the month, and it is a different
+       * goal — judged again from the record, and celebrated again if the record
+       * already shows it met. Keeping the stamp would call a goal met that
+       * never was.
+       */
+      /*
+       * A custom goal is ticked by hand, so an edit keeps the tick: rewording
+       * something already done does not undo it. The card's Undo does that.
+       */
+      const same =
+        manual ||
+        editing.metric === next.metric &&
+        editing.basis === next.basis &&
+        editing.target === next.target &&
+        editing.by === next.by &&
+        editing.plan === next.plan &&
+        editing.category === next.category;
+      if (same && editing.metOn) next.metOn = editing.metOn;
+      onAdd(next);
+      return;
+    }
+    onAdd(next);
     setTarget("");
+    setTitle("");
     setWhy("");
     setError("");
   };
@@ -370,7 +641,7 @@ export function GoalComposer({
     : null;
 
   return (
-    <div className="space-y-5">
+    <div className={cn("space-y-5", wide && "lg:grid lg:grid-cols-2 lg:gap-x-10 lg:gap-y-5 lg:space-y-0")}>
       <Step letter="S" title="Specific" hint={spec.source}>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="What to measure">
@@ -389,14 +660,19 @@ export function GoalComposer({
                   </option>
                 ))}
               </optgroup>
+              <optgroup label="Your own">
+                <option value={CUSTOM.metric}>{CUSTOM.label}</option>
+              </optgroup>
             </Select>
           </Field>
-          <Field label="Set as">
-            <Select value={basis} onChange={(e) => setBasis(e.target.value as GoalBasis)}>
-              <option value="amount">{def.amount.option}</option>
-              <option value="percent">{def.percent.option}</option>
-            </Select>
-          </Field>
+          {manual ? null : (
+            <Field label="Set as">
+              <Select value={basis} onChange={(e) => setBasis(e.target.value as GoalBasis)}>
+                <option value="amount">{def.amount.option}</option>
+                <option value="percent">{def.percent.option}</option>
+              </Select>
+            </Field>
+          )}
           {metric === "contribution" ? (
             <Field label="Which plan">
               <Select value={plan} onChange={(e) => setPlan(e.target.value as RegisteredPlan | "")}>
@@ -422,48 +698,71 @@ export function GoalComposer({
             </Field>
           ) : null}
         </div>
+          {metric === "donations" && !categories.includes(DONATIONS_CATEGORY) ? (
+            <p className="mt-2 text-[0.6875rem] text-ink-dim">
+              There is no {DONATIONS_CATEGORY} category yet. Gifts to charity count once they are
+              recorded under one — an import files a bank&rsquo;s charity rows there on its own.
+            </p>
+          ) : null}
+          {noRoom ? (
+            <p className="mt-2 text-[0.6875rem] text-ink-dim">
+              No contribution room is set for {year} yet, so there is nothing to take a share of. Set it
+              on the Year page, or in the January checklist.
+            </p>
+          ) : null}
       </Step>
 
-      {metric === "donations" && !categories.includes(DONATIONS_CATEGORY) ? (
-        <p className="-mt-2 ml-9 text-[0.6875rem] text-ink-dim">
-          There is no {DONATIONS_CATEGORY} category yet. Gifts to charity count once they are
-          recorded under one — an import files a bank&rsquo;s charity rows there on its own.
-        </p>
-      ) : null}
-      {noRoom ? (
-        <p className="-mt-2 ml-9 text-[0.6875rem] text-ink-dim">
-          No contribution room is set for {year} yet, so there is nothing to take a share of. Set it
-          on the Year page, or in the January checklist.
-        </p>
-      ) : null}
-
       <Step letter="M" title="Measurable">
-        <Field label={spec.field}>
-          <Input
-            inputMode="decimal"
-            placeholder={pct ? "e.g. 10" : metric === "donations" ? "e.g. 2000" : "e.g. 10000"}
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-          />
-        </Field>
+        {manual ? (
+          <Field label={spec.field}>
+            <Input
+              maxLength={120}
+              placeholder="e.g. Write a will"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </Field>
+        ) : (
+          <Field label={spec.field}>
+            <Input
+              inputMode="decimal"
+              placeholder={pct ? "e.g. 10" : metric === "donations" ? "e.g. 2000" : "e.g. 10000"}
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+            />
+          </Field>
+        )}
       </Step>
 
       <Step letter="A" title="Achievable">
-        <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
-          <p>
-            <span className="text-ink-faint">So far in {year}: </span>
-            <span className="font-medium tabular-nums text-ink">
-              {soFar === null ? "—" : fmtTarget(draft, soFar)}
-            </span>
+        {manual ? (
+          /*
+           * Nothing measures a goal of your own, so the one test of it is
+           * whether you will know, without argument, the day it is done.
+           */
+          <p className="text-xs text-ink-dim">
+            Nothing here measures it, so make it something you will know for certain is done — a
+            thing finished, not a feeling.
           </p>
-          <p>
-            <span className="text-ink-faint">{Number(year) - 1}: </span>
-            <span className="font-medium tabular-nums text-ink">
-              {lastYear === null ? "—" : fmtTarget(draft, lastYear)}
-            </span>
-          </p>
-        </div>
-        {pace ? <p className="mt-1.5 text-xs text-ink-dim">{pace}</p> : null}
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
+              <p>
+                <span className="text-ink-faint">So far in {year}: </span>
+                <span className="font-medium tabular-nums text-ink">
+                  {soFar === null ? "—" : fmtTarget(draft, soFar)}
+                </span>
+              </p>
+              <p>
+                <span className="text-ink-faint">{Number(year) - 1}: </span>
+                <span className="font-medium tabular-nums text-ink">
+                  {lastYear === null ? "—" : fmtTarget(draft, lastYear)}
+                </span>
+              </p>
+            </div>
+            {pace ? <p className="mt-1.5 text-xs text-ink-dim">{pace}</p> : null}
+          </>
+        )}
       </Step>
 
       <Step letter="R" title="Relevant">
@@ -483,7 +782,12 @@ export function GoalComposer({
         >
           <Select value={by} onChange={(e) => setBy(e.target.value)}>
             {MONTH_KEYS.map((m) => (
-              <option key={m} value={m} disabled={`${year}-${m}` < thisMonth}>
+              <option
+                key={m}
+                value={m}
+                // A month already past is no deadline — unless it is the one being edited.
+                disabled={`${year}-${m}` < thisMonth && `${year}-${m}` !== editing?.by}
+              >
                 {monthName(`${year}-${m}`)} {year}
               </option>
             ))}
@@ -491,7 +795,7 @@ export function GoalComposer({
         </Field>
       </Step>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4 lg:col-span-2">
         <p className="min-w-0 flex-1 text-sm text-ink-dim">
           {preview ? (
             <>
@@ -503,10 +807,84 @@ export function GoalComposer({
           )}
         </p>
         <Button onClick={add}>
-          <Plus size={14} /> Add goal
+          {editing ? (
+            <>
+              <Check size={14} /> Save changes
+            </>
+          ) : (
+            <>
+              <Plus size={14} /> Add goal
+            </>
+          )}
         </Button>
       </div>
-      {error ? <p className="text-xs text-negative">{error}</p> : null}
+      {error ? <p className="text-xs text-negative lg:col-span-2">{error}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * Starting points, one click from a filled-in form.
+ *
+ * Percentages rather than amounts, deliberately: a share of income or a
+ * year's growth means the same thing on anybody's record, where a dollar
+ * figure would be a guess about whose. Each is only offered where it can be
+ * measured — no room idea without a TFSA, no dining idea without the category.
+ */
+export function GoalIdeas({
+  onPick,
+  onScratch,
+}: {
+  onPick: (preset: GoalPreset) => void;
+  /** An empty form, for a goal none of the ideas fits. */
+  onScratch: () => void;
+}) {
+  const accounts = useFinance((s) => s.accounts);
+  const categories = useFinance((s) => s.categories);
+  const hasDebt = accounts.some((a) => isLiability(a.kind));
+  const ideas: { label: string; preset: GoalPreset; when?: boolean }[] = [
+    { label: "Save 20% of income", preset: { metric: "saved", basis: "percent", target: 20 } },
+    { label: "Grow net worth by 10%", preset: { metric: "netWorth", basis: "percent", target: 10 } },
+    {
+      label: "Use all of your TFSA room",
+      preset: { metric: "contribution", basis: "percent", target: 100, plan: "TFSA" },
+      when: accounts.some((a) => a.registration === "TFSA"),
+    },
+    {
+      label: "Cover 10% of spending with passive income",
+      preset: { metric: "passive", basis: "percent", target: 10 },
+    },
+    {
+      label: "Keep Dining under 5% of income",
+      preset: { metric: "spending", basis: "percent", target: 5, category: "Dining" },
+      when: categories.includes("Dining"),
+    },
+    { label: "Pay debt down by 25%", preset: { metric: "debt", basis: "percent", target: 25 }, when: hasDebt },
+    { label: "Give 2% of income to charity", preset: { metric: "donations", basis: "percent", target: 2 } },
+  ];
+  const tile =
+    "flex items-center gap-3 rounded-xl border border-line bg-elevated/40 p-3 text-left text-sm text-ink-dim transition-colors hover:border-brand/50 hover:text-ink";
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      {ideas
+        .filter((i) => i.when !== false)
+        .map((i) => {
+          const Icon = GOAL_ICONS[i.preset.metric ?? "saved"];
+          return (
+            <button key={i.label} type="button" onClick={() => onPick(i.preset)} className={tile}>
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand/10 text-brand">
+                <Icon size={15} />
+              </span>
+              <span className="leading-snug">{i.label}</span>
+            </button>
+          );
+        })}
+      <button type="button" onClick={onScratch} className={cn(tile, "border-dashed")}>
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-elevated text-ink-faint">
+          <PenLine size={15} />
+        </span>
+        <span className="leading-snug">Start from scratch</span>
+      </button>
     </div>
   );
 }
@@ -625,7 +1003,7 @@ function Confetti() {
  * sound at all; that is the browser's call, and the confetti and the message
  * say the same thing without it.
  */
-function playChime() {
+export function playChime() {
   const Ctx =
     window.AudioContext ??
     (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -677,6 +1055,7 @@ function playChime() {
  */
 export function GoalWatcher() {
   const router = useRouter();
+  const onGoals = usePathname() === "/goals";
   const inputs = useGoalInputs();
   const goals = useGoals((s) => s.goals);
   const state = useGoals((s) => s.state);
@@ -721,17 +1100,20 @@ export function GoalWatcher() {
           </ul>
         </div>
         <div className="mt-6 flex justify-end gap-2 border-t border-line pt-4">
-          <Button variant="ghost" onClick={close}>
+          <Button variant={onGoals ? "primary" : "ghost"} onClick={close}>
             Close
           </Button>
-          <Button
-            onClick={() => {
-              close();
-              router.push(`/goals#goal-${met[0].id}`);
-            }}
-          >
-            See it on the goals page
-          </Button>
+          {/* Already on the page it would link to: nothing to go and see. */}
+          {onGoals ? null : (
+            <Button
+              onClick={() => {
+                close();
+                router.push(`/goals#goal-${met[0].id}`);
+              }}
+            >
+              See it on the goals page
+            </Button>
+          )}
         </div>
       </Modal>
     </>
