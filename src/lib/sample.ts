@@ -609,9 +609,8 @@ export function generateSampleData(): FinanceData {
     if (chance(rng, 0.45)) {
       add(m, randInt(rng, 1, dim), "income", rand(rng, 320, 1240), "Freelance", "acc-checking", pick(rng, ["Upwork Client", "Design Retainer", "Consulting LLC"]));
     }
-    if (m.endsWith("-03") || m.endsWith("-06") || m.endsWith("-09") || m.endsWith("-12")) {
-      add(m, randInt(rng, 5, 12), "income", rand(rng, 62, 188), "Dividends", "acc-savings", "Vanguard Brokerage");
-    }
+    // No dividend rows: dividends are counted from the holdings' own records,
+    // and a second list of them here would be counted twice.
     add(m, 28, "income", rand(rng, 118, 176), "Interest", "acc-savings", "Ally Bank");
     if (chance(rng, 0.5)) {
       add(m, randInt(rng, 1, dim), "expense", rand(rng, 60, 400), "Other", "acc-cash", "ATM Withdrawal");

@@ -204,6 +204,13 @@
       "when": 1790083800000,
       "tag": "0028_keys_and_allowances_per_user",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1790700000000,
+      "tag": "0029_drop_copies_left_in_app_meta",
+      "breakpoints": true
     }
   ]
 }

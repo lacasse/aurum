@@ -38,6 +38,7 @@ import {
   partitionByMonth,
   previousMonthIncome,
   type IncomeBox,
+  unconvertedPrices,
 } from "@/lib/checklist";
 import {
   INCOME_CATEGORIES,
@@ -1556,6 +1557,14 @@ function ReviewStep({
        * itself, so it asks nothing and simply records what is held.
        */
       const closing = useFinance.getState().holdings;
+      const unconverted = unconvertedPrices(closing);
+      if (unconverted.length > 0) {
+        throw new Error(
+          `${unconverted.join(", ")} ${unconverted.length === 1 ? "has" : "have"} no Canadian-dollar price yet, ` +
+            "so the month-end value would be saved in US dollars. Refresh prices on the Investments page, " +
+            "then finish the checklist again.",
+        );
+      }
       if (closing.length > 0) {
         await saveSnapshots(
           closing.map((h) => ({

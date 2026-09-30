@@ -34,6 +34,13 @@ import {
   runwayMonths,
   DEFAULT_WITHDRAWAL_RATE,
   netWorthSeries,
+  monthToDate,
+  monthlyGains,
+  closesFromHoldings,
+  portfolioHistory,
+  dividendIncomeRows,
+  withDividendIncome,
+  dividendsPaid,
 } from "./analytics";
 import { currentMonthKey, lastCompleteMonthKey, lastMonthKeys } from "./format";
 import type { Account, Budget, Holding, Transaction } from "./types";
@@ -2017,5 +2024,202 @@ describe("classShares", () => {
   test("a key is carried through when the point has one", () => {
     const [row] = classShares([{ ...at("Jan", { Cash: 1 }), key: "2026-01" }]);
     assert.equal(row.key, "2026-01");
+  });
+});
+
+describe("monthToDate", () => {
+  // INVENTED: every figure here is made up and round.
+  const h = (o: Partial<Holding>): Holding =>
+    ({
+      id: o.ticker ?? "x",
+      ticker: "AAA",
+      name: "AAA",
+      assetClass: "US Equity",
+      shares: 10,
+      avgCost: 10,
+      price: 12,
+      history: [10, 12],
+      dividendsReceived: 0,
+      accountId: "acct",
+      currency: "CAD",
+      flows: [],
+      ...o,
+    }) as Holding;
+
+  test("counts a price move as earned and a purchase as money added", () => {
+    const r = monthToDate(
+      [h({ shares: 15, flows: [{ date: "2030-05-10", kind: "buy", amount: 60, shares: 5 }] })],
+      {},
+      "2030-05",
+    );
+    // Started with 10 shares at 10; now 15 at 12.
+    assert.equal(r.start, 100);
+    assert.equal(r.now, 180);
+    assert.equal(r.added, 60);
+    assert.equal(r.gain, 20);
+  });
+
+  test("prefers last month's recorded value to a reconstructed one", () => {
+    const r = monthToDate([h({})], { "2030-04": { AAA: 110 } }, "2030-05");
+    assert.equal(r.start, 110);
+    assert.equal(r.gain, 10);
+  });
+
+  test("a distribution counts as earned, and movers are ranked by gain", () => {
+    const r = monthToDate(
+      [
+        h({ ticker: "AAA" }),
+        h({
+          ticker: "BBB",
+          price: 9,
+          flows: [{ date: "2030-05-02", kind: "dividend", amount: 5, shares: 0 }],
+        }),
+      ],
+      {},
+      "2030-05",
+    );
+    assert.deepEqual(
+      r.movers.map((m) => [m.ticker, m.gain]),
+      [
+        ["AAA", 20],
+        ["BBB", -5],
+      ],
+    );
+    assert.equal(r.dividends, 5);
+    assert.equal(r.gain, 15);
+  });
+
+  test("a position sold out this month still reports what it did", () => {
+    const r = monthToDate(
+      [h({ shares: 0, flows: [{ date: "2030-05-03", kind: "sell", amount: 115, shares: 10 }] })],
+      {},
+      "2030-05",
+    );
+    assert.equal(r.start, 100);
+    assert.equal(r.now, 0);
+    assert.equal(r.gain, 15);
+  });
+});
+
+describe("monthlyGains", () => {
+  test("takes the money moved out of each month's change", () => {
+    const pts = [
+      { key: "2030-01", label: "Jan", value: 100, cost: 0 },
+      { key: "2030-02", label: "Feb", value: 150, cost: 0 },
+      { key: "2030-03", label: "Mar", value: 140, cost: 0 },
+    ];
+    assert.deepEqual(
+      monthlyGains(pts, { "2030-02": 40 }).map((g) => g.gain),
+      [10, -10],
+    );
+  });
+});
+
+describe("portfolioHistory without closed months", () => {
+  // INVENTED: three months of buying a rising security.
+  const [m1, m2, m3] = lastMonthKeys(3);
+  const holding = {
+    id: "h",
+    ticker: "AAA",
+    name: "AAA",
+    assetClass: "US Equity",
+    shares: 30,
+    avgCost: 11,
+    price: 12,
+    history: [10, 11, 12],
+    dividendsReceived: 0,
+    accountId: "acct",
+    currency: "CAD",
+    flows: [
+      { date: `${m1}-05`, kind: "buy", amount: 100, shares: 10 },
+      { date: `${m2}-05`, kind: "buy", amount: 110, shares: 10 },
+      { date: `${m3}-05`, kind: "buy", amount: 120, shares: 10 },
+    ],
+  } as unknown as Holding;
+
+  test("reads each month's close from the holding's own prices", () => {
+    assert.deepEqual(closesFromHoldings([holding]).AAA, { [m1]: 10, [m2]: 11, [m3]: 12 });
+  });
+
+  test("values each month at the shares held then, so buying is not a loss", () => {
+    const history = portfolioHistory([holding], {});
+    assert.ok(history);
+    assert.deepEqual(
+      history.points.map((p) => p.value),
+      [100, 220, 360],
+    );
+    const chain = chainedReturns(history.points, netExternalFlows([holding]));
+    assert.ok(chain[chain.length - 1] > 0, "a rising price is a positive return");
+  });
+});
+
+describe("dividends as income", () => {
+  // INVENTED: round figures, invented tickers.
+  const accounts = [
+    { id: "inv", kind: "investment" },
+    { id: "coins", kind: "crypto" },
+  ] as unknown as Account[];
+  const holding = (accountId: string, flows: { date: string; amount: number }[]) =>
+    ({
+      id: `h-${accountId}`,
+      ticker: "AAA",
+      name: "Alpha Fund",
+      accountId,
+      shares: 1,
+      flows: flows.map((f) => ({ ...f, kind: "dividend", shares: 0 })),
+    }) as unknown as Holding;
+  const income = (date: string, category: string) =>
+    ({ id: date + category, date, type: "income", amount: 10, category, payee: "x" }) as Transaction;
+  const holdings = [
+    holding("inv", [
+      { date: "2030-07-10", amount: 5 },
+      { date: "2030-08-10", amount: 7 },
+    ]),
+    holding("coins", [{ date: "2030-08-10", amount: 50 }]), // a staking reward
+  ];
+
+  test("every dividend the holdings recorded, from investment accounts only", () => {
+    assert.deepEqual(
+      dividendIncomeRows(holdings, accounts).map((r) => [r.date, r.amount]),
+      [
+        ["2030-07-10", 5],
+        ["2030-08-10", 7],
+      ],
+    );
+  });
+
+  test("they belong to no account, so no balance can move on them", () => {
+    for (const r of dividendIncomeRows(holdings, accounts)) {
+      assert.equal(r.sourceAccountId, undefined);
+      assert.equal(r.destinationAccountId, undefined);
+    }
+  });
+
+  test("a stored row filed as Dividends is not counted beside them", () => {
+    const all = withDividendIncome(
+      [income("2030-07-31", "Dividends"), income("2030-07-31", "Salary")],
+      holdings,
+      accounts,
+    );
+    const dividends = all.filter((t) => t.category === "Dividends");
+    assert.deepEqual(dividends.map((t) => t.amount), [5, 7]);
+    assert.ok(all.some((t) => t.category === "Salary"), "other income is untouched");
+  });
+});
+
+describe("dividendsPaid", () => {
+  // INVENTED: round figures.
+  const lot = (dividendsReceivedCAD: number, flows: { kind: string; amount: number }[]) =>
+    ({ dividendsReceived: dividendsReceivedCAD, dividendsReceivedCAD, flows }) as unknown as Holding;
+
+  test("reads the recorded payments over a stored total that disagrees", () => {
+    assert.equal(
+      dividendsPaid(lot(99, [{ kind: "dividend", amount: 10 }, { kind: "dividend", amount: 5 }, { kind: "buy", amount: 500 }])),
+      15,
+    );
+  });
+
+  test("keeps the typed total for a lot with no recorded payments", () => {
+    assert.equal(dividendsPaid(lot(40, [{ kind: "buy", amount: 500 }])), 40);
   });
 });

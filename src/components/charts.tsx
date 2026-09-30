@@ -665,6 +665,27 @@ export type ExposureDetail = {
   stale?: boolean;
 };
 
+/**
+ * Each asset class's colour: the colour at the middle of its run of slices in
+ * the holdings ring grouped by class. The outer ring draws its arcs in it, and
+ * anything else that marks a class — the detailed table's dots — uses the same
+ * map, so a class is one colour wherever it appears.
+ */
+export function classArcColors(data: ExposureDatum[]): Record<string, string> {
+  const ordered = byClassThenValue(data);
+  const runs = new Map<string, number[]>();
+  ordered.forEach((d, i) => {
+    const run = runs.get(d.assetClass) ?? [];
+    run.push(i);
+    runs.set(d.assetClass, run);
+  });
+  const out: Record<string, string> = {};
+  for (const [assetClass, idx] of runs) {
+    out[assetClass] = spectrumAt(idx[Math.floor((idx.length - 1) / 2)], ordered.length);
+  }
+  return out;
+}
+
 export function ExposurePie({
   data,
   height = 300,
@@ -736,6 +757,30 @@ export function ExposurePie({
 
   const pct = (v: number) => (total > 0 ? `${((v / total) * 100).toFixed(1)}%` : "—");
 
+  /*
+   * The asset classes as a thin ring around the holdings, when the ring is
+   * grouped by class: each arc spans exactly the slices of its own positions,
+   * so the allocation is read off the same circle rather than a second chart.
+   * An arc takes the colour at the middle of its run of slices, which makes it
+   * read as the edge of what it wraps rather than a new set of hues. The list's
+   * class headings carry the same colour, so the key names the outer ring too.
+   */
+  const classColor = useMemo(
+    () => (order === "class" ? classArcColors(data) : {}),
+    [order, data],
+  );
+  const classRing = useMemo(() => {
+    if (order !== "class") return [];
+    const runs: { assetClass: string; value: number }[] = [];
+    for (const d of shown) {
+      const last = runs[runs.length - 1];
+      if (last && last.assetClass === d.assetClass) last.value += d.value;
+      else runs.push({ assetClass: d.assetClass, value: d.value });
+    }
+    return runs.map((r) => ({ ...r, color: classColor[r.assetClass] }));
+  }, [order, shown, classColor]);
+  const ringed = classRing.length > 0;
+
   const beside = legend === "right";
   return (
     <div className={cn(beside && "flex flex-col gap-5 lg:flex-row lg:items-center")}>
@@ -750,15 +795,36 @@ export function ExposurePie({
               startAngle={PIE_START}
               endAngle={PIE_END}
               innerRadius="48%"
-              outerRadius="86%"
-              paddingAngle={1}
+              outerRadius={ringed ? "80%" : "86%"}
+              /* No padding under the class ring: padding is per slice, so it
+                 would push the slices out of line with the arcs around them.
+                 The surface-coloured stroke does the separating instead. */
+              paddingAngle={ringed ? 0 : 1}
               stroke="var(--surface)"
-              strokeWidth={1}
+              strokeWidth={ringed ? 1.5 : 1}
             >
               {shown.map((d) => (
                 <Cell key={d.ticker} fill={d.color} />
               ))}
             </Pie>
+            {ringed ? (
+              <Pie
+                data={classRing}
+                dataKey="value"
+                nameKey="assetClass"
+                startAngle={PIE_START}
+                endAngle={PIE_END}
+                innerRadius="85%"
+                outerRadius="92%"
+                paddingAngle={0}
+                stroke="var(--surface)"
+                strokeWidth={3}
+              >
+                {classRing.map((c) => (
+                  <Cell key={c.assetClass} fill={c.color} />
+                ))}
+              </Pie>
+            ) : null}
             <Tooltip
               content={<ChartTooltip fmt={(n) => `${fmt ? fmt(n) : n} · ${pct(n)}`} />}
             />
@@ -774,6 +840,7 @@ export function ExposurePie({
           pct={pct}
           beside={beside}
           hidden={hidden}
+          classColor={classColor}
           onToggleClass={toggleClass}
           onShowAll={() => setHidden(new Set())}
         />
@@ -839,6 +906,7 @@ function HoldingsKey({
   pct,
   beside,
   hidden,
+  classColor,
   onToggleClass,
   onShowAll,
 }: {
@@ -848,6 +916,8 @@ function HoldingsKey({
   pct: (v: number) => string;
   beside: boolean;
   hidden: Set<string>;
+  /** The outer ring's arc colour for each class, when the ring has one. */
+  classColor?: Record<string, string>;
   onToggleClass: (assetClass: string) => void;
   onShowAll: () => void;
 }) {
@@ -937,6 +1007,13 @@ function HoldingsKey({
               )}
               aria-hidden
             />
+            {classColor?.[g.assetClass] ? (
+              <span
+                className="h-1 w-3 shrink-0 self-center rounded-full"
+                style={{ background: classColor[g.assetClass] }}
+                aria-hidden
+              />
+            ) : null}
             <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-ink-dim group-hover:text-ink">
               {g.assetClass}
             </span>
@@ -1843,5 +1920,60 @@ export function YearSankey({
         </Sankey>
       </ResponsiveContainer>
     </div>
+  );
+}
+
+/* ---------------- Month-by-month gains, the latest picked out ---------------- */
+
+/**
+ * One bar per month for what the portfolio earned, so the month in progress
+ * is read against the ones before it. The last bar is the current month and
+ * is drawn at full strength; the rest are dimmed, as context rather than news.
+ */
+export function MonthGainBars({
+  data,
+  height = 120,
+  fmt,
+}: {
+  data: { label: string; gain: number }[];
+  height?: number;
+  fmt: (n: number) => string;
+}) {
+  const lastIndex = data.length - 1;
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+        <XAxis
+          dataKey="label"
+          tick={{ ...AXIS_TICK, fontSize: 10 }}
+          tickLine={false}
+          axisLine={{ stroke: "var(--line)" }}
+          interval="preserveStartEnd"
+          minTickGap={12}
+        />
+        {/* Zero always in view, so a bar's length is the month's size and
+            its side of the line is which way it went. */}
+        <YAxis
+          hide
+          domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+        />
+        <ReferenceLine y={0} stroke="var(--line)" />
+        <Tooltip
+          cursor={{ fill: "var(--elevated)", opacity: 0.6 }}
+          content={<ChartTooltip fmt={fmt} />}
+        />
+        <Bar dataKey="gain" name="Earned" radius={[3, 3, 3, 3]} maxBarSize={22}>
+          {data.map((row, i) => (
+            <Cell
+              key={i}
+              fill={row.gain >= 0 ? accent("positive") : accent("negative")}
+              fillOpacity={i === lastIndex ? 1 : 0.3}
+              stroke={i === lastIndex ? "var(--ink)" : "none"}
+              strokeWidth={i === lastIndex ? 1 : 0}
+            />
+          ))}
+        </Bar>
+      </ComposedChart>
+    </ResponsiveContainer>
   );
 }

@@ -127,6 +127,10 @@ administrator. An installation that ran before accounts existed keeps its login 
 the same username and password now sign into that first account, and every row already in
 the database belongs to it. After that the environment decides nothing about accounts —
 changing `AUTH_PASSWORD` in `.env` does not change anybody's password.
+Change a username or password in **Settings → Your account** instead. The values in `.env`
+are then out of date, and are only ever read again if the app starts on an empty database —
+a restored backup brings its own accounts back — so it is worth updating them to match, or
+removing them once the first account exists.
 
 **Everyone else is invited.** An administrator opens **Settings → People → Invite
 someone** and gets a link, shown once. It makes one account and stops working after seven

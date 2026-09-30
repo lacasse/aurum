@@ -6,7 +6,7 @@ import {
 } from "./format";
 import { roundMoney } from "./money";
 import type { ImportedRow } from "./csv";
-import type { Transaction } from "./types";
+import type { Holding, Transaction } from "./types";
 
 /**
  * What the monthly checklist knows that the general importer does not: it is
@@ -288,4 +288,25 @@ export function describeGaps(gaps: SnapshotGap[]): string {
 function list(items: string[]): string {
   if (items.length <= 2) return items.join(" and ");
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * Open US-dollar positions whose Canadian price is still the US one.
+ *
+ * A month-end value is stored in Canadian dollars and read for ever after, so
+ * one saved unconverted is wrong for good: a month was closed while newly
+ * created lots still carried their US price in the Canadian field, and the
+ * next month read the exchange rate as a gain. A price equal in both
+ * currencies is not a rate anyone has seen, so it is taken as not converted
+ * yet, and the month is not closed on it.
+ */
+export function unconvertedPrices(
+  holdings: Pick<Holding, "ticker" | "currency" | "shares" | "price" | "priceCAD">[],
+): string[] {
+  const tickers = new Set<string>();
+  for (const h of holdings) {
+    if (h.currency !== "USD" || h.shares <= 0 || !(h.price > 0)) continue;
+    if (!(h.priceCAD > 0) || Math.abs(h.priceCAD - h.price) < 0.005) tickers.add(h.ticker);
+  }
+  return [...tickers].sort();
 }
