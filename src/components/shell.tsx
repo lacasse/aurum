@@ -54,7 +54,7 @@ const NAV = [
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/year", label: "Year", icon: CalendarRange },
-  { href: "/goals", label: "Goals", icon: Target, unreleased: true },
+  { href: "/goals", label: "Goals", icon: Target },
   { href: "/tax", label: "Tax", icon: Receipt, unreleased: true },
   { href: "/guide", label: "Guide", icon: BookOpen, unreleased: true },
   /* Temporary: the colour-picking bench. Delete this line with the page. */

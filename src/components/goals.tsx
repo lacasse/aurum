@@ -17,7 +17,6 @@ import {
 } from "@/lib/contributions";
 import { fmtCAD, todayISO } from "@/lib/format";
 import { uid } from "@/lib/ids";
-import { SHOW_UNRELEASED } from "@/lib/unreleased";
 import {
   METRICS,
   describe,
@@ -677,11 +676,6 @@ function playChime() {
  * stops a reload from celebrating it again.
  */
 export function GoalWatcher() {
-  if (!SHOW_UNRELEASED) return null;
-  return <Watcher />;
-}
-
-function Watcher() {
   const router = useRouter();
   const inputs = useGoalInputs();
   const goals = useGoals((s) => s.goals);

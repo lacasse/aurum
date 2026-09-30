@@ -61,7 +61,6 @@ import { contributionsByMonth, estimateValue } from "@/lib/pension";
 import { getSettings, saveSettings } from "@/lib/api";
 import { GoalComposer, useGoals } from "./goals";
 import { describe as describeGoal } from "@/lib/goals";
-import { SHOW_UNRELEASED } from "@/lib/unreleased";
 
 type Step =
   | "import"
@@ -2111,7 +2110,7 @@ function Checklist({ onClose }: { onClose: () => void }) {
       (s.key !== "actions" || loaded.actions.length > 0) &&
       (s.key !== "room" || asks.length > 0) &&
       // Only when closing December, the January checklist that opens a year.
-      (s.key !== "goals" || (SHOW_UNRELEASED && month.endsWith("-12"))),
+      (s.key !== "goals" || month.endsWith("-12")),
   );
   const at = Math.min(index, steps.length - 1);
   const step = steps[at].key;
