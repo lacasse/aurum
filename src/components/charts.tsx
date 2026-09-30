@@ -1927,8 +1927,10 @@ export function YearSankey({
 
 /**
  * One bar per month for what the portfolio earned, so the month in progress
- * is read against the ones before it. The last bar is the current month and
- * is drawn at full strength; the rest are dimmed, as context rather than news.
+ * is read against the ones before it. Every bar is the app's own green or red,
+ * softened a little so a row of them does not shout; the current month is
+ * picked out by its outline rather than by dimming the rest, which turned them
+ * a colour that meant neither.
  */
 export function MonthGainBars({
   data,
@@ -1967,8 +1969,8 @@ export function MonthGainBars({
           {data.map((row, i) => (
             <Cell
               key={i}
-              fill={row.gain >= 0 ? accent("positive") : accent("negative")}
-              fillOpacity={i === lastIndex ? 1 : 0.3}
+              fill={row.gain >= 0 ? "var(--positive)" : "var(--negative)"}
+              fillOpacity={0.75}
               stroke={i === lastIndex ? "var(--ink)" : "none"}
               strokeWidth={i === lastIndex ? 1 : 0}
             />

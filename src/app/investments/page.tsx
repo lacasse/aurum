@@ -1034,7 +1034,7 @@ export default function InvestmentsPage() {
           {/* As tall as the cards either side, the bars filling it. */}
           <Card className="flex flex-col p-5 sm:p-6">
             <span className="text-xs font-medium text-ink-dim">
-              Earned each month, net of money added
+              Monthly gain
             </span>
             <div className="mt-3 min-h-[150px] flex-1">
               <MonthGainBars data={gainBars} fmt={(n) => fmtSignedCAD(n)} height="100%" />
