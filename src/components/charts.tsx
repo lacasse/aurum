@@ -1936,7 +1936,8 @@ export function MonthGainBars({
   fmt,
 }: {
   data: { label: string; gain: number }[];
-  height?: number;
+  /** A number of pixels, or a percentage of the box it sits in. See SeriesChart. */
+  height?: number | `${number}%`;
   fmt: (n: number) => string;
 }) {
   const lastIndex = data.length - 1;

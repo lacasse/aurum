@@ -961,11 +961,11 @@ export default function InvestmentsPage() {
           * The month in progress, first and largest: what the portfolio has
           * earned since the last month-end. Earned, not "changed": money added
           * this month is left out, so a month of contributions is not mistaken
-          * for a good month in the market. The bars put it against the eleven
-          * months before it.
+          * for a good month in the market. Beside it, the eleven months before
+          * it, and the positions that moved this one.
           */}
-        <Card className="p-5 sm:p-6">
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:items-center">
+        <div className="grid gap-4 lg:grid-cols-4">
+          <Card className="p-5 sm:p-6 lg:col-span-2">
             <div>
               <p className="flex items-center gap-1.5 text-xs font-medium text-ink-dim">
                 <CalendarDays size={14} className="text-ink-faint" />
@@ -1029,58 +1029,25 @@ export default function InvestmentsPage() {
                 </div>
               </div>
             </div>
-            <div>
-              <p className="mb-1 text-[0.6875rem] text-ink-faint">
-                Earned each month, net of money added
-              </p>
-              <MonthGainBars data={gainBars} fmt={(n) => fmtSignedCAD(n)} height={150} />
-            </div>
-          </div>
-        </Card>
+          </Card>
 
-        {/* Then how it got here, beside what moved it this month. */}
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Card className="lg:col-span-2">
-            <CardHeader
-              title="Portfolio growth"
-              subtitle={`Market value vs invested cost · ${rangeLabel(growthRange, growthSeries)}`}
-              action={
-                <Segmented
-                  options={RANGE_OPTIONS}
-                  value={growthRange}
-                  onChange={setGrowthRange}
-                />
-              }
-            />
-            <div className="px-3 pb-4">
-              <SeriesChart
-                data={growthSeries as unknown as Record<string, unknown>[]}
-                xKey="label"
-                series={[
-                  { key: "value", name: "Market value", color: "#22d3ee" },
-                  { key: "cost", name: "Cost basis", color: "#6e6e79", kind: "line", dashed: true },
-                ]}
-                height={300}
-                yFmt={fmtCompact}
-              />
-              {allTime && allTime.unpriced.length > 0 && (
-                <p className="mt-2 text-center text-[0.6875rem] text-ink-faint">
-                  No price history for {allTime.unpriced.join(", ")} — valued at
-                  book cost for the months held.
-                </p>
-              )}
+          {/* As tall as the cards either side, the bars filling it. */}
+          <Card className="flex flex-col p-5 sm:p-6">
+            <span className="text-xs font-medium text-ink-dim">
+              Earned each month, net of money added
+            </span>
+            <div className="mt-3 min-h-[150px] flex-1">
+              <MonthGainBars data={gainBars} fmt={(n) => fmtSignedCAD(n)} height="100%" />
             </div>
           </Card>
 
-          {/* The month's movers, beside the chart and as tall as it. */}
-          <div className="flex flex-col gap-4">
           {/*
             * The positions that moved the month, up and down, by what they
             * earned in dollars — a small position doubling moves less money
             * than a large one slipping. Each bar is against the largest move
             * shown, so the rows compare with one another.
             */}
-          <Card className="flex-1 p-5">
+          <Card className="p-5 sm:p-6">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-ink-dim">Top movers this month</span>
               <TrendingUp size={16} className="text-ink-faint" />
@@ -1115,8 +1082,40 @@ export default function InvestmentsPage() {
               </div>
             )}
           </Card>
-          </div>
         </div>
+
+        {/* Then how it got here. */}
+        <Card>
+          <CardHeader
+            title="Portfolio growth"
+            subtitle={`Market value vs invested cost · ${rangeLabel(growthRange, growthSeries)}`}
+            action={
+              <Segmented
+                options={RANGE_OPTIONS}
+                value={growthRange}
+                onChange={setGrowthRange}
+              />
+            }
+          />
+          <div className="px-3 pb-4">
+            <SeriesChart
+              data={growthSeries as unknown as Record<string, unknown>[]}
+              xKey="label"
+              series={[
+                { key: "value", name: "Market value", color: "#22d3ee" },
+                { key: "cost", name: "Cost basis", color: "#6e6e79", kind: "line", dashed: true },
+              ]}
+              height={300}
+              yFmt={fmtCompact}
+            />
+            {allTime && allTime.unpriced.length > 0 && (
+              <p className="mt-2 text-center text-[0.6875rem] text-ink-faint">
+                No price history for {allTime.unpriced.join(", ")} — valued at
+                book cost for the months held.
+              </p>
+            )}
+          </div>
+        </Card>
 
         {/*
           * One card for the holdings, two ways of reading them.
