@@ -1,5 +1,6 @@
 import Papa from "papaparse";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, TxnType } from "./types";
+import { DONATIONS_CATEGORY } from "./expenses";
 
 export type CsvFormat = "amex" | "simple" | "debit-credit";
 
@@ -315,8 +316,8 @@ const ISSUER_CATEGORIES: Record<string, string> = {
   groceries: "Groceries",
   rent: "Housing",
   mortgage: "Housing",
-  charity: "Donations",
-  donations: "Donations",
+  charity: DONATIONS_CATEGORY,
+  donations: DONATIONS_CATEGORY,
   education: "Education",
   "bank fees": "Fees",
   services: "Other",

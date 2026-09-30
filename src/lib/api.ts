@@ -145,9 +145,13 @@ export const api = {
  * place: in the demo they are kept in the browser under their own key, and
  * otherwise they go to the server exactly as they did.
  */
-const SETTINGS: Record<"/api/expense-settings" | "/api/contribution-limits", DemoSetting> = {
+const SETTINGS: Record<
+  "/api/expense-settings" | "/api/contribution-limits" | "/api/goals",
+  DemoSetting
+> = {
   "/api/expense-settings": "expense-settings",
   "/api/contribution-limits": "contribution-limits",
+  "/api/goals": "goals",
 };
 export type SettingsPath = keyof typeof SETTINGS;
 

@@ -20,6 +20,7 @@ import {
   Settings,
   ReceiptText,
   Sun,
+  Target,
   Trash2,
   TrendingUp,
   X,
@@ -29,6 +30,8 @@ import { Button, Modal } from "./ui";
 import { useFinance } from "@/lib/store";
 import { leaveDemo } from "@/lib/demo";
 import { useMounted } from "@/lib/hooks";
+import { SHOW_UNRELEASED } from "@/lib/unreleased";
+import { GoalWatcher } from "./goals";
 import { cn } from "./ui";
 
 /*
@@ -51,31 +54,12 @@ const NAV = [
   { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/accounts", label: "Accounts", icon: Landmark },
   { href: "/year", label: "Year", icon: CalendarRange },
+  { href: "/goals", label: "Goals", icon: Target, unreleased: true },
   { href: "/tax", label: "Tax", icon: Receipt, unreleased: true },
   { href: "/guide", label: "Guide", icon: BookOpen, unreleased: true },
   /* Temporary: the colour-picking bench. Delete this line with the page. */
   { href: "/colours", label: "Colours", icon: Palette, unreleased: true },
 ] as const;
-
-/**
- * Whether pages still being worked on are listed.
- *
- * `unreleased: true` above keeps a page out of the sidebar of a built app
- * while leaving it exactly where it was in development, so work carries on
- * without a branch to maintain or a revert to re-apply. Promoting a page is
- * deleting one word.
- *
- * This hides rather than disables: the route is still built and still answers
- * to its URL. That is deliberate — it is how a page is checked in the real app
- * before it is promoted — so it is not a way to keep anything secret, only a
- * way to keep an unfinished page from being offered as though it were done.
- *
- * Read at module scope because Next replaces `process.env.NEXT_PUBLIC_*` at
- * build time; there is nothing to re-evaluate per render.
- */
-const SHOW_UNRELEASED =
-  process.env.NODE_ENV !== "production" ||
-  process.env.NEXT_PUBLIC_SHOW_UNRELEASED === "1";
 
 const VISIBLE_NAV = NAV.filter((item) => SHOW_UNRELEASED || !("unreleased" in item));
 
@@ -511,6 +495,9 @@ export function Shell({
           Aurum · data stored in PostgreSQL via Docker · not financial advice
         </footer>
       </div>
+
+      {/* Celebrates a goal the moment the record shows it met, on any page. */}
+      <GoalWatcher />
 
       {/* Close button floating for mobile drawer */}
       {mobileOpen ? (

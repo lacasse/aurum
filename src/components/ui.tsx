@@ -177,7 +177,8 @@ export function Progress({
 }: {
   value: number;
   max: number;
-  tone?: "auto" | "positive" | "negative";
+  /** `auto` reads the bar as a budget used, amber then red as it fills. */
+  tone?: "auto" | "positive" | "negative" | "brand";
   className?: string;
 }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
@@ -186,7 +187,9 @@ export function Progress({
       ? "bg-positive"
       : tone === "negative"
         ? "bg-negative"
-        : pct >= 100
+        : tone === "brand"
+          ? "bg-brand-strong"
+          : pct >= 100
           ? "bg-negative"
           : pct >= 80
             ? "bg-amber-500"

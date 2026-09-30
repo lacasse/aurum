@@ -59,6 +59,9 @@ import {
 import { planTrades } from "@/lib/trade-batch";
 import { contributionsByMonth, estimateValue } from "@/lib/pension";
 import { getSettings, saveSettings } from "@/lib/api";
+import { GoalComposer, useGoals } from "./goals";
+import { describe as describeGoal } from "@/lib/goals";
+import { SHOW_UNRELEASED } from "@/lib/unreleased";
 
 type Step =
   | "import"
@@ -68,6 +71,7 @@ type Step =
   | "trades"
   | "pension"
   | "room"
+  | "goals"
   | "review";
 
 /**
@@ -1904,6 +1908,76 @@ function RoomStep({
   );
 }
 
+/* ---------- Step: Goals for the new year ---------- */
+
+/**
+ * The year's goals, asked for once, when the year turns.
+ *
+ * Closing December is the January checklist: the old year is done and the new
+ * one has just begun, which is the one moment in the year the question is
+ * natural. Entirely optional — skipping leaves nothing half-set, and goals can
+ * be set on the Goals page at any time. Each goal is saved as it is added, like
+ * the room above it: a goal is not part of the month being closed.
+ */
+function GoalsStep({ number, total, month, onNext, onBack }: StepProps) {
+  const year = String(Number(month.slice(0, 4)) + 1);
+  const goals = useGoals((s) => s.goals);
+  const state = useGoals((s) => s.state);
+  const load = useGoals((s) => s.load);
+  const save = useGoals((s) => s.save);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const set = goals.filter((g) => g.year === year);
+
+  return (
+    <StepBody
+      number={number}
+      total={total}
+      title={`Goals for ${year}`}
+      lead={`${labelMonth(month)} closes the year. If you want ${year} to be for something, say what — every goal here is measured from your own record as the year goes.`}
+      onBack={onBack}
+      note={<>Optional. Goals can be set or changed on the Goals page at any time.</>}
+      actions={
+        <>
+          {set.length === 0 ? (
+            <Button variant="ghost" onClick={onNext}>
+              Skip
+            </Button>
+          ) : null}
+          <Button onClick={onNext}>
+            Next <ArrowRight size={14} />
+          </Button>
+        </>
+      }
+    >
+      {set.length > 0 ? (
+        <ul className="mb-4 space-y-1 rounded-lg border border-line bg-elevated/40 p-3">
+          {set.map((g) => (
+            <li key={g.id} className="flex items-center gap-2 text-sm text-ink-dim">
+              <CheckCircle2 size={14} className="shrink-0 text-positive" />
+              {describeGoal(g, fmtCAD)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {state === "failed" ? (
+        <p className="text-xs text-negative">
+          Your goals could not be read, so none can be added here. Skip this step and try the Goals
+          page later.
+        </p>
+      ) : state === "ready" ? (
+        <GoalComposer
+          year={year}
+          onAdd={(goal) => save([...useGoals.getState().goals, goal])}
+        />
+      ) : (
+        <p className="text-xs text-ink-faint">Loading your goals…</p>
+      )}
+    </StepBody>
+  );
+}
+
 /* ---------- Main Component ---------- */
 
 const STEPS: { key: Step; label: string }[] = [
@@ -1914,6 +1988,7 @@ const STEPS: { key: Step; label: string }[] = [
   { key: "trades", label: "Trades" },
   { key: "pension", label: "Pension" },
   { key: "room", label: "Room" },
+  { key: "goals", label: "Goals" },
   { key: "review", label: "Save" },
 ];
 
@@ -2034,7 +2109,9 @@ function Checklist({ onClose }: { onClose: () => void }) {
     (s) =>
       (s.key !== "pension" || hasPension) &&
       (s.key !== "actions" || loaded.actions.length > 0) &&
-      (s.key !== "room" || asks.length > 0),
+      (s.key !== "room" || asks.length > 0) &&
+      // Only when closing December, the January checklist that opens a year.
+      (s.key !== "goals" || (SHOW_UNRELEASED && month.endsWith("-12"))),
   );
   const at = Math.min(index, steps.length - 1);
   const step = steps[at].key;
@@ -2166,6 +2243,7 @@ function Checklist({ onClose }: { onClose: () => void }) {
           onSave={saveRoom}
         />
       )}
+      {step === "goals" && <GoalsStep {...shared} />}
       {step === "review" && (
         <ReviewStep
           number={shared.number}

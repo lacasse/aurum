@@ -67,8 +67,8 @@ export interface DemoRecord extends FinanceData {
  * Settings the pages load and save themselves, outside the store. Each has a
  * key of its own, so saving one can never overwrite the record or the other.
  */
-export type DemoSetting = "expense-settings" | "contribution-limits";
-const DEMO_SETTINGS: DemoSetting[] = ["expense-settings", "contribution-limits"];
+export type DemoSetting = "expense-settings" | "contribution-limits" | "goals";
+const DEMO_SETTINGS: DemoSetting[] = ["expense-settings", "contribution-limits", "goals"];
 
 export function demoSettingKey(name: DemoSetting): string {
   return `${DEMO_STORAGE_KEY}.${name}`;

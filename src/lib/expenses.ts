@@ -50,6 +50,12 @@ export const SPEND_GROUP_LABELS: Record<SpendGroup, string> = {
 /** The category whose rows pay off a debt rather than buying anything. */
 export const DEBT_CATEGORY = "Debt Repayment";
 
+/**
+ * The category charitable giving is recorded under — what an import files a
+ * bank's "charity" and "donations" rows as, and what a giving goal counts.
+ */
+export const DONATIONS_CATEGORY = "Donations";
+
 export const DEFAULT_SPEND_GROUPS: Record<string, SpendGroup> = {
   Housing: "necessity",
   Groceries: "necessity",
@@ -68,7 +74,7 @@ export const DEFAULT_SPEND_GROUPS: Record<string, SpendGroup> = {
   Travel: "discretionary",
   Subscriptions: "discretionary",
   Education: "discretionary",
-  Donations: "discretionary",
+  [DONATIONS_CATEGORY]: "discretionary",
   Gifts: "discretionary",
   "Gifts for myself": "discretionary",
   Other: "discretionary",

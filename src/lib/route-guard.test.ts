@@ -19,6 +19,7 @@ const DATA_ROUTES = [
   "/api/backups",
   "/api/expense-settings",
   "/api/contribution-limits",
+  "/api/goals",
   "/api/prices",
   "/api/demo",
 ];

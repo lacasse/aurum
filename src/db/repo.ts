@@ -38,6 +38,7 @@ import {
 import { todayISO } from "@/lib/format";
 import { addMoney } from "@/lib/money";
 import { SPEND_GROUPS, type SpendGroup } from "@/lib/expenses";
+import { cleanGoals, type Goal } from "@/lib/goals";
 import {
   DEMO_ACCOUNT_ID_PREFIX,
   DEMO_HOLDING_ID_PREFIX,
@@ -682,6 +683,33 @@ export async function setContributionLimits(
   limits: ContributionLimits,
 ): Promise<void> {
   await setSetting(userId, CONTRIBUTION_LIMITS_KEY, JSON.stringify(limits));
+}
+
+/* ------------------------------------------------------------------ */
+/* Goals                                                               */
+/* ------------------------------------------------------------------ */
+
+const GOALS_KEY = "goals";
+
+/**
+ * The owner's goals, every year of them, as one row of JSON.
+ *
+ * Read whole and written whole, like the contribution room: there are a
+ * handful a year and nothing ever asks for one on its own. Whatever is stored
+ * is checked on the way out, so a malformed goal is dropped rather than drawn.
+ */
+export async function getGoals(userId: string): Promise<Goal[]> {
+  const raw = await getSetting(userId, GOALS_KEY);
+  if (raw === null) return [];
+  try {
+    return cleanGoals(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+export async function setGoals(userId: string, goals: Goal[]): Promise<void> {
+  await setSetting(userId, GOALS_KEY, JSON.stringify(cleanGoals(goals)));
 }
 
 /* ------------------------------------------------------------------ */
