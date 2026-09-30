@@ -179,6 +179,20 @@ input[type="number"] {
   .nav-rail .nav-brand {
     padding-inline: 0;
   }
+  /*
+   * The rail's own clip is not enough. It cuts at the edge of its padding, not
+   * its content, and the wordmark begins about a pixel inside that edge — so
+   * the collapsed rail showed a sliver of the A beside the disc. Clip the
+   * lockup to the disc itself while the rail is shut; opening it lifts the
+   * clip and the rail's widening still does the wipe.
+   */
+  .nav-rail .nav-brand svg {
+    clip-path: inset(-1rem -1rem -1rem -1rem);
+    transition: clip-path 0.18s ease;
+  }
+  html:not([data-nav="expanded"]) .nav-rail:not(:hover):not(:focus-within) .nav-brand svg {
+    clip-path: inset(-1rem calc(100% - 2.8rem) -1rem -1rem);
+  }
 
   /*
    * Hovering the collapsed rail reads it without reopening it: it widens over
@@ -206,7 +220,8 @@ input[type="number"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .nav-rail {
+  .nav-rail,
+  .nav-rail .nav-brand svg {
     transition: none;
   }
 }
