@@ -29,10 +29,9 @@ import { yearToDate } from "@/lib/spans";
 import {
   accountCadBalance,
   accountValueAt,
-  allTimeSeries,
+  portfolioHistory,
   firstAccountMonth,
   firstFlowMonth,
-  monthsSince,
   netWorthOver,
   portfolioSeries,
 } from "@/lib/analytics";
@@ -90,16 +89,9 @@ export default function AccountsPage() {
   }, [loadSnapshotHistory]);
 
   const data = useMemo(() => {
-    const starts = [
-      firstAccountMonth(accounts),
-      Object.keys(snapshots).sort()[0] ?? null,
-      firstFlowMonth(holdings),
-    ].filter((m): m is string => m !== null);
-    const historyStart = starts.length > 0 ? starts.sort()[0] : null;
     const portAll =
-      historyStart && Object.keys(snapshots).length > 0
-        ? allTimeSeries(holdings, {}, monthsSince(historyStart), snapshots).points
-        : portfolioSeries(holdings, 18);
+      portfolioHistory(holdings, snapshots, firstAccountMonth(accounts))?.points ??
+      portfolioSeries(holdings, 18);
     const series = netWorthOver(accounts, portAll, usdCadRate);
     let assets = 0;
     let liabilities = 0;

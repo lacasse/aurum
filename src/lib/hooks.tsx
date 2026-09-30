@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useFinance } from "./store";
-import type { AssetClass, Currency } from "./types";
+import type { AssetClass, Currency, Transaction } from "./types";
+import { withDividendIncome } from "./analytics";
 import type { SpendGroup } from "./expenses";
 import { getSettings } from "@/lib/api";
 import { isDemo } from "./demo";
@@ -230,4 +231,20 @@ export function useTickerValidation(ticker: string, assetClass: AssetClass, curr
   }, [t, assetClass, currency, heldPrice]);
 
   return { status, price };
+}
+
+/**
+ * The transactions every income figure is read from: the record as kept, with
+ * its dividends taken from the holdings rather than from any row filed as one.
+ * See `withDividendIncome`. The transactions list and anything that replays a
+ * balance read the store directly instead — the derived rows were never kept.
+ */
+export function useIncomeTransactions(): Transaction[] {
+  const transactions = useFinance((s) => s.transactions);
+  const holdings = useFinance((s) => s.holdings);
+  const accounts = useFinance((s) => s.accounts);
+  return useMemo(
+    () => withDividendIncome(transactions, holdings, accounts),
+    [transactions, holdings, accounts],
+  );
 }

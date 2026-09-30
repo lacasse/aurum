@@ -1173,10 +1173,10 @@ const LEAF_ROLE: Record<string, FlowNode["role"]> = {
  * and nothing to draw. It also makes a year that paid for itself by selling
  * legible, which the previous version could not show at all.
  *
- * Dividends are deliberately *not* taken from the trade history. A dividend
- * landing in a chequing account is already an income row under "Dividends",
- * and the trade importer records the same payment against the holding, so
- * counting both would inflate the year by every distribution twice.
+ * Dividends arrive here as income rows, and those rows are the holdings'
+ * own records (see `withDividendIncome`), so they are not taken from the trade
+ * history a second time below: counting both would inflate the year by every
+ * distribution twice.
  *
  * Where an investment account took money in and has no purchases to account
  * for it, the remainder is "Not itemised" rather than "Kept". It is either

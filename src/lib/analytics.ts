@@ -978,9 +978,7 @@ export function consolidateHoldings(
     const costBasis = roundMoney(
       lots.reduce((sum, h) => sum + h.shares * (h.avgCostCAD ?? h.avgCost), 0),
     );
-    const totalDividends = roundMoney(
-      lots.reduce((sum, h) => sum + (h.dividendsReceivedCAD ?? h.dividendsReceived ?? 0), 0),
-    );
+    const totalDividends = roundMoney(lots.reduce((sum, h) => sum + dividendsPaid(h), 0));
     // Same security, so the price is the same wherever it is held; the lots
     // only disagree when one has never been priced.
     const priced = lots.find((h) => (h.priceCAD ?? h.price) > 0) ?? lots[0];
@@ -1036,6 +1034,22 @@ export function consolidateHoldings(
     r.weightPct = totalValue > 0 ? (r.marketValue / totalValue) * 100 : 0;
   }
   return rows.sort((a, b) => b.marketValue - a.marketValue);
+}
+
+/**
+ * What a lot has paid out, in CAD.
+ *
+ * The payments recorded with its trades, where there are any: the stored
+ * total was a second copy of the same sum, kept up to date by whichever path
+ * last wrote it, and it drifted — one position's total ran ahead of its own
+ * payments. The returns already read the payments; the holdings table now
+ * does too. A lot with no recorded payments keeps the total typed into the
+ * holding form, which is then the only record there is.
+ */
+export function dividendsPaid(h: Holding): number {
+  const paid = (h.flows ?? []).filter((f) => f.kind === "dividend");
+  if (paid.length > 0) return paid.reduce((sum, f) => sum + f.amount, 0);
+  return h.dividendsReceivedCAD ?? h.dividendsReceived ?? 0;
 }
 
 export function holdingRows(holdings: Holding[]): HoldingRow[] {
@@ -1994,4 +2008,284 @@ export function chainedReturns(
     out.push(roundMoney((chain - 1) * 100));
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* The month so far                                                    */
+/* ------------------------------------------------------------------ */
+
+export interface MonthMover {
+  ticker: string;
+  name: string;
+  assetClass: AssetClass;
+  /** Worth at the end of last month, and now. */
+  start: number;
+  now: number;
+  /** What the market did to it: the change in value net of money moved. */
+  gain: number;
+  /** That gain over the capital at work, in percent; null with none at work. */
+  pct: number | null;
+}
+
+export interface MonthToDate {
+  month: string;
+  /** Portfolio value at the end of last month, and now. */
+  start: number;
+  now: number;
+  /** Buys less sells this month: money put in, not earned. */
+  added: number;
+  /** Distributions paid out this month. */
+  dividends: number;
+  /** What the portfolio earned: value change, less money added, plus payouts. */
+  gain: number;
+  /** The gain over the capital at work (Modified Dietz), in percent. */
+  pct: number | null;
+  movers: MonthMover[];
+}
+
+/**
+ * The month in progress: what each position, and the whole, has earned since
+ * the last month-end.
+ *
+ * "Earned" is the same rule the returns chart uses (`netExternalFlows`):
+ * money bought in is not growth, money sold out is not a loss, and a
+ * distribution paid out still counts as earned though it has left the
+ * holdings. So a month of steady contributions does not read as a month the
+ * market was kind.
+ *
+ * The starting point prefers the month-end record, which is what the position
+ * was actually worth, and falls back to last month's close times the shares
+ * held then — replayed back from this month's trades — where there is none.
+ */
+export function monthToDate(
+  holdings: Holding[],
+  snapshots: SnapshotHistory = {},
+  month = currentMonthKey(),
+): MonthToDate {
+  const prev = previousMonthKey(month);
+  const recorded = snapshots[prev];
+
+  interface Pooled {
+    ticker: string;
+    name: string;
+    assetClass: AssetClass;
+    now: number;
+    fallbackStart: number;
+    added: number;
+    dividends: number;
+  }
+  const pooled = new Map<string, Pooled>();
+  for (const h of holdings) {
+    const key = h.ticker.toUpperCase();
+    const p =
+      pooled.get(key) ??
+      ({ ticker: h.ticker, name: h.name, assetClass: h.assetClass, now: 0, fallbackStart: 0, added: 0, dividends: 0 } as Pooled);
+    if (h.name.length > p.name.length) p.name = h.name;
+    const px = h.priceCAD ?? h.price;
+    if (h.shares > 0 && Number.isFinite(px)) p.now += h.shares * px;
+
+    let sharesAtStart = h.shares;
+    for (const f of h.flows ?? []) {
+      if (monthKeyOf(f.date) !== month) continue;
+      if (f.kind === "buy") {
+        p.added += f.amount;
+        sharesAtStart -= f.shares;
+      } else if (f.kind === "sell") {
+        p.added -= f.amount;
+        sharesAtStart += f.shares;
+      } else {
+        p.dividends += f.amount;
+      }
+    }
+    const hist = h.historyCAD ?? h.history;
+    const close = hist.length >= 2 ? hist[hist.length - 2] : px;
+    if (sharesAtStart > 0 && Number.isFinite(close)) p.fallbackStart += sharesAtStart * close;
+    pooled.set(key, p);
+  }
+
+  const movers: MonthMover[] = [];
+  let start = 0;
+  let now = 0;
+  let added = 0;
+  let dividends = 0;
+  for (const [key, p] of pooled) {
+    const s = recorded ? (recorded[key] ?? 0) : p.fallbackStart;
+    if (s === 0 && p.now === 0 && p.added === 0 && p.dividends === 0) continue;
+    const gain = p.now - s - p.added + p.dividends;
+    const atWork = s + p.added / 2;
+    movers.push({
+      ticker: p.ticker,
+      name: p.name,
+      assetClass: p.assetClass,
+      start: roundMoney(s),
+      now: roundMoney(p.now),
+      gain: roundMoney(gain),
+      pct: atWork > 0 ? (gain / atWork) * 100 : null,
+    });
+    start += s;
+    now += p.now;
+    added += p.added;
+    dividends += p.dividends;
+  }
+  movers.sort((a, b) => b.gain - a.gain || a.ticker.localeCompare(b.ticker));
+  const gain = now - start - added + dividends;
+  const atWork = start + added / 2;
+  return {
+    month,
+    start: roundMoney(start),
+    now: roundMoney(now),
+    added: roundMoney(added),
+    dividends: roundMoney(dividends),
+    gain: roundMoney(gain),
+    pct: atWork > 0 ? (gain / atWork) * 100 : null,
+    movers,
+  };
+}
+
+/**
+ * What the portfolio earned in each month: the change in value, net of the
+ * money moved in or out that month. The first point has no month before it,
+ * so it is left out.
+ */
+export function monthlyGains(
+  points: readonly PortfolioPoint[],
+  flowsByMonth: Record<string, number>,
+): { key: string; label: string; gain: number }[] {
+  const out: { key: string; label: string; gain: number }[] = [];
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i];
+    out.push({
+      key: p.key,
+      label: p.label,
+      gain: roundMoney(p.value - points[i - 1].value - (flowsByMonth[p.key] ?? 0)),
+    });
+  }
+  return out;
+}
+
+/**
+ * Month-end closes from the prices each holding carries with it, per ticker.
+ *
+ * A holding keeps a short run of monthly prices, the last of them this month's.
+ * For a record with no closed months those are the only closes there are, and
+ * without them every past month could only be valued at what it cost.
+ */
+export function closesFromHoldings(
+  holdings: Holding[],
+  end = currentMonthKey(),
+): CloseHistory {
+  const out: CloseHistory = {};
+  for (const h of holdings) {
+    const hist = h.historyCAD ?? h.history;
+    if (!hist || hist.length === 0) continue;
+    const key = h.ticker.toUpperCase();
+    // An open lot's prices win over a closed one's, which may be years stale.
+    if (out[key] && h.shares <= 0) continue;
+    const months = lastMonthKeys(hist.length, end);
+    const closes: Record<string, number> = {};
+    months.forEach((m, i) => {
+      const px = hist[i];
+      if (Number.isFinite(px) && px > 0) closes[m] = px;
+    });
+    out[key] = closes;
+  }
+  return out;
+}
+
+/**
+ * The portfolio's value and cost for every month since its record begins —
+ * the one series every page draws the portfolio's history from.
+ *
+ * The record begins at the earlier of the first trade and the first closed
+ * month. A month closed with the checklist is valued from that record; any
+ * other month from the shares held then, replayed from the trades, at each
+ * holding's own monthly price. Null when there is nothing to begin from.
+ *
+ * `closesFromHoldings` is what keeps a record with no closed months honest:
+ * without prices, those months could only be valued at cost, and before this
+ * existed the pages fell back to today's share counts at past prices — which
+ * counted every purchase as a loss in the time-weighted return.
+ */
+export function portfolioHistory(
+  holdings: Holding[],
+  snapshots: SnapshotHistory = {},
+  /** An earlier month to begin from, when the series is drawn beside others. */
+  from: string | null = null,
+): AllTimeSeries | null {
+  const starts = [Object.keys(snapshots).sort()[0], firstFlowMonth(holdings), from].filter(
+    (m): m is string => typeof m === "string",
+  );
+  if (starts.length === 0) return null;
+  const start = starts.sort()[0];
+  return allTimeSeries(holdings, closesFromHoldings(holdings), monthsSince(start), snapshots);
+}
+
+/** The income category every dividend is counted under. */
+export const DIVIDENDS_CATEGORY = "Dividends";
+
+/**
+ * Every dividend the holdings recorded, as income rows.
+ *
+ * Dividends are recorded once, with the trades, against the holding that paid
+ * them — the only place that knows which security paid, into which account,
+ * in which currency. Income used to keep a second list of the same payments,
+ * as monthly totals copied from a spreadsheet, and the copy was wrong in every
+ * month with a US-dollar payer: the sheet added US dollars to Canadian ones
+ * unconverted. Two lists of one thing drift apart; so there is one, and every
+ * income figure reads its dividends from here.
+ *
+ * Investment accounts only. The crypto account is left out because a coin pays
+ * no dividend: what the trade history files as one there is a staking reward,
+ * recorded with the dividend kind because that is the only kind of income a
+ * flow can carry.
+ *
+ * The rows belong to no account, so nothing that replays balances can move on
+ * them, and they are never stored: they are derived on every read.
+ */
+export function dividendIncomeRows(holdings: Holding[], accounts: Account[]): Transaction[] {
+  const investment = new Set(accounts.filter((a) => a.kind === "investment").map((a) => a.id));
+  const rows: Transaction[] = [];
+  for (const h of holdings) {
+    if (!investment.has(h.accountId)) continue;
+    (h.flows ?? []).forEach((f, i) => {
+      if (f.kind !== "dividend" || f.amount <= 0) return;
+      rows.push({
+        id: `holding-dividend:${h.id}:${i}`,
+        date: f.date,
+        type: "income",
+        amount: roundMoney(f.amount),
+        category: DIVIDENDS_CATEGORY,
+        payee: h.name || h.ticker,
+        note: "Recorded with the trades",
+        granularity: "individual",
+      });
+    });
+  }
+  return rows;
+}
+
+/** A stored income row filed as a dividend, which the holdings already count. */
+export function isFiledDividend(t: Transaction): boolean {
+  return t.type === "income" && t.category === DIVIDENDS_CATEGORY;
+}
+
+/**
+ * The income record with its dividends taken from the holdings.
+ *
+ * Any stored row filed as Dividends is left out, because the payment it
+ * describes is already counted from the holding: a brokerage that pays into
+ * a bank account puts the same dividend on the bank statement and in the
+ * trade history. Leaving it out is said on the Income page, never silent, and
+ * a dividend from something that is not a recorded holding belongs under
+ * another income category.
+ */
+export function withDividendIncome(
+  transactions: Transaction[],
+  holdings: Holding[],
+  accounts: Account[],
+): Transaction[] {
+  return [
+    ...transactions.filter((t) => !isFiledDividend(t)),
+    ...dividendIncomeRows(holdings, accounts),
+  ];
 }

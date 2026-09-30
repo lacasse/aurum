@@ -13,13 +13,14 @@ import {
 } from "@/components/charts";
 import { accent } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
-import { PageSkeleton, useReady, useRemembered } from "@/lib/hooks";
+import { PageSkeleton, useReady, useRemembered, useIncomeTransactions } from "@/lib/hooks";
 import { monthsToDate } from "@/lib/spans";
 import {
   incomeBySource,
   incomeYearOverYear,
   monthlyAverages,
   PASSIVE_INCOME_CATEGORIES,
+  isFiledDividend,
 } from "@/lib/analytics";
 import {
   fmtCAD,
@@ -98,7 +99,14 @@ const WINDOWS: Window[] = ["ytd", "12", "24", "60"];
 
 export default function IncomePage() {
   const ready = useReady();
-  const transactions = useFinance((s) => s.transactions);
+  const transactions = useIncomeTransactions();
+  /*
+   * Rows someone filed as Dividends, which the totals leave out because the
+   * holdings already count those payments. Said on the page so a figure is
+   * never dropped without a word.
+   */
+  const stored = useFinance((s) => s.transactions);
+  const setAside = useMemo(() => stored.filter(isFiledDividend).length, [stored]);
   const [window, setWindow] = useRemembered<Window>("aurum.span.income", "12", WINDOWS);
 
   /*
@@ -564,6 +572,9 @@ export default function IncomePage() {
               )}
               . This is the part that does not need you to work for it, so what
               matters is the slope rather than the height.
+              {setAside > 0
+                ? ` ${setAside} ${setAside === 1 ? "entry" : "entries"} filed as Dividends ${setAside === 1 ? "is" : "are"} left out: dividends are counted once, from what your holdings recorded with the trades. A dividend from something that is not one of your holdings belongs under another income category.`
+                : ""}
             </p>
           </Card>
         )}

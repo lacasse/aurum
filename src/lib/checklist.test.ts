@@ -7,6 +7,7 @@ import {
   partitionByMonth,
   previousMonthIncome,
   snapshotGaps,
+  unconvertedPrices,
 } from "./checklist";
 import type { ImportedRow } from "./csv";
 
@@ -298,5 +299,24 @@ describe("describeGaps", () => {
     ]);
     assert.ok(s.includes("no closing value"));
     assert.ok(s.includes("only partly recorded"));
+  });
+});
+
+describe("unconvertedPrices", () => {
+  // INVENTED: made-up tickers and round prices.
+  const h = (ticker: string, currency: string, shares: number, price: number, priceCAD: number) =>
+    ({ ticker, currency, shares, price, priceCAD }) as Parameters<typeof unconvertedPrices>[0][number];
+
+  test("names open US-dollar positions whose Canadian price was never converted", () => {
+    assert.deepEqual(
+      unconvertedPrices([
+        h("AAA", "USD", 10, 100, 100), // unconverted
+        h("BBB", "USD", 10, 100, 138), // converted
+        h("CCC", "CAD", 10, 100, 100), // a Canadian listing: equal is right
+        h("DDD", "USD", 0, 100, 100), // closed: its value is zero either way
+        h("EEE", "USD", 5, 50, 0), // no Canadian price at all
+      ]),
+      ["AAA", "EEE"],
+    );
   });
 });

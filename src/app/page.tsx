@@ -22,13 +22,11 @@ import {
 import { SeriesChart, Waterfall, YearSankey } from "@/components/charts";
 import { MonthlyChecklistButton, MonthlyChecklistModal } from "@/components/monthly-checklist";
 import { useFinance } from "@/lib/store";
-import { PageSkeleton, useReady, useRemembered, useSpendGroups } from "@/lib/hooks";
+import { PageSkeleton, useReady, useRemembered, useSpendGroups, useIncomeTransactions } from "@/lib/hooks";
 import { yearToDate } from "@/lib/spans";
 import {
-  allTimeSeries,
-  firstFlowMonth,
+  portfolioHistory,
   fiProgress,
-  monthsSince,
   netWorthOver,
   portfolioSeries,
   runwayMonths,
@@ -212,7 +210,7 @@ function WatchRow({ item }: { item: WatchItem }) {
 export default function OverviewPage() {
   const ready = useReady();
   const accounts = useFinance((s) => s.accounts);
-  const transactions = useFinance((s) => s.transactions);
+  const transactions = useIncomeTransactions();
   const holdings = useFinance((s) => s.holdings);
   const usdCadRate = useFinance((s) => s.usdCadRate);
   const spendGroups = useSpendGroups();
@@ -250,14 +248,8 @@ export default function OverviewPage() {
      * zero put net worth below nothing for months when the portfolio was the
      * largest thing owned.
      */
-    const starts = [Object.keys(snapshots).sort()[0] ?? null, firstFlowMonth(holdings)].filter(
-      (m): m is string => m !== null,
-    );
-    const historyStart = starts.length > 0 ? starts.sort()[0] : null;
     const portfolio =
-      historyStart && Object.keys(snapshots).length > 0
-        ? allTimeSeries(holdings, {}, monthsSince(historyStart), snapshots).points
-        : portfolioSeries(holdings, 18);
+      portfolioHistory(holdings, snapshots)?.points ?? portfolioSeries(holdings, 18);
     const netWorth = netWorthOver(accounts, portfolio, usdCadRate);
 
     const shape = periodShape(transactions, netWorth, from, through, group);

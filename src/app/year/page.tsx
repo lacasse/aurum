@@ -31,11 +31,11 @@ import {
 } from "@/components/charts";
 import { accent as accentFor } from "@/lib/palette";
 import { useFinance } from "@/lib/store";
-import { PageSkeleton, useReady, useRemembered, useSpendGroups } from "@/lib/hooks";
+import { PageSkeleton, useReady, useRemembered, useSpendGroups, useIncomeTransactions } from "@/lib/hooks";
 import {
-  allTimeSeries,
+  portfolioHistory,
+  closesFromHoldings,
   classShares,
-  firstFlowMonth,
   monthsSince,
   netExternalFlows,
   netWorthByClass,
@@ -88,7 +88,7 @@ export default function YearPage() {
   const ready = useReady();
   const accounts = useFinance((s) => s.accounts);
   const holdings = useFinance((s) => s.holdings);
-  const transactions = useFinance((s) => s.transactions);
+  const transactions = useIncomeTransactions();
   const usdCadRate = useFinance((s) => s.usdCadRate);
   const [year, setYear] = useState<string | null>(null);
   const [limits, setLimits] = useState<ContributionLimits>({});
@@ -124,13 +124,9 @@ export default function YearPage() {
   }, [loadSnapshotHistory]);
 
   const data = useMemo(() => {
-    const starts = [Object.keys(snapshots).sort()[0] ?? null, firstFlowMonth(holdings)].filter(
-      (m): m is string => m !== null,
-    );
-    const start = starts.length > 0 ? starts.sort()[0] : null;
-    const portfolio = start
-      ? allTimeSeries(holdings, {}, monthsSince(start), snapshots).points
-      : portfolioSeries(holdings, 18);
+    const history = portfolioHistory(holdings, snapshots);
+    const portfolio = history?.points ?? portfolioSeries(holdings, 18);
+    const start = history?.points[0]?.key ?? null;
     const netWorth = netWorthOver(accounts, portfolio, usdCadRate);
     const rows = yearRows(
       transactions,
@@ -146,7 +142,14 @@ export default function YearPage() {
      * have happened yet.
      */
     const classes = start
-      ? netWorthByClass(accounts, holdings, {}, monthsSince(start), snapshots, usdCadRate)
+      ? netWorthByClass(
+          accounts,
+          holdings,
+          closesFromHoldings(holdings),
+          monthsSince(start),
+          snapshots,
+          usdCadRate,
+        )
       : [];
     return {
       rows,
