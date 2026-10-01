@@ -321,7 +321,7 @@ export default function InvestmentsPage() {
   const ready = useReady();
   const holdings = useFinance((s) => s.holdings);
   const accounts = useFinance((s) => s.accounts);
-  const updateHolding = useFinance((s) => s.updateHolding);
+  const setHoldingPrice = useFinance((s) => s.setHoldingPrice);
 
 
   /** Short label for the account a position sits in, e.g. "TFSA". */
@@ -490,7 +490,7 @@ export default function InvestmentsPage() {
         for (const h of subset) {
           const px = prices[h.ticker];
           if (px != null && px > 0 && px !== h.price) {
-            updateHolding(h.id, { ...h, price: px });
+            setHoldingPrice(h.id, px);
           }
         }
         setLastPriceUpdate(new Date());
@@ -500,7 +500,7 @@ export default function InvestmentsPage() {
         if (mountedRef.current) setPriceRefreshing(false);
       }
     },
-    [updateHolding],
+    [setHoldingPrice],
   );
 
   /*

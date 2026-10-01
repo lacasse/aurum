@@ -91,6 +91,8 @@ export const api = {
   createHolding: (holding: Holding) => send("/api/holdings", "POST", holding),
   updateHolding: (holding: Holding) =>
     send(`/api/holdings/${encodeURIComponent(holding.id)}`, "PUT", holding),
+  setHoldingPrice: (id: string, quote: { price: number; priceCAD: number }) =>
+    send(`/api/holdings/${encodeURIComponent(id)}`, "PATCH", quote),
   deleteHolding: (id: string) =>
     send(`/api/holdings/${encodeURIComponent(id)}`, "DELETE"),
   updateSecurity: (
