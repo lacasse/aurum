@@ -1296,6 +1296,50 @@ export async function insertHolding(userId: string, h: Holding, position: number
 }
 
 /**
+ * The columns a new quote changes: the price, its Canadian mirror, and the
+ * last entry of each price history.
+ *
+ * `history` carries the monthly prices and ends on the current one, so its
+ * last entry moves with the price — otherwise the chart's final point and
+ * the table would disagree by exactly the change.
+ */
+function quoteColumns(price: number, priceCAD: number) {
+  const last = sql`greatest(jsonb_array_length(${holdings.history}) - 1, 0)::text`;
+  const lastCad = sql`greatest(jsonb_array_length(${holdings.historyCAD}) - 1, 0)::text`;
+  return {
+    price,
+    priceCAD,
+    history: sql`CASE WHEN jsonb_array_length(${holdings.history}) > 0
+      THEN jsonb_set(${holdings.history}, ARRAY[${last}], to_jsonb(${price}::numeric))
+      ELSE ${holdings.history} END`,
+    historyCAD: sql`CASE WHEN jsonb_array_length(${holdings.historyCAD}) > 0
+      THEN jsonb_set(${holdings.historyCAD}, ARRAY[${lastCad}], to_jsonb(${priceCAD}::numeric))
+      ELSE ${holdings.historyCAD} END`,
+  };
+}
+
+/**
+ * Record a fresh quote on one holding, and change nothing else.
+ *
+ * The price refresh used to send the whole holding back, so a tab opened
+ * before a correction to the trades wrote its old copy of them over the
+ * correction at the next price tick — silently, and long after the change had
+ * been checked. A quote is about the market, not about what was bought, so it
+ * can only ever reach the price columns.
+ */
+export async function setHoldingPrice(
+  userId: string,
+  id: string,
+  price: number,
+  priceCAD: number,
+): Promise<void> {
+  await db
+    .update(holdings)
+    .set(quoteColumns(price, priceCAD))
+    .where(and(eq(holdings.id, id), eq(holdings.userId, userId)));
+}
+
+/**
  * Rename a security, or move it to another asset class, everywhere it is held.
  *
  * Ticker, name and asset class describe the security itself, so they cannot
@@ -1338,26 +1382,11 @@ export async function updateSecurity(
    * the lots quoted in the same currency as the one that was edited, since the
    * number typed in is a price in that currency and nothing converts it for a
    * lot listed elsewhere.
-   *
-   * `history` carries the monthly prices and ends on the current one, so its
-   * last entry moves with the price — otherwise the chart's final point and
-   * the table would disagree by exactly the manual correction.
    */
   if (next.price != null && next.priceCAD != null) {
-    const last = sql`greatest(jsonb_array_length(${holdings.history}) - 1, 0)::text`;
-    const lastCad = sql`greatest(jsonb_array_length(${holdings.historyCAD}) - 1, 0)::text`;
     await db
       .update(holdings)
-      .set({
-        price: next.price,
-        priceCAD: next.priceCAD,
-        history: sql`CASE WHEN jsonb_array_length(${holdings.history}) > 0
-          THEN jsonb_set(${holdings.history}, ARRAY[${last}], to_jsonb(${next.price}::numeric))
-          ELSE ${holdings.history} END`,
-        historyCAD: sql`CASE WHEN jsonb_array_length(${holdings.historyCAD}) > 0
-          THEN jsonb_set(${holdings.historyCAD}, ARRAY[${lastCad}], to_jsonb(${next.priceCAD}::numeric))
-          ELSE ${holdings.historyCAD} END`,
-      })
+      .set(quoteColumns(next.price, next.priceCAD))
       .where(
         and(
           eq(holdings.userId, userId),

@@ -117,6 +117,11 @@ interface FinanceStore extends FinanceData {
   addHolding: (input: HoldingInput) => void;
   updateHolding: (id: string, input: HoldingInput) => void;
   /**
+   * Record a fresh quote. Only the price moves: a refresh running in a tab
+   * opened before the trades were corrected must not send its old copy back.
+   */
+  setHoldingPrice: (id: string, price: number) => void;
+  /**
    * Change what a security *is* — ticker, name, asset class — everywhere it is
    * held. These three are properties of the security, not of one account's
    * position in it, so editing them in one account and not the others would
@@ -691,6 +696,25 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
           }),
         }));
         if (updated) api.updateHolding(updated).catch(report);
+      },
+
+      setHoldingPrice: (id, price) => {
+        let quote: { price: number; priceCAD: number } | undefined;
+        const rate = get().usdCadRate;
+        set((s) => ({
+          holdings: s.holdings.map((h) => {
+            if (h.id !== id) return h;
+            const priceCAD =
+              h.currency === "USD" ? Math.round(price * rate * 100) / 100 : price;
+            const history = h.history.slice();
+            if (history.length > 0) history[history.length - 1] = price;
+            const historyCAD = (h.historyCAD ?? h.history).slice();
+            if (historyCAD.length > 0) historyCAD[historyCAD.length - 1] = priceCAD;
+            quote = { price, priceCAD };
+            return { ...h, price, priceCAD, history, historyCAD };
+          }),
+        }));
+        if (quote) api.setHoldingPrice(id, quote).catch(report);
       },
 
       updateSecurity: (ticker, input) => {

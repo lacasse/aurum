@@ -589,6 +589,23 @@ async function main() {
       expect(stored?.flows[0].kind === "buy" && stored?.flows[0].amount === 200, "flow detail kept");
     }
     {
+      // A price refresh writes the quote and nothing else. It used to send the
+      // whole holding, so a tab holding an old copy of the trades wrote them
+      // back at the next tick.
+      await repo.setHoldingPrice(uid, "test-hold-1", 115, 115);
+      const quoted = (await repo.getState(uid)).holdings.find((h) => h.id === "test-hold-1");
+      expect(quoted?.price === 115 && quoted?.priceCAD === 115, "a quote moves the price");
+      expect(
+        quoted?.history[quoted.history.length - 1] === 115 &&
+          quoted?.historyCAD[quoted.historyCAD.length - 1] === 115,
+        "…and the last month of both price histories",
+      );
+      expect(
+        quoted?.flows.length === 2 && quoted?.shares === 2 && quoted?.avgCostCAD === 100,
+        "…and leaves the trades, units and cost base alone",
+      );
+    }
+    {
       // The same security in a second account: a rename has to reach both, or
       // the holdings page stops pooling them into one row.
       await repo.insertHolding(uid, 
@@ -849,6 +866,30 @@ async function main() {
     const afterWrite = (await repo.getState(uid)).accounts.find((a) => a.id === target.id);
     expect(afterWrite?.name === targetBefore.name, "another user cannot rename an account by its id");
     expect(afterWrite !== undefined, "…or delete it");
+
+    // Nor does a quote aimed at somebody else's holding.
+    await repo.insertHolding(uid, {
+      id: "owner-hold-1",
+      ticker: "OWNR",
+      name: "Owner ETF",
+      assetClass: "US Equity",
+      shares: 1,
+      avgCost: 50,
+      price: 60,
+      history: [60],
+      dividendsReceived: 0,
+      accountId: "owner-chequing",
+      currency: "CAD",
+      priceCAD: 60,
+      avgCostCAD: 50,
+      dividendsReceivedCAD: 0,
+      historyCAD: [60],
+      flows: [],
+    }, 0);
+    await repo.setHoldingPrice(other, "owner-hold-1", 999, 999);
+    const quotedByOther = (await repo.getState(uid)).holdings.find((h) => h.id === "owner-hold-1");
+    expect(quotedByOther?.price === 60, "another user cannot reprice a holding by its id");
+    await repo.deleteHoldingRow(uid, "owner-hold-1");
 
     // A transaction naming somebody else's account does not move its balance.
     await repo.insertTransaction(other, {
