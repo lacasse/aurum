@@ -78,6 +78,9 @@ function isChequing(accountType: string): boolean {
  * once arriving in the investment account — so counting both sides would show
  * a month of saving as a month of spending followed by a deposit.
  */
+/** The sub-type for a whole account brought over from another institution. */
+const ACCOUNT_MOVED_IN = "TRANSFER_TF";
+
 function isInternalTransfer(subType: string, description: string): boolean {
   const d = description.toLowerCase();
   return (
@@ -147,6 +150,40 @@ export function parseActivitiesCsv(
 
   const swapsByDate = new Map<string, { ticker: string; quantity: number }[]>();
   const demergersByDate = new Map<string, { ticker: string; quantity: number }[]>();
+  /*
+   * Money moving between two investment accounts shows as a withdrawal from
+   * one and a deposit into the other on the same day. Paired, it is one
+   * transfer between them; unpaired, each half would pass through the everyday
+   * account and show it a movement that never happened.
+   */
+  const moves = new Map<string, { index: number; registration: Registration; amount: number }[]>();
+  for (const [index, r] of records.entries()) {
+    const registration = registrationOf(r.account_type ?? "");
+    const amount = Number(r.net_cash_amount);
+    if (
+      registration &&
+      (r.activity_type ?? "").trim() === "MoneyMovement" &&
+      (r.activity_sub_type ?? "").trim() !== ACCOUNT_MOVED_IN &&
+      Number.isFinite(amount) &&
+      amount !== 0
+    ) {
+      const key = `${(r.effective_date ?? "").trim()}|${Math.abs(amount).toFixed(2)}`;
+      moves.set(key, [...(moves.get(key) ?? []), { index, registration, amount }]);
+    }
+  }
+  /** Deposit rows paid out of another investment account, and from which. */
+  const pairedFrom = new Map<number, Registration>();
+  /** The withdrawal halves of those, which the deposit now stands for. */
+  const pairedOut = new Set<number>();
+  for (const sides of moves.values()) {
+    const outs = sides.filter((s) => s.amount < 0);
+    for (const into of sides.filter((s) => s.amount > 0)) {
+      const out = outs.find((o) => o.registration !== into.registration && !pairedOut.has(o.index));
+      if (!out) continue;
+      pairedOut.add(out.index);
+      pairedFrom.set(into.index, out.registration);
+    }
+  }
   for (const r of records) {
     const date = (r.effective_date ?? "").trim();
     const sub = (r.activity_sub_type ?? "").trim();
@@ -202,7 +239,7 @@ export function parseActivitiesCsv(
       .map(([amount]) => amount),
   );
 
-  for (const r of records) {
+  for (const [index, r] of records.entries()) {
     const date = (r.effective_date ?? "").trim();
     const accountType = (r.account_type ?? "").trim();
     const type = (r.activity_type ?? "").trim();
@@ -265,8 +302,10 @@ export function parseActivitiesCsv(
       qty: number,
       price: number,
       cashAmount: number,
+      fromRegistration?: Registration,
     ) => {
-      if (!symbol) {
+      const moneyOnly = tradeType === "deposit" || tradeType === "withdrawal";
+      if (!symbol && !moneyOnly) {
         drop("security rows with no symbol");
         return;
       }
@@ -286,7 +325,9 @@ export function parseActivitiesCsv(
        * `tickerForSecurity`. Reading them here is what keeps a US trade off a
        * receipt's position.
        */
-      const ticker = alias.get(symbol) ?? tickerForSecurity(symbol, securityName, currency);
+      const ticker = moneyOnly
+        ? ""
+        : alias.get(symbol) ?? tickerForSecurity(symbol, securityName, currency);
       const row: TradeRow = {
         id: rowId("trd"),
         date,
@@ -304,6 +345,7 @@ export function parseActivitiesCsv(
         include: true,
         duplicate: false,
         sourceFile: fileName,
+        ...(fromRegistration ? { fromRegistration } : {}),
       };
       const key = tradeKey(row);
       row.duplicate = seenTrade.has(key);
@@ -411,6 +453,31 @@ export function parseActivitiesCsv(
           // The card's own export carries the purchases; the payment that
           // settles it would count the same spending a second time.
           drop("credit card payments");
+          break;
+        }
+        /*
+         * Money arriving in or leaving an investment account is the only
+         * record of a contribution, so it is kept as a deposit or withdrawal,
+         * which the save posts as a transfer from the everyday account. It
+         * used to be dropped with the chequing side it mirrors, and with both
+         * halves gone an RRSP deposit counted towards no contribution room.
+         */
+        if (registration && sub === ACCOUNT_MOVED_IN) {
+          /*
+           * A whole account brought over from another institution. It is
+           * neither new money nor a payment out of the everyday account, so
+           * nothing is guessed for it.
+           */
+          drop("accounts moved in from another institution");
+          needsAttention.push(`${date}: ${accountType} — account moved in from another institution`);
+          break;
+        }
+        if (registration && pairedOut.has(index)) {
+          drop("moves between your investment accounts");
+          break;
+        }
+        if (registration) {
+          addTrade(amount > 0 ? "deposit" : "withdrawal", 0, 0, amount, pairedFrom.get(index));
           break;
         }
         if (isInternalTransfer(sub, desc)) {

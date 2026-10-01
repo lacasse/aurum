@@ -62,6 +62,11 @@ export interface TradeRow {
   duplicate: boolean;
   error?: string;
   sourceFile: string;
+  /**
+   * For a deposit, the investment account the money came out of, when the
+   * export shows it leaving one. Absent means the everyday account.
+   */
+  fromRegistration?: Registration;
 }
 
 /**
@@ -387,6 +392,7 @@ export function markAlreadyImported(
     amount: number;
     sourceAccountId?: string;
     destinationAccountId?: string;
+    granularity?: "individual" | "monthly";
   }[],
   investmentAccountIds: ReadonlySet<string>,
 ): TradeRow[] {
@@ -405,12 +411,25 @@ export function markAlreadyImported(
     }
   }
   const seen = new Set<string>();
+  /*
+   * Months whose transfers are kept as one total each. A deposit in such a
+   * month is either already inside the total for its account, or cannot be
+   * added beside it — the database refuses a month kept both ways.
+   */
+  const monthlyMonths = new Set<string>();
+  const monthlyInto = new Set<string>();
   for (const t of existingTransfers) {
     // The investment side is the one a deposit or withdrawal names.
     const into = t.destinationAccountId && investmentAccountIds.has(t.destinationAccountId);
     const out = t.sourceAccountId && investmentAccountIds.has(t.sourceAccountId);
     if (into) seen.add(transferKey(t.date, t.amount, t.destinationAccountId!, true));
     if (out) seen.add(transferKey(t.date, t.amount, t.sourceAccountId!, false));
+    if (t.granularity === "monthly") {
+      const month = t.date.slice(0, 7);
+      monthlyMonths.add(month);
+      if (into) monthlyInto.add(`${month}|${t.destinationAccountId}|in`);
+      if (out) monthlyInto.add(`${month}|${t.sourceAccountId}|out`);
+    }
   }
 
   return rows.map((r) => {
@@ -418,7 +437,19 @@ export function markAlreadyImported(
     const accountId = accountIdFor(r.registration);
     if (!accountId) return r;
     if (r.type === "deposit" || r.type === "withdrawal") {
-      if (!seen.has(transferKey(r.date, r.amountCad, accountId, r.type === "deposit"))) return r;
+      const deposit = r.type === "deposit";
+      const month = r.date.slice(0, 7);
+      if (monthlyInto.has(`${month}|${accountId}|${deposit ? "in" : "out"}`)) {
+        return { ...r, duplicate: true, include: false, error: "Already in this month's total" };
+      }
+      if (monthlyMonths.has(month)) {
+        return {
+          ...r,
+          include: false,
+          error: `${month} is kept as monthly totals — add this to that month's transfer instead`,
+        };
+      }
+      if (!seen.has(transferKey(r.date, r.amountCad, accountId, deposit))) return r;
     } else {
       const marks = seenFlows.get(flowKey(r.ticker, accountId, r.type));
       const mark: FlowMark = { date: r.date, quantity: Math.abs(r.quantity), amount: r.amountCad };
@@ -476,6 +507,8 @@ export interface AccumulationResult {
     accountId: string;
     amount: number;
     deposit: boolean;
+    /** The investment account a deposit came from; absent for the everyday one. */
+    fromAccountId?: string;
   }[];
   /** Rows dropped because their account type or activity type was unreadable. */
   skipped: number;
@@ -601,6 +634,9 @@ export function accumulatePositions(
         accountId,
         amount: row.amountCad,
         deposit: row.type === "deposit",
+        ...(row.fromRegistration
+          ? { fromAccountId: accountIdFor(row.fromRegistration) || undefined }
+          : {}),
       });
       continue;
     }

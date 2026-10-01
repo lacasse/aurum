@@ -132,17 +132,57 @@ describe("parseActivitiesCsv", () => {
     assert.equal(res.cash[1].amount, 58.20);
   });
 
-  test("both sides of an internal transfer are dropped, not counted", () => {
-    // The same amount leaving chequing and arriving in the RRSP. Counted, it
-    // would read as a month of spending followed by a deposit.
+  test("an internal transfer becomes one deposit, not spending and income", () => {
+    // The same amount leaving chequing and arriving in the RRSP. The chequing
+    // side is the mirror and is dropped; the RRSP side is the contribution.
     const res = parse(
       cashRow({ date: "2026-07-15", subType: "TRANSFER", description: "Money transfer out of the account", netCash: -500 }),
       cashRow({ date: "2026-07-15", accountId: "BB2", accountType: "RRSP", subType: "EFT", description: "Deposit", netCash: 500 }),
     );
     assert.equal(res.cash.length, 0);
-    assert.equal(
-      res.skipped.find((s) => s.reason.includes("your own accounts"))?.count,
-      2,
+    assert.equal(res.skipped.find((s) => s.reason.includes("your own accounts"))?.count, 1);
+    assert.equal(res.trades.length, 1);
+    assert.equal(res.trades[0].type, "deposit");
+    assert.equal(res.trades[0].registration, "RRSP");
+    assert.equal(res.trades[0].amountCad, 500);
+  });
+
+  test("money moved between two investment accounts is one transfer between them", () => {
+    const res = parse(
+      cashRow({ date: "2026-08-15", accountId: "FF6", accountType: "Non-registered margin", subType: "TRANSFER", description: "Money transfer out of the account", netCash: -700 }),
+      cashRow({ date: "2026-08-15", accountId: "BB2", accountType: "RRSP", subType: "EFT", description: "Deposit", netCash: 700 }),
+    );
+    assert.equal(res.trades.length, 1);
+    const [t] = res.trades;
+    assert.equal(t.type, "deposit");
+    assert.equal(t.registration, "RRSP");
+    assert.equal(t.fromRegistration, "non-registered");
+    assert.equal(res.skipped.find((s) => s.reason === "moves between your investment accounts")?.count, 1);
+  });
+
+  test("an account moved in from another institution is surfaced, not recorded", () => {
+    const res = parse(
+      cashRow({ date: "2026-08-14", accountId: "FF6", accountType: "Non-registered margin", subType: "TRANSFER_TF", description: "Money transfer into the account", netCash: 9000 }),
+    );
+    assert.equal(res.trades.length, 0);
+    assert.equal(res.cash.length, 0);
+    assert.equal(res.needsAttention.length, 1);
+  });
+
+  test("every investment account records its deposits and withdrawals", () => {
+    const res = parse(
+      cashRow({ date: "2026-08-15", accountId: "DD4", accountType: "TFSA", subType: "EFT", description: "Deposit", netCash: 300 }),
+      cashRow({ date: "2026-08-16", accountId: "EE5", accountType: "FHSA", subType: "EFT", description: "Deposit", netCash: 200 }),
+      cashRow({ date: "2026-08-17", accountId: "FF6", accountType: "Non-registered margin", subType: "EFT", description: "Withdrawal", netCash: -100 }),
+    );
+    assert.equal(res.cash.length, 0);
+    assert.deepEqual(
+      res.trades.map((t) => [t.registration, t.type, t.amountCad]),
+      [
+        ["TFSA", "deposit", 300],
+        ["FHSA", "deposit", 200],
+        ["non-registered", "withdrawal", 100],
+      ],
     );
   });
 

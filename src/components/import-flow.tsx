@@ -413,7 +413,7 @@ export function ImportFlow() {
       }
     }
     for (const t of transfers) {
-      const from = t.deposit ? cashAccountId : t.accountId;
+      const from = t.deposit ? (t.fromAccountId ?? cashAccountId) : t.accountId;
       const to = t.deposit ? t.accountId : cashAccountId;
       const label = REGISTRATION_LABELS[t.registration];
       if (from && to && from !== to) {
@@ -957,9 +957,16 @@ export function ImportFlow() {
                         <td className="whitespace-nowrap px-2 py-1.5 text-ink-dim">{r.date}</td>
                         <td className="px-2 py-1.5">
                           <span className="font-medium">{r.ticker}</span>{" "}
-                          <span className="text-ink-faint">{r.type ?? r.typeRaw}</span>
+                          <span className="text-ink-faint">
+                            {r.type ?? r.typeRaw}
+                            {r.fromRegistration &&
+                              ` from ${REGISTRATION_LABELS[r.fromRegistration]}`}
+                          </span>
                           {r.duplicate && (
                             <Badge className="ml-2 text-[0.5625rem]">already have it</Badge>
+                          )}
+                          {r.error && !r.duplicate && (
+                            <p className="text-[0.625rem] text-negative">{r.error}</p>
                           )}
                         </td>
                         <td className="px-2 py-1.5 text-ink-dim">

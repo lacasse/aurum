@@ -318,6 +318,17 @@ describe("accumulatePositions", () => {
     );
     assert.equal(positions.length, 0);
     assert.deepEqual(transfers.map((t) => [t.deposit, t.amount]), [[true, 1000], [false, 400]]);
+    assert.equal(transfers[0].fromAccountId, undefined, "from the everyday account");
+  });
+
+  test("a deposit out of another investment account names that account", () => {
+    const { transfers } = accumulatePositions(
+      [row({ type: "deposit", ticker: "", quantity: 0, amountCad: 700, registration: "RRSP", fromRegistration: "TFSA" })],
+      resolve,
+      [],
+    );
+    assert.equal(transfers[0].accountId, "acc-rrsp");
+    assert.equal(transfers[0].fromAccountId, "acc-tfsa");
   });
 
   test("a same-day buy is applied before a same-day sell", () => {
@@ -547,6 +558,32 @@ describe("markAlreadyImported", () => {
       new Set(["acc-tfsa"]),
     );
     assert.equal(r.duplicate, false, "money in is not money out");
+  });
+
+  test("a deposit inside a month's total for its account is already counted", () => {
+    const [r] = markAlreadyImported(
+      [csvRow({ date: "2025-01-15", type: "deposit", typeRaw: "Deposit", ticker: "", quantity: 0, amountCad: 500 })],
+      resolveAcc,
+      [],
+      [{ date: "2025-01-31", amount: 500, sourceAccountId: "acc-cash", destinationAccountId: "acc-tfsa", granularity: "monthly" }],
+      new Set(["acc-tfsa"]),
+    );
+    assert.equal(r.duplicate, true);
+    assert.equal(r.include, false);
+  });
+
+  test("a deposit in a month kept as totals for other accounts is held back, not saved", () => {
+    // The database refuses an individual transfer beside monthly ones.
+    const [r] = markAlreadyImported(
+      [csvRow({ date: "2025-01-15", type: "deposit", typeRaw: "Deposit", ticker: "", quantity: 0, amountCad: 500 })],
+      resolveAcc,
+      [],
+      [{ date: "2025-01-31", amount: 100, sourceAccountId: "acc-cash", destinationAccountId: "acc-rrsp", granularity: "monthly" }],
+      new Set(["acc-tfsa", "acc-rrsp"]),
+    );
+    assert.equal(r.duplicate, false);
+    assert.equal(r.include, false);
+    assert.match(r.error ?? "", /monthly totals/);
   });
 
   test("an empty portfolio flags nothing", () => {
