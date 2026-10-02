@@ -42,14 +42,23 @@ export interface PlanRoom {
   held: boolean;
 }
 
-const YEAR = /^(\d{4})/;
-
-function yearOf(date: string): string {
-  return YEAR.exec(date)?.[1] ?? "";
+/**
+ * The dates a plan's year covers, as [first day, day after the last).
+ *
+ * TFSA and FHSA room is a calendar year. An RRSP year runs from 1 March to the
+ * end of February, named for the year it starts in: a contribution in the
+ * first two months of a year is deductible against the year before, so
+ * counting it in the calendar year it landed put it against the wrong room.
+ */
+export function planYearSpan(plan: RegisteredPlan, year: string): [string, string] {
+  const next = String(Number(year) + 1);
+  return plan === "RRSP"
+    ? [`${year}-03-01`, `${next}-03-01`]
+    : [`${year}-01-01`, `${next}-01-01`];
 }
 
 /**
- * What was paid into a plan during a calendar year.
+ * What was paid into a plan during its year (see `planYearSpan`).
  *
  * Counted as money arriving from outside the plan: a transfer whose
  * destination is an account of that registration. Gross, not net of
@@ -72,10 +81,11 @@ export function contributedIn(
   );
   if (inPlan.size === 0) return 0;
 
+  const [from, until] = planYearSpan(plan, year);
   let total = 0;
   for (const t of transactions) {
     if (t.type !== "transfer") continue;
-    if (yearOf(t.date) !== year) continue;
+    if (t.date < from || t.date >= until) continue;
     if (!t.destinationAccountId || !inPlan.has(t.destinationAccountId)) continue;
     // Moving between two accounts of the same plan is not new money.
     if (t.sourceAccountId && inPlan.has(t.sourceAccountId)) continue;

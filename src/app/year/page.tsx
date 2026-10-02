@@ -748,7 +748,7 @@ export default function YearPage() {
           <Card className="flex h-full flex-col">
             <CardHeader
               title="Registered plan contribution room"
-              subtitle={`What you have paid into each plan in ${selected.year}`}
+              subtitle={`What you have paid into each plan in ${selected.year} · the RRSP from March ${selected.year} to February ${Number(selected.year) + 1}`}
               action={
                 <Button variant="ghost" size="sm" onClick={() => setRoomOpen(true)}>
                   <SlidersHorizontal size={14} /> Set room

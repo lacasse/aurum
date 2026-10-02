@@ -86,6 +86,24 @@ describe("what was paid into a plan", () => {
     assert.equal(contributedIn("2026", "TFSA", txns, accounts), 2000);
   });
 
+  test("an RRSP year runs from March to the end of February", () => {
+    const txns = [
+      deposit("2026-02-28", 300, "rrsp-1"),
+      deposit("2026-03-01", 400, "rrsp-1"),
+      deposit("2027-02-28", 500, "rrsp-1"),
+      deposit("2027-03-01", 600, "rrsp-1"),
+    ];
+    assert.equal(contributedIn("2025", "RRSP", txns, accounts), 300);
+    assert.equal(contributedIn("2026", "RRSP", txns, accounts), 900);
+    assert.equal(contributedIn("2027", "RRSP", txns, accounts), 600);
+  });
+
+  test("a leap-year February still belongs to the year before", () => {
+    const txns = [deposit("2028-02-29", 250, "rrsp-1")];
+    assert.equal(contributedIn("2027", "RRSP", txns, accounts), 250);
+    assert.equal(contributedIn("2028", "RRSP", txns, accounts), 0);
+  });
+
   test("income and spending are not contributions", () => {
     const txns: Transaction[] = [
       { ...deposit("2026-02-01", 100, "tfsa-1"), type: "income" },
