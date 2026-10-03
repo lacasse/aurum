@@ -480,14 +480,16 @@ export function periodShape(
  * The same accounts the flow chart's middle bar is made of, netted the way a
  * balance sheet nets them: a card is money owed against the cash beside it,
  * not money you have. Read through `accountValueAt`, so a gap in an account's
- * history is filled the way it is filled everywhere else.
+ * history is filled the way it is filled everywhere else. `cards: false`
+ * leaves the cards out, for someone who reads cash as what the bank holds.
  */
 export function spendableCashAt(
   accounts: readonly Account[],
   month: string,
+  { cards = true }: { cards?: boolean } = {},
 ): number {
   return accounts
-    .filter((a) => CASH_KINDS.has(a.kind))
+    .filter((a) => CASH_KINDS.has(a.kind) && (cards || a.kind !== "credit"))
     .reduce(
       (sum, a) => sum + (isLiability(a.kind) ? -1 : 1) * accountValueAt(a, month),
       0,

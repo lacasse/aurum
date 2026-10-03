@@ -351,6 +351,11 @@ export interface Goal {
   title?: string;
   /** One category, for a spending goal; absent means all spending. */
   category?: string;
+  /**
+   * A cash goal that counts only what the bank accounts hold. Absent means
+   * what the cards owe is taken off, as the Year page's cash is.
+   */
+  ignoreCards?: true;
   /** Why it matters, in the owner's words. */
   why?: string;
   createdAt: string;
@@ -433,14 +438,18 @@ function flowTotals(
 }
 
 /** A month-end balance for one metric, in dollars. */
-function levelAt(metric: GoalMetric, point: NetWorthPoint, accounts: readonly Account[]): number {
-  switch (metric) {
+function levelAt(
+  goal: Pick<Goal, "metric" | "ignoreCards">,
+  point: NetWorthPoint,
+  accounts: readonly Account[],
+): number {
+  switch (goal.metric) {
     case "portfolio":
       return point.portfolio;
     case "debt":
       return point.liabilities;
     case "cash":
-      return spendableCashAt(accounts, point.key);
+      return spendableCashAt(accounts, point.key, { cards: !goal.ignoreCards });
     default:
       return point.net;
   }
@@ -496,7 +505,7 @@ const NOTHING: Measure = { value: null, best: null, start: null, dollars: null }
 
 /** The levels in the window, with the one they are measured from. */
 function levels(
-  goal: Pick<Goal, "metric" | "basis" | "year">,
+  goal: Pick<Goal, "metric" | "basis" | "year" | "ignoreCards">,
   w: { from: string; to: string },
   inputs: GoalInputs,
 ): Measure {
@@ -534,7 +543,7 @@ function levels(
   const points = inputs.netWorth.filter((p) => inWindow(p.key, w));
   if (points.length === 0) return NOTHING;
   const before = inputs.netWorth.find((p) => p.key === decKey) ?? null;
-  const raw = (p: NetWorthPoint) => levelAt(goal.metric, p, inputs.accounts);
+  const raw = (p: NetWorthPoint) => levelAt(goal, p, inputs.accounts);
   const latest = points[points.length - 1];
 
   let values: number[];
@@ -579,7 +588,7 @@ function levels(
  * achievable rather than a guess.
  */
 export function measure(
-  goal: Pick<Goal, "metric" | "basis" | "year" | "by" | "plan" | "category">,
+  goal: Pick<Goal, "metric" | "basis" | "year" | "by" | "plan" | "category" | "ignoreCards">,
   inputs: GoalInputs,
 ): Measure {
   const w = windowOf(goal.year, goal.by, inputs.today);
@@ -960,6 +969,7 @@ export function cleanGoals(raw: unknown): Goal[] {
     if (metric === "spending" && typeof g.category === "string" && g.category.trim()) {
       goal.category = g.category.trim().slice(0, 80);
     }
+    if (metric === "cash" && g.ignoreCards === true) goal.ignoreCards = true;
     if (metric === "custom") {
       goal.title = title;
       goal.target = 0;

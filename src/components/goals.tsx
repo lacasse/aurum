@@ -505,6 +505,7 @@ export function GoalComposer({
   // Empty is every plan, as an empty category is all spending.
   const [plan, setPlan] = useState<RegisteredPlan | "">(start?.plan ?? "");
   const [category, setCategory] = useState(start?.category ?? "");
+  const [cards, setCards] = useState<"net" | "ignore">(editing?.ignoreCards ? "ignore" : "net");
   const [basis, setBasis] = useState<GoalBasis>(start?.basis ?? "amount");
   const [target, setTarget] = useState(start?.target !== undefined ? String(start.target) : "");
   const [by, setBy] = useState(editing ? editing.by.slice(5) : "12");
@@ -526,6 +527,7 @@ export function GoalComposer({
     by: `${year}-${by}`,
     plan: metric === "contribution" && plan ? plan : undefined,
     category: metric === "spending" && category ? category : undefined,
+    ignoreCards: metric === "cash" && cards === "ignore" ? (true as const) : undefined,
     title: manual ? title.trim() : undefined,
     ...(manual ? { basis: "amount" as GoalBasis } : {}),
   };
@@ -624,7 +626,8 @@ export function GoalComposer({
         editing.target === next.target &&
         editing.by === next.by &&
         editing.plan === next.plan &&
-        editing.category === next.category;
+        editing.category === next.category &&
+        editing.ignoreCards === next.ignoreCards;
       if (same && editing.metOn) next.metOn = editing.metOn;
       onAdd(next);
       return;
@@ -642,7 +645,15 @@ export function GoalComposer({
 
   return (
     <div className={cn("space-y-5", wide && "lg:grid lg:grid-cols-2 lg:gap-x-10 lg:gap-y-5 lg:space-y-0")}>
-      <Step letter="S" title="Specific" hint={spec.source}>
+      <Step
+        letter="S"
+        title="Specific"
+        hint={
+          metric === "cash" && cards === "ignore" && basis === "amount"
+            ? "Chequing and savings as the bank shows them, with nothing taken off for the cards."
+            : spec.source
+        }
+      >
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="What to measure">
             <Select value={metric} onChange={(e) => setMetric(e.target.value as GoalMetric)}>
@@ -683,6 +694,13 @@ export function GoalComposer({
                     {accounts.some((a) => a.registration === p) ? "" : " (no account yet)"}
                   </option>
                 ))}
+              </Select>
+            </Field>
+          ) : metric === "cash" ? (
+            <Field label="Credit cards">
+              <Select value={cards} onChange={(e) => setCards(e.target.value as "net" | "ignore")}>
+                <option value="net">Subtract what they owe</option>
+                <option value="ignore">Leave them out</option>
               </Select>
             </Field>
           ) : metric === "spending" ? (

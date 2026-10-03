@@ -325,6 +325,37 @@ describe("every goal as a percentage", () => {
     assert.equal(m.value, 20);
   });
 
+  test("a cash goal can leave what the cards owe out", () => {
+    const chequing = {
+      id: "chq",
+      name: "Chequing",
+      institution: "—",
+      kind: "checking",
+      balance: 5000,
+      history: [{ month: "2026-02", value: 5000 }],
+    } as unknown as Account;
+    const card = {
+      id: "card",
+      name: "Card",
+      institution: "—",
+      kind: "credit",
+      balance: 1000,
+      history: [{ month: "2026-02", value: 1000 }],
+    } as unknown as Account;
+    const given = inputs({ accounts: [chequing, card], netWorth: [point("2026-02", 60000)] });
+    assert.equal(measure(goal({ metric: "cash" }), given).value, 4000);
+    assert.equal(measure(goal({ metric: "cash", ignoreCards: true }), given).value, 5000);
+  });
+
+  test("only a cash goal keeps the choice about cards", () => {
+    const [cash, saved] = cleanGoals([
+      { ...goal({ metric: "cash" }), id: "a", ignoreCards: true },
+      { ...goal({ metric: "saved" }), id: "b", ignoreCards: true },
+    ]);
+    assert.equal(cash.ignoreCards, true);
+    assert.equal(saved.ignoreCards, undefined);
+  });
+
   test("debt paid down is the share of what was owed in December", () => {
     const netWorth = [
       point("2025-12", 0, { liabilities: 20000 }),
