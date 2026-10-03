@@ -251,7 +251,7 @@ describe("planTrades: buying", () => {
     assert.equal(c.existing, null);
     assert.equal(c.shares, 10);
     assert.equal(c.avgCost, 35);
-    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", delta: -350 }]);
+    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", currency: "CAD", delta: -350 }]);
     assert.equal(plan.batch.created, 1);
   });
 
@@ -297,7 +297,7 @@ describe("planTrades: buying", () => {
     );
     assert.ok(plan.ok);
     assert.equal(plan.batch.changes[0].avgCost, 125);
-    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", delta: -250 }]);
+    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", currency: "CAD", delta: -250 }]);
   });
 
   test("a zero price is refused", () => {
@@ -316,7 +316,7 @@ describe("planTrades: selling", () => {
     );
     assert.ok(plan.ok);
     assert.equal(plan.batch.changes[0].shares, 60);
-    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", delta: 1440 }]);
+    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", currency: "CAD", delta: 1440 }]);
   });
 
   test("selling more than is held fails the whole batch", () => {
@@ -361,7 +361,53 @@ describe("planTrades: dividends and rewards", () => {
     assert.ok(plan.ok);
     assert.equal(plan.batch.changes[0].shares, 100);
     assert.equal(plan.batch.changes[0].dividendsReceived, 18.44);
-    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", delta: 18.44 }]);
+    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", currency: "CAD", delta: 18.44 }]);
+  });
+
+  test("a USD dividend with no stated conversion uses the rate", () => {
+    const plan = planTrades(
+      [row({ action: "dividend", price: "8", quantity: "1", currency: "USD", ticker: "ZLMN" })],
+      [],
+      [holding({ ticker: "ZLMN", currency: "USD" })],
+      1.5,
+    );
+    assert.ok(plan.ok);
+    assert.equal(plan.batch.changes[0].dividendsReceived, 12);
+  });
+
+  test("a stated conversion wins over the rate", () => {
+    const plan = planTrades(
+      [row({ action: "dividend", price: "8", quantity: "1", currency: "USD", ticker: "ZLMN", cadAmount: "11" })],
+      [],
+      [holding({ ticker: "ZLMN", currency: "USD" })],
+      1.5,
+    );
+    assert.ok(plan.ok);
+    assert.equal(plan.batch.changes[0].dividendsReceived, 11);
+  });
+
+  test("a US-dollar dividend goes to the account's US-dollar cash", () => {
+    const plan = planTrades(
+      [row({ action: "dividend", price: "8", quantity: "1", currency: "USD", ticker: "ZLMN" })],
+      [],
+      [holding({ ticker: "ZLMN", currency: "USD" })],
+      1.5,
+    );
+    assert.ok(plan.ok);
+    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", currency: "USD", delta: 8 }]);
+    assert.equal(plan.batch.changes[0].dividendsReceived, 12, "still counted in CAD as income");
+  });
+
+  test("tax withheld from a dividend is kept on its flow", () => {
+    const plan = planTrades(
+      [row({ action: "dividend", price: "10", quantity: "1", taxWithheld: "1.5" })],
+      [],
+      [holding()],
+      1.37,
+    );
+    assert.ok(plan.ok);
+    const flow = plan.batch.changes[0].flows.at(-1);
+    assert.deepEqual([flow?.amount, flow?.taxWithheld], [10, 1.5]);
   });
 
   test("a dividend on a position not held is refused", () => {

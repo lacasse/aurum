@@ -116,3 +116,9 @@ export function daysLeftInMonth(from = new Date()): number {
   const end = new Date(from.getFullYear(), from.getMonth() + 1, 0);
   return Math.max(1, end.getDate() - from.getDate() + 1);
 }
+
+/** Whole days between two ISO dates, unsigned. */
+export function daysApart(a: string, b: string): number {
+  const ms = Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`));
+  return Number.isFinite(ms) ? ms / 86_400_000 : Infinity;
+}

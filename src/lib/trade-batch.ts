@@ -26,6 +26,8 @@ export interface TradeInput {
   accountId: string;
   currency: string;
   cadAmount: string;
+  /** For a dividend read from a file, the tax withheld from it, in CAD. */
+  taxWithheld?: string;
 }
 
 /** Identity for a ticker nobody has held before, which no trade row carries. */
@@ -54,7 +56,7 @@ export interface HoldingChange {
 export interface TradeBatch {
   changes: HoldingChange[];
   /** Net cash movement per account, applied once rather than row by row. */
-  cash: { accountId: string; delta: number }[];
+  cash: { accountId: string; delta: number; currency: "CAD" | "USD" }[];
   /** Rows that carried a trade, ignoring the blank one at the end. */
   trades: number;
   /** How many of the changes open a position that did not exist. */
@@ -301,9 +303,15 @@ export function planTrades(
   }
 
   const cashDeltas = new Map<string, number>();
-  const moveCash = (accountId: string, delta: number, onDate: string) => {
+  const moveCash = (
+    accountId: string,
+    delta: number,
+    onDate: string,
+    currency: "CAD" | "USD" = "CAD",
+  ) => {
     if (!movementApplies({ balanceAsOf: balanceAnchorFor(accountId) }, onDate)) return;
-    cashDeltas.set(accountId, (cashDeltas.get(accountId) ?? 0) + delta);
+    const key = `${accountId}|${currency}`;
+    cashDeltas.set(key, (cashDeltas.get(key) ?? 0) + delta);
   };
 
   /*
@@ -423,20 +431,30 @@ export function planTrades(
       if (valueCad > 0) lot.dividends += valueCad;
       lot.flows.push(...rewardFlows(row.date, qty, valueCad));
     } else if (row.action === "dividend") {
-      const cadAmount = isUsd ? Number(row.cadAmount) || 0 : Number(row.price) || 0;
+      // The same fallback as a buy or a reward: a stated conversion, else the rate.
+      const cadAmount = isUsd
+        ? Number(row.cadAmount) || (Number(row.price) || 0) * usdCadRate
+        : Number(row.price) || 0;
       if (!Number.isFinite(cadAmount) || cadAmount <= 0) {
         return { ok: false, error: `Dividend ${ticker}: amount must be > 0.` };
       }
       if (!held) {
         return { ok: false, error: `Dividend ${ticker}: no position found to credit.` };
       }
-      moveCash(row.accountId, cadAmount, row.date);
+      /*
+       * Paid in US dollars, it lands in the account's US-dollar cash, as the
+       * money actually did. Credited in Canadian dollars it was a conversion
+       * nobody made, and the US balance never saw it.
+       */
+      if (isUsd) moveCash(row.accountId, Number(row.price) || 0, row.date, "USD");
+      else moveCash(row.accountId, cadAmount, row.date);
       lot.dividends += cadAmount;
       lot.flows.push({
         date: row.date,
         kind: "dividend",
         amount: cadAmount,
         shares: 0,
+        ...(Number(row.taxWithheld) > 0 ? { taxWithheld: Number(row.taxWithheld) } : {}),
       });
     }
   }
@@ -497,10 +515,10 @@ export function planTrades(
     ok: true,
     batch: {
       changes,
-      cash: [...cashDeltas].map(([accountId, delta]) => ({
-        accountId,
-        delta: Math.round(delta * 100) / 100,
-      })),
+      cash: [...cashDeltas].map(([key, delta]) => {
+        const [accountId, currency] = key.split("|") as [string, "CAD" | "USD"];
+        return { accountId, currency, delta: Math.round(delta * 100) / 100 };
+      }),
       trades: active.length,
       created,
       warnings: holdingProblems(projected),

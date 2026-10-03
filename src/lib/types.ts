@@ -296,6 +296,11 @@ export interface CashFlow {
    * rather than left to look like a free lunch.
    */
   awaitingPrice?: boolean;
+  /**
+   * Tax withheld at source from a dividend, in CAD. The amount is still the
+   * gross, so the net received and the tax are both on the record.
+   */
+  taxWithheld?: number;
 }
 
 export interface Holding {

@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   accumulatePositions,
   markAlreadyImported,
+  transferFor,
   normalizeAccountType,
   tradeKey,
   normalizeType,
@@ -592,5 +593,29 @@ describe("markAlreadyImported", () => {
       markAlreadyImported(rows, resolveAcc, [], [], new Set()).map((r) => r.duplicate),
       [false, false],
     );
+  });
+});
+
+describe("transferFor", () => {
+  const t = { date: "2026-08-15", registration: "RRSP" as const, accountId: "acc-rrsp", amount: 500, deposit: true };
+
+  test("a deposit comes out of the everyday account", () => {
+    const txn = transferFor(t, "acc-cash");
+    assert.equal(txn?.sourceAccountId, "acc-cash");
+    assert.equal(txn?.destinationAccountId, "acc-rrsp");
+    assert.equal(txn?.type, "transfer");
+  });
+
+  test("or out of the investment account it was moved from", () => {
+    assert.equal(transferFor({ ...t, fromAccountId: "acc-tfsa" }, "acc-cash")?.sourceAccountId, "acc-tfsa");
+  });
+
+  test("a withdrawal goes back to the everyday account", () => {
+    const txn = transferFor({ ...t, deposit: false }, "acc-cash");
+    assert.deepEqual([txn?.sourceAccountId, txn?.destinationAccountId], ["acc-rrsp", "acc-cash"]);
+  });
+
+  test("nothing when there is no everyday account to pair it with", () => {
+    assert.equal(transferFor(t, ""), null);
   });
 });

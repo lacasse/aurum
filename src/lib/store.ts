@@ -113,7 +113,13 @@ interface FinanceStore extends FinanceData {
    * counted twice: once as cash sitting in the account and again as the
    * position it bought.
    */
-  adjustAccountCash: (accountId: string, delta: number, onDate?: string) => void;
+  /** Moves the account's cash; `USD` moves its US-dollar balance instead. */
+  adjustAccountCash: (
+    accountId: string,
+    delta: number,
+    onDate?: string,
+    currency?: "CAD" | "USD",
+  ) => void;
   addHolding: (input: HoldingInput) => void;
   updateHolding: (id: string, input: HoldingInput) => void;
   /**
@@ -633,13 +639,17 @@ export const useFinance = create<FinanceStore>()((set, get) => ({
         api.deleteAccount(id).catch(report);
       },
 
-      adjustAccountCash: (accountId, delta, onDate) => {
+      adjustAccountCash: (accountId, delta, onDate, currency = "CAD") => {
         if (!accountId || !Number.isFinite(delta) || delta === 0) return;
         let updated: Account | undefined;
         set((s) => ({
           accounts: s.accounts.map((a) => {
             if (a.id !== accountId) return a;
             if (!movementApplies(a, onDate)) return a;
+            if (currency === "USD") {
+              updated = { ...a, balanceUSD: round2((a.balanceUSD ?? 0) + delta) };
+              return updated;
+            }
             const balance = round2(a.balance + delta);
             updated = withBalanceRecorded({ ...a, balance });
             return updated;

@@ -204,6 +204,8 @@ export const holdingSchema = z
           shares: z.coerce.number().finite(),
           // Set on a staking reward whose value on the day is still unknown.
           awaitingPrice: z.boolean().optional(),
+          // Tax withheld from a dividend at source.
+          taxWithheld: z.coerce.number().finite().optional(),
         }),
       )
       .catch([]),

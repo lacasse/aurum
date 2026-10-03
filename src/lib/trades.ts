@@ -12,11 +12,14 @@ import {
   CashFlow,
   Currency,
   Holding,
+  REGISTRATION_LABELS,
   Registration,
+  TRANSFER_CATEGORY,
+  Transaction,
   movementApplies,
 } from "./types";
 import { baseTicker, resolveTicker } from "./trade-batch";
-import { todayISO } from "./format";
+import { daysApart, todayISO } from "./format";
 
 export type TradeType = "buy" | "sell" | "dividend" | "deposit" | "withdrawal";
 
@@ -67,6 +70,8 @@ export interface TradeRow {
    * export shows it leaving one. Absent means the everyday account.
    */
   fromRegistration?: Registration;
+  /** For a dividend, the tax withheld from it at source, in CAD. */
+  taxWithheld?: number;
 }
 
 /**
@@ -304,12 +309,6 @@ function flowKey(ticker: string, accountId: string, kind: string): string {
   return `${baseTicker(ticker)}|${accountId}|${kind}`;
 }
 
-/** Whole days between two ISO dates, unsigned. */
-function daysApart(a: string, b: string): number {
-  const ms = Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`));
-  return Number.isFinite(ms) ? ms / 86_400_000 : Infinity;
-}
-
 /**
  * How far apart two records of one event may be dated.
  *
@@ -500,6 +499,8 @@ export interface AccumulationResult {
   positions: Position[];
   /** Net cash movement per account: buys spend it, sells and dividends add it. */
   cashDeltas: Map<string, number>;
+  /** The same, for an account's US-dollar cash. */
+  usdCashDeltas: Map<string, number>;
   /** Deposits and withdrawals, to be posted as transfers by the caller. */
   transfers: {
     date: string;
@@ -514,6 +515,33 @@ export interface AccumulationResult {
   skipped: number;
   /** Sales larger than the position they were applied to. */
   oversold: { ticker: string; accountId: string; sold: number; held: number }[];
+}
+
+/**
+ * The transaction a deposit or withdrawal is saved as.
+ *
+ * Shared by the import page and the monthly checklist, so money moving into an
+ * investment account is recorded the same way whichever door it came through.
+ * Null when both sides would be the same account, or one is missing.
+ */
+export function transferFor(
+  t: AccumulationResult["transfers"][number],
+  cashAccountId: string,
+): Omit<Transaction, "id"> | null {
+  const from = t.deposit ? (t.fromAccountId ?? cashAccountId) : t.accountId;
+  const to = t.deposit ? t.accountId : cashAccountId;
+  if (!from || !to || from === to) return null;
+  const label = REGISTRATION_LABELS[t.registration];
+  return {
+    date: t.date,
+    type: "transfer",
+    amount: t.amount,
+    category: TRANSFER_CATEGORY,
+    sourceAccountId: from,
+    destinationAccountId: to,
+    payee: t.deposit ? `Deposit to ${label}` : `Withdrawal from ${label}`,
+    note: `Imported: ${label} ${t.deposit ? "deposit" : "withdrawal"}`,
+  };
 }
 
 /**
@@ -539,6 +567,7 @@ export function accumulatePositions(
 ): AccumulationResult {
   const positions = new Map<string, Position>();
   const cashDeltas = new Map<string, number>();
+  const usdCashDeltas = new Map<string, number>();
   const transfers: AccumulationResult["transfers"] = [];
   let skipped = 0;
   const oversold: AccumulationResult["oversold"] = [];
@@ -677,14 +706,34 @@ export function accumulatePositions(
       pos.shares = remaining;
       pos.flows.push({ date: row.date, kind: "sell", amount: row.amountCad, shares: -sold });
     } else if (row.type === "dividend") {
-      moveCash(accountId, row.amountCad, row.date);
+      // A US-dollar dividend is US-dollar cash: see the same rule in planTrades.
+      if (row.currency === "USD") {
+        if (movementApplies({ balanceAsOf: balanceAnchorFor(accountId) }, row.date)) {
+          usdCashDeltas.set(accountId, (usdCashDeltas.get(accountId) ?? 0) + row.transactedAmount);
+        }
+      } else {
+        moveCash(accountId, row.amountCad, row.date);
+      }
       pos.dividendsNative += row.transactedAmount;
       pos.dividendsCad += row.amountCad;
-      pos.flows.push({ date: row.date, kind: "dividend", amount: row.amountCad, shares: 0 });
+      pos.flows.push({
+        date: row.date,
+        kind: "dividend",
+        amount: row.amountCad,
+        shares: 0,
+        ...(row.taxWithheld ? { taxWithheld: row.taxWithheld } : {}),
+      });
     }
   }
 
-  return { positions: [...positions.values()], cashDeltas, transfers, skipped, oversold };
+  return {
+    positions: [...positions.values()],
+    cashDeltas,
+    usdCashDeltas,
+    transfers,
+    skipped,
+    oversold,
+  };
 }
 
 /** The holding fields a finished position should be written with. */
