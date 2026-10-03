@@ -1592,7 +1592,8 @@ export function Waterfall({
                   </p>
                   {r.kind !== "total" && (
                     <p className="mt-0.5 text-[0.6875rem] tabular-nums text-ink-faint">
-                      Leaves net worth at {format(r.top)}
+                      {/* After the step: the bottom of a fall, the top of a rise. */}
+                      Leaves net worth at {format(r.delta < 0 ? r.range[0] : r.top)}
                     </p>
                   )}
                 </div>

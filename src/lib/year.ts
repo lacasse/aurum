@@ -551,7 +551,12 @@ export function yearWaterfall(
 
   add("Income", shape.income, "income");
   add("Expenses", -shape.expenses, "spending");
-  add(shape.revaluation >= 0 ? "Growth" : "Decline", shape.revaluation, "market");
+  /*
+   * One name whichever way it went. "Decline" beside a headline that was also
+   * down read as a second, larger answer to the same question, when this is
+   * only the part of the move that did not come from saving.
+   */
+  add("Markets & other", shape.revaluation, "market");
 
   steps.push({
     label: "Closing",

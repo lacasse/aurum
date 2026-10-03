@@ -426,7 +426,7 @@ export default function OverviewPage() {
           <Card className="flex h-full flex-col">
             <CardHeader
               title="Net worth roll forward"
-              subtitle={`Net worth 12 months ago plus what came in, minus what went out, plus growth, equals net worth as of ${monthName}`}
+              subtitle={`Net worth 12 months ago plus what came in, minus what went out, plus markets and everything else, equals net worth as of ${monthName}`}
             />
             <div className="min-h-[380px] flex-1 px-3 pb-4">
               <Waterfall steps={yearWaterfall(shape)} format={(n) => fmtCompact(n)} height="100%" />
