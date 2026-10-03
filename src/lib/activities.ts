@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import { ImportedRow, suggestCategory, txnKey } from "./csv";
+import { ImportedRow, StoredKeys, makeDupCheck, suggestCategory, txnKey } from "./csv";
 import { TradeRow, tradeKey } from "./trades";
 import { CorporateAction } from "./corporate-actions";
 import { tickerForSecurity } from "./trade-batch";
@@ -99,7 +99,7 @@ function rowId(prefix: string): string {
 export function parseActivitiesCsv(
   fileName: string,
   csvText: string,
-  existingTxnKeys: ReadonlySet<string>,
+  existingTxnKeys: StoredKeys,
   existingTradeKeys: ReadonlySet<string>,
   merchantRules: Record<string, string>,
   userCategories?: readonly string[],
@@ -116,7 +116,13 @@ export function parseActivitiesCsv(
   const actions: CorporateAction[] = [];
   const skipped = new Map<string, number>();
   const needsAttention: string[] = [];
-  const seenTxn = new Set(existingTxnKeys);
+  const withheld: { date: string; accountType: string; ticker: string; amount: number; currency: Currency }[] = [];
+  /*
+   * Stored rows and earlier files only, matched one for one, never this
+   * file's own other rows: the same small interest payment lands in three
+   * accounts on one day, and each is real.
+   */
+  const isStored = makeDupCheck(existingTxnKeys);
   const seenTrade = new Set(existingTradeKeys);
   const drop = (reason: string) => skipped.set(reason, (skipped.get(reason) ?? 0) + 1);
 
@@ -150,6 +156,13 @@ export function parseActivitiesCsv(
 
   const swapsByDate = new Map<string, { ticker: string; quantity: number }[]>();
   const demergersByDate = new Map<string, { ticker: string; quantity: number }[]>();
+  /*
+   * The securities that paid a dividend, by day and account. Withholding tax
+   * is its own line with no symbol on it, but it lands in the account and on
+   * the day of the dividend it was taken from — so that is how it is paired.
+   */
+  const dividendsOn = new Map<string, Set<string>>();
+  const payDay = (date: string, accountType: string) => `${date}|${accountType}`;
   /*
    * Money moving between two investment accounts shows as a withdrawal from
    * one and a deposit into the other on the same day. Paired, it is one
@@ -203,6 +216,10 @@ export function parseActivitiesCsv(
         months.add(date.slice(0, 7));
         transferMonths.set(key, months);
       }
+    }
+    if (type === "Dividend" && ticker) {
+      const k = payDay(date, (r.account_type ?? "").trim());
+      dividendsOn.set(k, (dividendsOn.get(k) ?? new Set()).add(ticker));
     }
     if (type === "ListingSwap" && ticker && Number.isFinite(quantity) && quantity !== 0) {
       swapsByDate.set(date, [...(swapsByDate.get(date) ?? []), { ticker, quantity }]);
@@ -264,8 +281,7 @@ export function parseActivitiesCsv(
       const abs = Math.abs(Math.round(amount * 100) / 100);
       if (abs === 0) return;
       const key = txnKey(date, abs, payee);
-      const dup = seenTxn.has(key);
-      seenTxn.add(key);
+      const dup = isStored(key);
       const s = suggestCategory(
         payee,
         hint,
@@ -385,9 +401,27 @@ export function parseActivitiesCsv(
       case "InterestCharged":
         addCash("expense", "Margin interest", "Fees", desc);
         break;
-      case "Tax":
-        addCash("expense", "Withholding tax", "Taxes", desc);
+      case "Tax": {
+        /*
+         * Paired with its dividend when exactly one paid in this account that
+         * day. With none, or several, the tax is still recorded but not
+         * guessed at, and named for a person to check.
+         */
+        const paying = [...(dividendsOn.get(payDay(date, accountType)) ?? [])];
+        if (paying.length === 1) {
+          const ticker = paying[0];
+          addCash("expense", `Withholding tax · ${ticker}`, "Taxes", desc);
+          withheld.push({ date, accountType, ticker, amount: Math.abs(amount), currency });
+        } else {
+          addCash("expense", "Withholding tax", "Taxes", desc);
+          needsAttention.push(
+            `${date} ${accountType}: withholding tax with ${
+              paying.length === 0 ? "no dividend" : `${paying.length} dividends`
+            } that day to pair it with`,
+          );
+        }
         break;
+      }
       case "FxExchange":
         drop("currency conversions");
         break;
@@ -508,6 +542,27 @@ export function parseActivitiesCsv(
       default:
         drop(`unrecognised activity (${type})`);
     }
+  }
+
+  /*
+   * Each tax onto the first dividend row it belongs to, converted the way that
+   * dividend was. One payment can arrive as two lines of the same security on
+   * the same day, and the tax belongs to the payment, not to each line.
+   */
+  for (const w of withheld) {
+    const div = trades.find(
+      (t) =>
+        t.type === "dividend" &&
+        t.date === w.date &&
+        t.registrationRaw === w.accountType &&
+        t.ticker.toUpperCase().startsWith(w.ticker),
+    );
+    if (!div) continue;
+    const rate =
+      w.currency === div.currency && div.transactedAmount > 0
+        ? div.amountCad / div.transactedAmount
+        : 1;
+    div.taxWithheld = Math.round(((div.taxWithheld ?? 0) + w.amount * rate) * 100) / 100;
   }
 
   return {

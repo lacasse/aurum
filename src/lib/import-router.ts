@@ -2,6 +2,7 @@ import Papa from "papaparse";
 import {
   ImportedRow,
   SignConvention,
+  StoredKeys,
   detectFormat,
   parseCsvRecords,
 } from "./csv";
@@ -85,7 +86,7 @@ export function accountForHint(
 
 export async function routeFile(
   file: File,
-  existingTxnKeys: Set<string>,
+  existingTxnKeys: StoredKeys,
   existingTradeKeys: Set<string>,
   merchantRules: Record<string, string>,
   userCategories?: readonly string[],
@@ -153,7 +154,6 @@ export async function routeFile(
       trades: [],
       actions: [],
       skipped: [
-        { reason: "card payments", count: res.skippedPayments },
         { reason: "rows that could not be read", count: res.skippedInvalid },
       ].filter((s) => s.count > 0),
       needsAttention: [],

@@ -364,3 +364,31 @@ describe("a receipt and its underlying, as the export writes them", () => {
     assert.equal(res.trades[0].ticker, "BMIX");
   });
 });
+
+describe("withholding tax and its dividend", () => {
+  test("is paired with the one dividend paid in that account that day", () => {
+    const res = parse(
+      '2026-08-05,00:00:00,,BB2,RRSP,Dividend,-,"ZLMN: Cash dividend distribution",,ZLMN,Zellmann Instruments N.V.,CAD,,,,10.00', // INVENTED
+      "2026-08-05,00:00:00,,BB2,RRSP,Tax,NRT,Non-resident tax,,,,CAD,-1.50,,,-1.50", // INVENTED
+    );
+    assert.equal(res.cash[0].payee, "Withholding tax · ZLMN");
+    assert.equal(res.trades[0].taxWithheld, 1.5);
+    assert.equal(res.needsAttention.length, 0);
+  });
+
+  test("with no dividend to pair it with, it is recorded but not guessed at", () => {
+    const res = parse(
+      "2026-08-05,00:00:00,,BB2,RRSP,Tax,NRT,Non-resident tax,,,,CAD,-1.50,,,-1.50", // INVENTED
+    );
+    assert.equal(res.cash[0].payee, "Withholding tax");
+    assert.equal(res.needsAttention.length, 1);
+  });
+
+  test("a dividend in another account that day is not its dividend", () => {
+    const res = parse(
+      '2026-08-05,00:00:00,,DD4,TFSA,Dividend,-,"ZLMN: Cash dividend distribution",,ZLMN,Zellmann Instruments N.V.,CAD,,,,10.00', // INVENTED
+      "2026-08-05,00:00:00,,BB2,RRSP,Tax,NRT,Non-resident tax,,,,CAD,-1.50,,,-1.50", // INVENTED
+    );
+    assert.equal(res.trades[0].taxWithheld, undefined);
+  });
+});

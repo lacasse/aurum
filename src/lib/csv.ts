@@ -1,6 +1,15 @@
 import Papa from "papaparse";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, TxnType } from "./types";
-import { DONATIONS_CATEGORY } from "./expenses";
+import {
+  type Account,
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+  TRANSFER_CATEGORY,
+  type Transaction,
+  TxnType,
+  sidesFor,
+} from "./types";
+import { daysApart } from "./format";
+import { DEBT_CATEGORY, DONATIONS_CATEGORY } from "./expenses";
 
 export type CsvFormat = "amex" | "simple" | "debit-credit";
 
@@ -43,13 +52,18 @@ export interface ImportedRow {
    * the far side of the transaction so the balance actually moves.
    */
   debtAccountId?: string;
+  /**
+   * The bank's line for a card payment recorded from the card's statement.
+   * Left out so the payment is not also counted as spending, and labelled as
+   * that rather than as a duplicate, which it is not.
+   */
+  paysCard?: boolean;
 }
 
 export interface ParseResult {
   fileName: string;
   format: CsvFormat | null;
   rows: ImportedRow[];
-  skippedPayments: number;
   skippedInvalid: number;
   /** How the file's signs were read. Null when nothing needed reading. */
   signs: SignConvention | null;
@@ -166,7 +180,9 @@ export function parseAmount(raw: string | undefined): number | null {
   if (raw == null) return null;
   let t = String(raw)
     .trim()
-    .replace(/^\$/, "")
+    // Anywhere, not only first: a card export writes a credit as "-$80.00",
+    // and reading only a leading "$" dropped every one of them as unreadable.
+    .replace(/\$/g, "")
     .replace(/,/g, "")
     .replace(/\s/g, "");
   if (!t) return null;
@@ -588,22 +604,33 @@ interface RawRow {
   desc: string;
   note?: string;
   csvCategory?: string;
+  /** Paying the card off: money moving from the everyday account, not spending or income. */
+  payment: boolean;
 }
+
+/**
+ * A card statement's payment line, by what the file calls it.
+ *
+ * Some exports give it a type of its own; others list it among the purchases
+ * and only the merchant name says what it is.
+ */
+const CARD_PAYMENT_NAME = /payment[\s-]*thank/i;
+
+/** The payee every card payment is recorded under, whatever the file wrote. */
+export const CARD_PAYMENT_PAYEE = "Credit card payment";
 
 export function rowsFromRecords(
   fileName: string,
   format: CsvFormat,
   records: Record<string, string>[],
-  existingKeys: Set<string>,
+  existingKeys: StoredKeys,
   merchantRules: Record<string, string>,
   userCategories?: readonly string[],
 ): {
   rows: ImportedRow[];
-  skippedPayments: number;
   skippedInvalid: number;
   signs: SignConvention | null;
 } {
-  let skippedPayments = 0;
   let skippedInvalid = 0;
   const pick = (r: Record<string, string>, ...names: string[]): string => {
     for (const n of names) {
@@ -672,10 +699,16 @@ export function rowsFromRecords(
       skippedInvalid += 1;
       continue;
     }
-    if (typeStr === "payment" || typeStr === "payment/credit") {
-      skippedPayments += 1; // paying the card bill isn't spending
-      continue;
-    }
+    /*
+     * Paying the card bill is not spending, but it is not nothing either: it
+     * is what brings the balance owed back down. It used to be dropped here,
+     * and the bank side of the same payment was dropped too, so a card's
+     * balance only ever grew. Only a card statement can say which card was
+     * paid, so the payment is recorded from this side.
+     */
+    const payment =
+      format !== "debit-credit" &&
+      (typeStr === "payment" || typeStr === "payment/credit" || CARD_PAYMENT_NAME.test(payee));
 
     const date = parseFlexibleDate(dateStr);
     const signed = parseAmount(amountStr);
@@ -692,6 +725,7 @@ export function rowsFromRecords(
       desc,
       note,
       csvCategory,
+      payment,
     });
   }
 
@@ -706,22 +740,48 @@ export function rowsFromRecords(
             disagreed: 0,
           }
         : detectSignConvention(
-            raw.map((r) => ({ amount: r.signed, stated: r.stated })),
+            raw.filter((r) => !r.payment).map((r) => ({ amount: r.signed, stated: r.stated })),
           );
   const outflowIsNegative = signs?.outflow !== "positive";
 
   const rows: ImportedRow[] = [];
-  const seen = new Set<string>(existingKeys);
+  /*
+   * Compared with what is already stored and with earlier files, never with
+   * the rest of this one: a file does not list one event twice, so two
+   * identical lines in it are two purchases — two coffees on one card in one
+   * day — and flagging the second dropped a real one.
+   */
+  const isStored = makeDupCheck(existingKeys);
 
   for (const r of raw) {
+    if (r.payment) {
+      const key = `${r.date}|${Math.abs(r.signed).toFixed(2)}|${CARD_PAYMENT_PAYEE.toLowerCase()}`;
+      const dup = isStored(key);
+      rows.push({
+        id: rowId(),
+        date: r.date,
+        payee: CARD_PAYMENT_PAYEE,
+        amount: Math.abs(Math.round(r.signed * 100) / 100),
+        type: "transfer",
+        note: r.note,
+        sourceFile: fileName,
+        csvCategory: r.csvCategory,
+        category: TRANSFER_CATEGORY,
+        suggestedCategory: TRANSFER_CATEGORY,
+        confident: true,
+        include: !dup,
+        dup,
+        explicitType: true,
+      });
+      continue;
+    }
     // Words beat signs: a row the file called a credit is a credit, whatever
     // the rest of the file signs its amounts.
     const type: TxnType =
       r.stated ?? (r.signed < 0 === outflowIsNegative ? "expense" : "income");
 
     const key = `${r.date}|${Math.abs(r.signed).toFixed(2)}|${r.payee.toLowerCase()}`;
-    const dup = seen.has(key);
-    seen.add(key);
+    const dup = isStored(key);
 
     const suggestion = suggestCategory(
       r.payee,
@@ -750,7 +810,7 @@ export function rowsFromRecords(
     });
   }
 
-  return { rows, skippedPayments, skippedInvalid, signs };
+  return { rows, skippedInvalid, signs };
 }
 
 /* ------------------------------------------------------------------ */
@@ -761,7 +821,7 @@ export function parseCsvRecords(
   fileName: string,
   fields: string[] | undefined,
   records: Record<string, string>[],
-  existingKeys: Set<string>,
+  existingKeys: StoredKeys,
   merchantRules: Record<string, string>,
   userCategories?: readonly string[],
 ): ParseResult {
@@ -771,13 +831,12 @@ export function parseCsvRecords(
       fileName,
       format: null,
       rows: [],
-      skippedPayments: 0,
       skippedInvalid: 0,
       signs: null,
       error: "Unrecognized columns — expected an Amex-style export or transaction_date/merchant/amount format.",
     };
   }
-  const { rows, skippedPayments, skippedInvalid, signs } = rowsFromRecords(
+  const { rows, skippedInvalid, signs } = rowsFromRecords(
     fileName,
     format,
     records,
@@ -785,12 +844,12 @@ export function parseCsvRecords(
     merchantRules,
     userCategories,
   );
-  return { fileName, format, rows, skippedPayments, skippedInvalid, signs };
+  return { fileName, format, rows, skippedInvalid, signs };
 }
 
 export function parseCsvFile(
   file: File,
-  existingKeys: Set<string>,
+  existingKeys: StoredKeys,
   merchantRules: Record<string, string>,
   userCategories?: readonly string[],
 ): Promise<ParseResult> {
@@ -815,8 +874,7 @@ export function parseCsvFile(
           fileName: file.name,
           format: null,
           rows: [],
-          skippedPayments: 0,
-          skippedInvalid: 0,
+              skippedInvalid: 0,
           signs: null,
           error: "Could not read file.",
         }),
@@ -824,6 +882,229 @@ export function parseCsvFile(
   });
 }
 
+/**
+ * What is already recorded, by key. A map says how many copies of each; a set
+ * means one.
+ */
+export type StoredKeys = ReadonlySet<string> | ReadonlyMap<string, number>;
+
+/** Every key with how many times it occurs. */
+export function countKeys(keys: Iterable<string>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const k of keys) out.set(k, (out.get(k) ?? 0) + 1);
+  return out;
+}
+
+/**
+ * Whether a row is one already recorded, matched one for one.
+ *
+ * A key on record once accounts for one row, not for every row that shares
+ * it: the same small interest payment lands in three accounts on one day, and
+ * when one of them was already stored all three were turned away.
+ */
+export function makeDupCheck(stored: StoredKeys): (key: string) => boolean {
+  const used = new Map<string, number>();
+  return (key) => {
+    const have = stored instanceof Map ? (stored.get(key) ?? 0) : stored.has(key) ? 1 : 0;
+    const taken = used.get(key) ?? 0;
+    if (taken >= have) return false;
+    used.set(key, taken + 1);
+    return true;
+  };
+}
+
 export function txnKey(date: string, amount: number, payee: string): string {
   return `${date}|${amount.toFixed(2)}|${payee.trim().toLowerCase()}`;
+}
+
+/**
+ * How far apart the two sides of one card payment may be dated: the card
+ * posts it the day it arrives, the bank the day it left, and a weekend between
+ * them is ordinary.
+ */
+const PAYMENT_SLACK_DAYS = 5;
+
+/**
+ * Card payments checked against everything else, so each is recorded once.
+ *
+ * A payment is saved from the card's statement as a transfer out of the
+ * everyday account. Two things would count it a second time: the same
+ * transfer already being stored, and the bank's own line for it — a
+ * pre-authorized debit in the same import — being saved as spending beside
+ * it. The first is marked as already had; the second as the payment's other
+ * side. Both are excluded.
+ *
+ * `fromEveryday` says which rows are the everyday account's, which only the
+ * caller knows: it depends on what kind of file each row came from.
+ */
+export function reconcileCardPayments(
+  rows: ImportedRow[],
+  existing: Pick<Transaction, "type" | "date" | "amount" | "destinationAccountId">[],
+  accounts: Pick<Account, "id" | "kind">[],
+  fromEveryday: (r: ImportedRow) => boolean,
+): ImportedRow[] {
+  const cards = new Set(accounts.filter((a) => a.kind === "credit").map((a) => a.id));
+  const near = (a: { date: string; amount: number }, b: { date: string; amount: number }) =>
+    Math.abs(a.amount - b.amount) < 0.005 && daysApart(a.date, b.date) <= PAYMENT_SLACK_DAYS;
+
+  const stored = existing.filter(
+    (t) => t.type === "transfer" && t.destinationAccountId && cards.has(t.destinationAccountId),
+  );
+  const used = new Set<number>();
+  const out = rows.map((r) => {
+    if (r.type !== "transfer" || r.payee !== CARD_PAYMENT_PAYEE || r.dup) return r;
+    const i = stored.findIndex((t, idx) => !used.has(idx) && near(t, r));
+    if (i < 0) return r;
+    used.add(i);
+    return { ...r, dup: true, include: false };
+  });
+
+  const payments = out.filter((r) => r.type === "transfer" && r.payee === CARD_PAYMENT_PAYEE);
+  const mirrored = new Set<string>();
+  for (const p of payments) {
+    const mirror = out.find(
+      (r) =>
+        r.type === "expense" &&
+        !r.dup &&
+        !mirrored.has(r.id) &&
+        r.sourceFile !== p.sourceFile &&
+        fromEveryday(r) &&
+        near(r, p),
+    );
+    if (mirror) mirrored.add(mirror.id);
+  }
+  return out.map((r) => (mirrored.has(r.id) ? { ...r, paysCard: true, include: false } : r));
+}
+
+/**
+ * Both sides of the transaction a cash row is saved as.
+ *
+ * A card payment leaves the everyday account and lands on the card. A
+ * repayment lands on the debt it paid off. Everything else has only the one
+ * side that is an account of yours.
+ */
+export function cashRowSides(
+  r: Pick<ImportedRow, "type" | "debtAccountId">,
+  accountId: string,
+  everydayAccountId: string,
+): Pick<Transaction, "sourceAccountId" | "destinationAccountId"> {
+  if (r.type === "transfer") {
+    return { sourceAccountId: everydayAccountId, destinationAccountId: accountId };
+  }
+  return {
+    ...sidesFor(r.type, accountId),
+    ...(r.debtAccountId ? { destinationAccountId: r.debtAccountId } : {}),
+  };
+}
+
+/** A bank line that says money left by pre-authorized debit and nothing about where to. */
+export function isUnnamedDebit(payee: string): boolean {
+  return /^pre-?authori[sz]ed debit$/i.test(payee.trim());
+}
+
+/**
+ * Pre-authorized debits named from the record, where the record knows.
+ *
+ * The bank's export says only "Pre-authorized Debit" — never who was paid —
+ * so on its own every one arrives nameless and filed as Other. But the same
+ * debit recurs at the same amount, and once it has been given a name on any
+ * earlier month that name and its category are the best guess there is. The
+ * most recent named payment of the same amount out of an everyday account is
+ * taken; nothing is guessed where there is none.
+ *
+ * Named, a row is checked against what is stored again under its name: an
+ * earlier import that was renamed by hand would otherwise come in a second
+ * time under the bank's word for it.
+ */
+export function nameFromHistory(
+  rows: ImportedRow[],
+  existing: Pick<
+    Transaction,
+    "type" | "date" | "amount" | "payee" | "category" | "sourceAccountId" | "destinationAccountId" | "granularity"
+  >[],
+  accounts: Pick<Account, "id" | "kind">[],
+): ImportedRow[] {
+  const everyday = new Set(accounts.filter((a) => a.kind === "checking").map((a) => a.id));
+  const named = existing
+    .filter(
+      (t) =>
+        t.type === "expense" &&
+        (t.granularity ?? "individual") === "individual" &&
+        t.sourceAccountId &&
+        everyday.has(t.sourceAccountId) &&
+        !isUnnamedDebit(t.payee),
+    )
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const isStored = makeDupCheck(countKeys(existing.map((t) => txnKey(t.date, t.amount, t.payee))));
+  return rows.map((r) => {
+    if (r.type !== "expense" || !isUnnamedDebit(r.payee)) return r;
+    const match = named.find((t) => Math.abs(t.amount - r.amount) < 0.005);
+    if (!match) return r;
+    const dup = r.dup || isStored(txnKey(r.date, r.amount, match.payee));
+    return {
+      ...r,
+      payee: match.payee,
+      note: r.note ?? r.payee,
+      category: match.category,
+      suggestedCategory: match.category,
+      // A repayment brings its debt with it, so a loan paid every month
+      // arrives filed against the loan with nothing left to choose.
+      ...(match.category === DEBT_CATEGORY && match.destinationAccountId
+        ? { debtAccountId: match.destinationAccountId }
+        : {}),
+      confident: true,
+      dup,
+      include: r.include && !dup,
+    };
+  });
+}
+
+/** Whether a row came in as a pre-authorized debit with no name of its own. */
+function cameUnnamed(r: Pick<ImportedRow, "note" | "payee">): boolean {
+  return isUnnamedDebit(r.note ?? "") || isUnnamedDebit(r.payee);
+}
+
+/**
+ * The change when a repayment is pointed at a debt.
+ *
+ * A pre-authorized debit filed as a repayment is named for the debt it paid.
+ * Asking for the name as well repeated the answer just given in the debt
+ * picker. A name typed or learned is left alone; only the bank's placeholder,
+ * or the name of the debt chosen before, gives way.
+ */
+export function chooseDebt(
+  r: Pick<ImportedRow, "note" | "payee" | "debtAccountId">,
+  debtAccountId: string,
+  debtName: (id: string) => string | undefined,
+): Partial<ImportedRow> {
+  const previous = r.debtAccountId ? debtName(r.debtAccountId) : undefined;
+  const placeholder = isUnnamedDebit(r.payee) || (previous !== undefined && r.payee === previous);
+  if (!cameUnnamed(r) || !placeholder) return { debtAccountId };
+  return {
+    debtAccountId,
+    payee: (debtAccountId && debtName(debtAccountId)) || r.note || r.payee,
+  };
+}
+
+/**
+ * The change when a row's category moves.
+ *
+ * Moving off Debt Repayment drops the debt — a far side for spending that no
+ * longer pays one off would still bring that balance down — and gives back the
+ * placeholder if the debt's name had stood in for one.
+ */
+export function chooseCategory(
+  r: Pick<ImportedRow, "note" | "payee" | "debtAccountId" | "category">,
+  category: string,
+  debtName: (id: string) => string | undefined,
+): Partial<ImportedRow> {
+  if (category === DEBT_CATEGORY || r.category !== DEBT_CATEGORY || !r.debtAccountId) {
+    return { category };
+  }
+  const named = cameUnnamed(r) && r.payee === debtName(r.debtAccountId);
+  return {
+    category,
+    debtAccountId: undefined,
+    ...(named ? { payee: r.note ?? r.payee } : {}),
+  };
 }

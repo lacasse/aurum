@@ -2,10 +2,17 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { INCOME_CATEGORIES } from "./types";
 import {
+  CARD_PAYMENT_PAYEE,
+  cashRowSides,
   detectSignConvention,
+  chooseCategory,
+  chooseDebt,
   detectFormat,
+  nameFromHistory,
+  reconcileCardPayments,
   rowsFromRecords,
   suggestCategory,
+  type ImportedRow,
 } from "./csv";
 
 describe("detectFormat", () => {
@@ -493,5 +500,230 @@ describe("paying into a pension against being paid by one", () => {
 
   test("a bare mention on arriving money reads as the plan paying", () => {
     assert.equal(forIncome("Pension"), "Pension Income");
+  });
+});
+
+/* ALL-FIXTURES-INVENTED */
+describe("card payments", () => {
+  const read = (format: "simple" | "amex", records: Record<string, string>[]) =>
+    rowsFromRecords("card.csv", format, records, new Set(), {}).rows;
+
+  test("a payment line becomes a transfer, not something dropped", () => {
+    const rows = read("simple", [
+      { transaction_date: "2026-09-08", transaction_type: "Payment", merchant: "", amount: "300.00" },
+      { transaction_date: "2026-09-09", transaction_type: "Purchase", merchant: "Corner Cafe", amount: "-12.00" },
+    ]);
+    assert.deepEqual(
+      rows.map((r) => [r.payee, r.type, r.amount]),
+      [[CARD_PAYMENT_PAYEE, "transfer", 300], ["Corner Cafe", "expense", 12]],
+    );
+  });
+
+  test("a statement that lists the payment among purchases is read by its name", () => {
+    const rows = read("amex", [
+      { Date: "2026-09-08", "Activity Type": "TRANS", "Merchant Name": "AUTO PAYMENT-THANK-YOU", Amount: "-$80.00" },
+      { Date: "2026-09-10", "Activity Type": "TRANS", "Merchant Name": "FUEL STOP 12", Amount: "$40.00" },
+    ]);
+    assert.equal(rows[0].type, "transfer");
+    assert.equal(rows[1].type, "expense", "the payment does not decide which way the purchases go");
+  });
+
+  const row = (over: Partial<ImportedRow>): ImportedRow => ({
+    id: "r", date: "2026-09-08", payee: CARD_PAYMENT_PAYEE, amount: 300, type: "transfer",
+    sourceFile: "card.csv", category: "Transfer", suggestedCategory: "Transfer",
+    confident: true, include: true, dup: false, explicitType: true, ...over,
+  });
+  const accounts = [
+    { id: "chq", kind: "checking" as const },
+    { id: "card", kind: "credit" as const },
+  ];
+  const everyday = (r: ImportedRow) => r.accountHint === "chequing";
+
+  test("the bank's line for the same payment is not saved as spending too", () => {
+    const out = reconcileCardPayments(
+      [
+        row({ id: "pay" }),
+        row({ id: "pad", type: "expense", payee: "Pre-authorized Debit", date: "2026-09-09", sourceFile: "bank.csv", accountHint: "chequing" }),
+        row({ id: "other", type: "expense", payee: "Corner Cafe", amount: 12, sourceFile: "bank.csv", accountHint: "chequing" }),
+      ],
+      [],
+      accounts,
+      everyday,
+    );
+    const by = Object.fromEntries(out.map((r) => [r.id, r]));
+    assert.equal(by.pay.include, true);
+    assert.equal(by.pad.include, false);
+    assert.equal(by.pad.paysCard, true, "labelled as the payment's other side");
+    assert.equal(by.pad.dup, false, "not as a duplicate, which it is not");
+    assert.equal(by.other.include, true);
+  });
+
+  test("a purchase on another card of the same amount is left alone", () => {
+    const out = reconcileCardPayments(
+      [row({ id: "pay" }), row({ id: "buy", type: "expense", payee: "Big Store", sourceFile: "card2.csv" })],
+      [],
+      accounts,
+      everyday,
+    );
+    assert.equal(out.find((r) => r.id === "buy")?.include, true);
+  });
+
+  test("a payment already stored as a transfer to a card is not added again", () => {
+    const out = reconcileCardPayments(
+      [row({ id: "pay" })],
+      [{ type: "transfer", date: "2026-09-10", amount: 300, destinationAccountId: "card" }],
+      accounts,
+      everyday,
+    );
+    assert.equal(out[0].dup, true);
+    assert.equal(out[0].include, false);
+  });
+
+  test("a transfer somewhere else is not mistaken for it", () => {
+    const out = reconcileCardPayments(
+      [row({ id: "pay" })],
+      [{ type: "transfer", date: "2026-09-08", amount: 300, destinationAccountId: "chq" }],
+      accounts,
+      everyday,
+    );
+    assert.equal(out[0].include, true);
+  });
+
+  test("it is saved out of the everyday account and onto the card", () => {
+    assert.deepEqual(cashRowSides(row({}), "card", "chq"), {
+      sourceAccountId: "chq",
+      destinationAccountId: "card",
+    });
+  });
+
+  test("a repayment still lands on its debt", () => {
+    assert.deepEqual(
+      cashRowSides(row({ type: "expense", debtAccountId: "loan" }), "chq", "chq"),
+      { sourceAccountId: "chq", destinationAccountId: "loan" },
+    );
+  });
+});
+
+/* ALL-FIXTURES-INVENTED */
+describe("rows of one file", () => {
+  test("two identical lines in one file are two purchases, not a duplicate", () => {
+    const rows = rowsFromRecords("card.csv", "simple", [
+      { transaction_date: "2026-09-06", transaction_type: "Purchase", merchant: "Corner Cafe", amount: "-2.50" },
+      { transaction_date: "2026-09-06", transaction_type: "Purchase", merchant: "Corner Cafe", amount: "-2.50" },
+    ], new Set(), {}).rows;
+    assert.deepEqual(rows.map((r) => r.include), [true, true]);
+  });
+
+  test("a key stored once accounts for one row, not every row that shares it", () => {
+    const rows = rowsFromRecords("card.csv", "simple", [
+      { transaction_date: "2026-09-06", transaction_type: "Purchase", merchant: "Corner Cafe", amount: "-2.50" },
+      { transaction_date: "2026-09-06", transaction_type: "Purchase", merchant: "Corner Cafe", amount: "-2.50" },
+      { transaction_date: "2026-09-06", transaction_type: "Purchase", merchant: "Corner Cafe", amount: "-2.50" },
+    ], new Map([["2026-09-06|2.50|corner cafe", 1]]), {}).rows;
+    assert.deepEqual(rows.map((r) => r.dup), [true, false, false]);
+  });
+
+  test("but a line already stored is still flagged", () => {
+    const rows = rowsFromRecords("card.csv", "simple", [
+      { transaction_date: "2026-09-06", transaction_type: "Purchase", merchant: "Corner Cafe", amount: "-2.50" },
+    ], new Set(["2026-09-06|2.50|corner cafe"]), {}).rows;
+    assert.equal(rows[0].dup, true);
+  });
+});
+
+describe("naming a pre-authorized debit", () => {
+  const accounts = [{ id: "chq", kind: "checking" as const }, { id: "card", kind: "credit" as const }];
+  const debit = (over: Partial<ImportedRow> = {}): ImportedRow => ({
+    id: "d", date: "2026-09-30", payee: "Pre-authorized Debit", note: "Pre-authorized Debit",
+    amount: 40, type: "expense", sourceFile: "bank.csv", category: "Other",
+    suggestedCategory: "Other", confident: false, include: true, dup: false, explicitType: true, ...over,
+  });
+  const paid = (over: Partial<Parameters<typeof nameFromHistory>[1][number]> = {}) => ({
+    type: "expense" as const, date: "2026-08-31", amount: 40, payee: "Loan Servicer",
+    category: "Debt Repayment", sourceAccountId: "chq", granularity: "individual" as const, ...over,
+  });
+
+  test("takes the name and category last given to a debit of that amount", () => {
+    const [r] = nameFromHistory([debit()], [paid()], accounts);
+    assert.deepEqual([r.payee, r.category, r.confident], ["Loan Servicer", "Debt Repayment", true]);
+  });
+
+  test("the most recent name wins", () => {
+    const [r] = nameFromHistory(
+      [debit()],
+      [paid({ payee: "Old Name", date: "2026-07-31" }), paid({ payee: "New Name", date: "2026-08-31" })],
+      accounts,
+    );
+    assert.equal(r.payee, "New Name");
+  });
+
+  test("nothing is guessed without a named payment of the same amount", () => {
+    const [r] = nameFromHistory([debit()], [paid({ amount: 41 })], accounts);
+    assert.equal(r.payee, "Pre-authorized Debit");
+  });
+
+  test("a month's total or another debit's bank wording is not a name", () => {
+    const [r] = nameFromHistory(
+      [debit()],
+      [paid({ granularity: "monthly", payee: "Utilities" }), paid({ payee: "Pre-authorized Debit" })],
+      accounts,
+    );
+    assert.equal(r.payee, "Pre-authorized Debit");
+  });
+
+  test("spending off a card is not a debit's name", () => {
+    const [r] = nameFromHistory([debit()], [paid({ sourceAccountId: "card" })], accounts);
+    assert.equal(r.payee, "Pre-authorized Debit");
+  });
+
+  test("once named, a debit already stored under that name is not added again", () => {
+    const [r] = nameFromHistory([debit()], [paid({ date: "2026-09-30" })], accounts);
+    assert.equal(r.dup, true);
+    assert.equal(r.include, false);
+  });
+});
+
+/* ALL-FIXTURES-INVENTED */
+describe("a debit filed as a repayment", () => {
+  const names: Record<string, string> = { loan: "Car Loan", card: "Store Card" };
+  const debtName = (id: string) => names[id];
+  const debit = { note: "Pre-authorized Debit", payee: "Pre-authorized Debit", debtAccountId: undefined as string | undefined };
+
+  test("is named for the debt it paid, with nothing to type", () => {
+    assert.deepEqual(chooseDebt(debit, "loan", debtName), { debtAccountId: "loan", payee: "Car Loan" });
+  });
+
+  test("changing the debt changes the name it was given", () => {
+    const first = { ...debit, ...chooseDebt(debit, "loan", debtName) };
+    assert.equal(chooseDebt(first, "card", debtName).payee, "Store Card");
+  });
+
+  test("a name typed or learned is left alone", () => {
+    assert.deepEqual(chooseDebt({ ...debit, payee: "Credit Union" }, "loan", debtName), { debtAccountId: "loan" });
+  });
+
+  test("a bought thing filed under the category keeps its merchant", () => {
+    assert.deepEqual(chooseDebt({ note: undefined, payee: "Corner Cafe" }, "loan", debtName), { debtAccountId: "loan" });
+  });
+
+  test("moving off the category drops the debt and the name it lent", () => {
+    const named = { ...debit, payee: "Car Loan", debtAccountId: "loan", category: "Debt Repayment" };
+    assert.deepEqual(chooseCategory(named, "Utilities", debtName), {
+      category: "Utilities",
+      debtAccountId: undefined,
+      payee: "Pre-authorized Debit",
+    });
+  });
+
+  test("a learned repayment arrives with its debt", () => {
+    const [r] = nameFromHistory(
+      [{ id: "d", date: "2026-09-30", payee: "Pre-authorized Debit", note: "Pre-authorized Debit", amount: 40,
+        type: "expense", sourceFile: "bank.csv", category: "Other", suggestedCategory: "Other",
+        confident: false, include: true, dup: false, explicitType: true }],
+      [{ type: "expense", date: "2026-08-31", amount: 40, payee: "Car Loan", category: "Debt Repayment",
+        sourceAccountId: "chq", destinationAccountId: "loan", granularity: "individual" }],
+      [{ id: "chq", kind: "checking" }],
+    );
+    assert.equal(r.debtAccountId, "loan");
   });
 });

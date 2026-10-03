@@ -45,6 +45,8 @@ expect(parseAmount("-86.41") === -86.41, "parseAmount negative");
 expect(parseAmount("(45.00)") === -45, "parseAmount parentheses");
 expect(parseAmount("$1,234.56") === 1234.56, "parseAmount currency/commas"); // INVENTED
 expect(parseAmount("12.00-") === -12, "parseAmount trailing minus");
+expect(parseAmount("-$80.00") === -80, "parseAmount minus before the dollar sign");
+expect(parseAmount("($80.00)") === -80, "parseAmount parentheses around a dollar amount");
 expect(parseFlexibleDate("8/12/26") === "2026-08-12", "date M/D/YY");
 expect(parseFlexibleDate("08/12/2026") === "2026-08-12", "date MM/DD/YYYY");
 expect(parseFlexibleDate("2026-08-12") === "2026-08-12", "date ISO");
@@ -54,8 +56,11 @@ console.log("amex format");
 const a = parseStr(AMEX_CSV);
 const amex = parseCsvRecords("amex.csv", a.fields, a.data, new Set(), {});
 expect(amex.format === "amex", "format detected as amex");
-expect(amex.rows.length === 4, `4 rows imported (got ${amex.rows.length})`);
-expect(amex.skippedPayments === 1, "card payment skipped");
+expect(amex.rows.length === 5, `5 rows imported (got ${amex.rows.length})`);
+expect(
+  amex.rows.filter((r) => r.type === "transfer" && r.payee === "Credit card payment").length === 1,
+  "card payment kept as a transfer",
+);
 const byPayee = Object.fromEntries(amex.rows.map((r) => [r.payee, r]));
 expect(byPayee["WHOLE FOODS MARKET #102"]?.category === "Groceries", "whole foods -> Groceries");
 expect(byPayee["WHOLE FOODS MARKET #102"]?.type === "expense", "whole foods -> expense");
@@ -69,9 +74,12 @@ console.log("simple format");
 const s = parseStr(SIMPLE_CSV);
 const simple = parseCsvRecords("simple.csv", s.fields, s.data, new Set(), {});
 expect(simple.format === "simple", "format detected as simple");
-expect(simple.rows.length === 4, `4 rows imported (got ${simple.rows.length})`);
+expect(simple.rows.length === 5, `5 rows imported (got ${simple.rows.length})`);
 expect(simple.skippedInvalid === 1, "declined row skipped");
-expect(simple.skippedPayments === 1, "payment row skipped");
+expect(
+  simple.rows.filter((r) => r.type === "transfer" && r.payee === "Credit card payment").length === 1,
+  "payment row kept as a transfer",
+);
 const byP2 = Object.fromEntries(simple.rows.map((r) => [r.payee, r]));
 expect(byP2["NETFLIX.COM"]?.category === "Subscriptions", "csv category subscriptions -> Subscriptions");
 expect(byP2["SHELL OIL 5542"]?.category === "Transport", "shell -> Transport");
