@@ -224,9 +224,9 @@ export default function IncomePage() {
         <Segmented<string>
           options={[
             { value: "ytd", label: "YTD" },
-            { value: "12", label: "1y" },
-            { value: "24", label: "2y" },
-            { value: "60", label: "5y" },
+            { value: "12", label: "1Y" },
+            { value: "24", label: "2Y" },
+            { value: "60", label: "5Y" },
           ]}
           value={window}
           onChange={(v) => setWindow(v as Window)}

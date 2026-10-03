@@ -85,9 +85,9 @@ const RANGE_MONTHS = { "3M": 3, "6M": 6, "1Y": 12, "3Y": 36, ALL: Infinity } as 
 type RangeKey = keyof typeof RANGE_MONTHS | "YTD";
 
 const RANGE_OPTIONS: { value: RangeKey; label: string }[] = [
-  { value: "YTD", label: "YTD" },
   { value: "3M", label: "3M" },
   { value: "6M", label: "6M" },
+  { value: "YTD", label: "YTD" },
   { value: "1Y", label: "1Y" },
   { value: "3Y", label: "3Y" },
   { value: "ALL", label: "All" },
