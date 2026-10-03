@@ -7,8 +7,11 @@ import {
   partitionByMonth,
   previousMonthIncome,
   snapshotGaps,
+  tradeDraftFrom,
   unconvertedPrices,
 } from "./checklist";
+import type { TradeRow } from "./trades";
+import type { Account } from "./types";
 import type { ImportedRow } from "./csv";
 
 let n = 0;
@@ -318,5 +321,47 @@ describe("unconvertedPrices", () => {
       ]),
       ["AAA", "EEE"],
     );
+  });
+});
+
+describe("tradeDraftFrom", () => {
+  // INVENTED: accounts in the order the store keeps them, chequing first.
+  const accounts = [
+    { id: "chq", name: "Chequing", kind: "checking", registration: "non-registered" },
+    { id: "nonreg", name: "Brokerage", kind: "investment", registration: "non-registered" },
+    { id: "tfsa", name: "TFSA", kind: "investment", registration: "TFSA" },
+  ] as Account[];
+  const imported = (over: Partial<TradeRow> = {}): TradeRow => ({
+    id: "t", date: "2026-09-10", type: "dividend", typeRaw: "Dividend", ticker: "OMNI",
+    quantity: 0, pricePerUnit: 0, transactedAmount: 12.5, registration: "TFSA",
+    registrationRaw: "TFSA", currency: "CAD", amountCad: 12.5, include: true,
+    duplicate: false, sourceFile: "x.csv", ...over,
+  });
+
+  test("a dividend arrives as one unit priced at the payment, not as zero", () => {
+    const d = tradeDraftFrom(imported(), accounts);
+    assert.equal(d.quantity, "1");
+    assert.equal(d.price, "12.5");
+    assert.equal(d.accountId, "tfsa");
+  });
+
+  test("a USD dividend with no stated rate leaves the conversion to the form", () => {
+    const d = tradeDraftFrom(imported({ currency: "USD", transactedAmount: 8, amountCad: 8 }), accounts);
+    assert.equal(d.cadAmount, "");
+  });
+
+  test("a stated conversion is kept", () => {
+    const d = tradeDraftFrom(imported({ currency: "USD", transactedAmount: 8, amountCad: 11 }), accounts);
+    assert.equal(d.cadAmount, "11");
+  });
+
+  test("a buy keeps its shares and price", () => {
+    const d = tradeDraftFrom(imported({ type: "buy", quantity: 5, pricePerUnit: 40, transactedAmount: 200 }), accounts);
+    assert.deepEqual([d.quantity, d.price], ["5", "40"]);
+  });
+
+  test("a non-registered trade lands in the brokerage, not the chequing account", () => {
+    const d = tradeDraftFrom(imported({ registration: "non-registered" }), accounts);
+    assert.equal(d.accountId, "nonreg");
   });
 });

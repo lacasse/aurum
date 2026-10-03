@@ -6,7 +6,9 @@ import {
 } from "./format";
 import { roundMoney } from "./money";
 import type { ImportedRow } from "./csv";
-import type { Holding, Transaction } from "./types";
+import type { Account, Holding, Transaction } from "./types";
+import type { TradeRow } from "./trades";
+import { accountForHint } from "./import-router";
 
 /**
  * What the monthly checklist knows that the general importer does not: it is
@@ -309,4 +311,45 @@ export function unconvertedPrices(
     if (!(h.priceCAD > 0) || Math.abs(h.priceCAD - h.price) < 0.005) tickers.add(h.ticker);
   }
   return [...tickers].sort();
+}
+
+/** A row of the trade form, as the checklist seeds it from an import. */
+export interface ImportedTradeDraft {
+  date: string;
+  action: "buy" | "sell" | "dividend";
+  ticker: string;
+  quantity: string;
+  price: string;
+  accountId: string;
+  currency: string;
+  cadAmount: string;
+  taxWithheld?: string;
+}
+
+/**
+ * An imported buy, sell or dividend in the shape the trade form takes.
+ *
+ * The form takes a dividend as one unit priced at the payment. The file
+ * carries it as no shares at no price with the payment as its cash amount, so
+ * passed through as it stood it arrived as zero.
+ */
+export function tradeDraftFrom(t: TradeRow, accounts: Account[]): ImportedTradeDraft {
+  const dividend = t.type === "dividend";
+  /*
+   * Only a conversion the file actually stated. Without one the importer's CAD
+   * figure is the USD amount unconverted, and passing it on would override the
+   * form's own rate with a rate of one.
+   */
+  const converted = t.currency === "USD" && t.amountCad !== t.transactedAmount;
+  return {
+    date: t.date,
+    action: t.type as ImportedTradeDraft["action"],
+    ticker: t.ticker,
+    quantity: dividend ? "1" : String(t.quantity),
+    price: String(dividend ? t.transactedAmount : t.pricePerUnit),
+    accountId: accountForHint(t.registration ?? undefined, accounts) ?? "",
+    currency: t.currency,
+    cadAmount: converted ? String(t.amountCad) : "",
+    ...(t.taxWithheld ? { taxWithheld: String(t.taxWithheld) } : {}),
+  };
 }
