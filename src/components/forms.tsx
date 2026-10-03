@@ -1260,6 +1260,7 @@ export interface TradeDraft {
   accountId: string;
   currency: string;
   cadAmount: string;
+  taxWithheld?: string;
 }
 
 export function TradeEntry({
@@ -1458,8 +1459,8 @@ export function TradeEntry({
         flows: c.flows,
       });
     }
-    for (const { accountId, delta } of batch.cash) {
-      adjustAccountCash(accountId, delta);
+    for (const { accountId, delta, currency } of batch.cash) {
+      adjustAccountCash(accountId, delta, undefined, currency);
     }
   };
 
@@ -1538,7 +1539,7 @@ export function TradeEntry({
           className="grid items-end gap-2 rounded-lg border border-line bg-elevated/60 p-3"
           style={{
             gridTemplateColumns:
-              "minmax(110px,1fr) minmax(80px,100px) minmax(80px,110px) minmax(60px,80px) minmax(60px,90px) minmax(90px,140px) minmax(70px,90px) minmax(80px,110px)" +
+              "minmax(110px,1fr) minmax(118px,124px) minmax(80px,110px) minmax(60px,80px) minmax(60px,90px) minmax(90px,140px) minmax(70px,90px) minmax(80px,110px)" +
               (rows.length > 1 ? " 32px" : ""),
           }}
         >
@@ -1564,21 +1565,37 @@ export function TradeEntry({
             <TradeTickerInput row={row} update={update} />
           </Field>
           <Field label={idx === 0 ? "Qty" : undefined}>
+            {/*
+              * A dividend has no share count: the 1 it carries underneath is
+              * only what lets the payment sit in the price box. Showing it read
+              * as one share bought at the payment.
+              */}
             <Input
-              type="number"
+              type={row.action === "dividend" ? "text" : "number"}
               step="any"
               min="0"
-              value={row.quantity}
+              value={row.action === "dividend" ? "—" : row.quantity}
               onChange={(e) => update(row.id, "quantity", e.target.value)}
-              placeholder={row.action === "dividend" ? "1" : "0"}
+              placeholder="0"
               disabled={row.action === "dividend"}
+              aria-label={row.action === "dividend" ? "No shares for a dividend" : undefined}
             />
           </Field>
-          <Field label={idx === 0 ? "Price" : undefined}>
+          <Field
+            label={
+              idx === 0
+                ? active.length > 0 && active.every((r) => r.action === "dividend")
+                  ? "Amount"
+                  : "Price"
+                : undefined
+            }
+          >
             <Input
               type="number"
               step="any"
               min="0"
+              title={row.action === "dividend" ? "Amount paid" : undefined}
+              aria-label={row.action === "dividend" ? "Amount paid" : undefined}
               value={row.price}
               onChange={(e) => update(row.id, "price", e.target.value)}
               placeholder={

@@ -29,8 +29,27 @@ import {
   lastCompleteMonthKey,
   previousMonthKey,
 } from "@/lib/format";
-import { ImportedRow, describeSigns, txnKey } from "@/lib/csv";
-import { TradeRow, tradeKey } from "@/lib/trades";
+import {
+  ImportedRow,
+  CARD_PAYMENT_PAYEE,
+  cashRowSides,
+  chooseCategory,
+  chooseDebt,
+  countKeys,
+  describeSigns,
+  isUnnamedDebit,
+  nameFromHistory,
+  reconcileCardPayments,
+  txnKey,
+} from "@/lib/csv";
+import { CHEQUING_HINT } from "@/lib/activities";
+import {
+  TradeRow,
+  accumulatePositions,
+  markAlreadyImported,
+  tradeKey,
+  transferFor,
+} from "@/lib/trades";
 import { RoutedFile, accountForHint, labelFor, routeFile } from "@/lib/import-router";
 import {
   incomeBoxes,
@@ -38,12 +57,14 @@ import {
   partitionByMonth,
   previousMonthIncome,
   type IncomeBox,
+  tradeDraftFrom,
   unconvertedPrices,
 } from "@/lib/checklist";
 import {
   INCOME_CATEGORIES,
   alphabetical,
   REGISTRATION_LABELS,
+  type Registration,
   isInvestmentAccount,
   isLiability,
   isPension,
@@ -119,6 +140,14 @@ interface Loaded {
   actions: CorporateAction[];
   trimmedCash: { older: number; newer: number };
   trimmedTrades: { older: number; newer: number };
+  /**
+   * The card each card statement belongs to, chosen by hand.
+   *
+   * A card statement does not name its card. The save used to file every one
+   * against the first card on record, so with two cards one statement's
+   * purchases all landed on the other.
+   */
+  cardFor: Record<string, string>;
 }
 
 const EMPTY_LOAD: Loaded = {
@@ -128,6 +157,7 @@ const EMPTY_LOAD: Loaded = {
   actions: [],
   trimmedCash: { older: 0, newer: 0 },
   trimmedTrades: { older: 0, newer: 0 },
+  cardFor: {},
 };
 
 function StepIndicator({
@@ -280,6 +310,7 @@ function ImportStep({
   onLoaded: (l: Loaded) => void;
 }) {
   const transactions = useFinance((s) => s.transactions);
+  const accounts = useFinance((s) => s.accounts);
   const merchantRules = useFinance((s) => s.merchantRules);
   const userCategories = useFinance((s) => s.categories);
   const holdings = useFinance((s) => s.holdings);
@@ -289,7 +320,7 @@ function ImportStep({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const existingKeys = useMemo(
-    () => new Set(transactions.map((t) => txnKey(t.date, t.amount, t.payee))),
+    () => countKeys(transactions.map((t) => txnKey(t.date, t.amount, t.payee))),
     [transactions],
   );
   const existingTradeKeys = useMemo(
@@ -320,15 +351,21 @@ function ImportStep({
 
     // Keys carry across the files of one import as well as across months, so
     // a statement downloaded twice is caught rather than counted twice.
-    const txnKeys = new Set([
-      ...existingKeys,
-      ...loaded.cash.map((r) => txnKey(r.date, r.amount, r.payee)),
-    ]);
+    // Counted, not just collected: a key stored once covers one row. Only rows
+    // that are new add to it — a row matched to a stored one is that row.
+    const txnKeys = new Map(existingKeys);
+    const carry = (rows: ImportedRow[]) => {
+      for (const r of rows.filter((x) => !x.dup)) {
+        const k = txnKey(r.date, r.amount, r.payee);
+        txnKeys.set(k, (txnKeys.get(k) ?? 0) + 1);
+      }
+    };
+    carry(loaded.cash);
     const tKeys = new Set([...existingTradeKeys, ...loaded.trades.map(tradeKey)]);
     const routed: RoutedFile[] = [];
     for (const file of csvs) {
       const res = await routeFile(file, txnKeys, tKeys, merchantRules, userCategories);
-      for (const r of res.cash) txnKeys.add(txnKey(r.date, r.amount, r.payee));
+      carry(res.cash);
       for (const t of res.trades) tKeys.add(tradeKey(t));
       routed.push(res);
     }
@@ -341,28 +378,53 @@ function ImportStep({
      */
     const cash = partitionByMonth(routed.flatMap((r) => r.cash), month);
     const trades = partitionByMonth(routed.flatMap((r) => r.trades), month);
+    /*
+     * Trimmed like everything else. An export covers several months, so an
+     * action from an earlier one was offered again at every close after it —
+     * a demerger already applied would be applied a second time.
+     */
+    const actions = partitionByMonth(routed.flatMap((r) => r.actions), month);
 
+    const kinds = new Map([...loaded.files, ...routed].map((f) => [f.fileName, f.kind]));
     onLoaded({
+      ...loaded,
       files: [...loaded.files, ...routed],
-      cash: [...loaded.cash, ...cash.kept],
+      // Across every file loaded so far: the bank's side of a card payment
+      // usually arrives in a different export from the card's.
+      cash: nameFromHistory(
+        reconcileCardPayments(
+          [...loaded.cash, ...cash.kept],
+          transactions,
+          accounts,
+          (r) => r.accountHint === CHEQUING_HINT || kinds.get(r.sourceFile) === "bank",
+        ),
+        transactions,
+        accounts,
+      ),
       trades: [...loaded.trades, ...trades.kept],
-      /*
-       * Not trimmed to the month. An action dated just outside it still has to
-       * be applied before the sale that follows, or the sale is priced against
-       * a cost base the action was supposed to move.
-       */
-      actions: [...loaded.actions, ...routed.flatMap((r) => r.actions)],
+      actions: [...loaded.actions, ...actions.kept],
       trimmedCash: {
         older: loaded.trimmedCash.older + cash.older.length,
         newer: loaded.trimmedCash.newer + cash.newer.length,
       },
       trimmedTrades: {
-        older: loaded.trimmedTrades.older + trades.older.length,
-        newer: loaded.trimmedTrades.newer + trades.newer.length,
+        older: loaded.trimmedTrades.older + trades.older.length + actions.older.length,
+        newer: loaded.trimmedTrades.newer + trades.newer.length + actions.newer.length,
       },
     });
     setBusy(false);
   };
+
+  const cards = accounts.filter((a) => a.kind === "credit");
+  /*
+   * A statement has to be put on a card before the month can move on. With
+   * one card there is nothing to choose; with two, guessing is how one card's
+   * purchases ended up on the other.
+   */
+  const unplaced =
+    cards.length > 1
+      ? loaded.files.filter((f) => f.kind === "card" && !f.error && !loaded.cardFor[f.fileName])
+      : [];
 
   const label = labelMonth(month);
   const cashTrim = describeTrim(
@@ -402,13 +464,17 @@ function ImportStep({
         </>
       }
       onBack={onBack}
-      note={cashTrim || undefined}
+      note={
+        unplaced.length > 0
+          ? `Choose the card for ${unplaced.length === 1 ? "this statement" : "each statement"} before going on.`
+          : cashTrim || undefined
+      }
       actions={
         <>
           <Button variant="ghost" onClick={onNext}>
             Skip import
           </Button>
-          <Button onClick={onNext} disabled={loaded.files.length === 0}>
+          <Button onClick={onNext} disabled={loaded.files.length === 0 || unplaced.length > 0}>
             Next <ArrowRight size={14} />
           </Button>
         </>
@@ -464,17 +530,44 @@ function ImportStep({
                 key={f.fileName}
                 className="rounded-lg border border-line bg-elevated/40 px-3 py-2"
               >
-                <p className="truncate text-xs font-medium">{f.fileName}</p>
-                <p className="mt-0.5 text-[0.6875rem] text-ink-faint">
-                  {f.error ? (
-                    <span className="text-negative">{f.error}</span>
-                  ) : (
-                    <>
-                      Read as {labelFor(f.kind)}
-                      {f.signs ? <> · {describeSigns(f.signs)}</> : null}
-                    </>
-                  )}
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-medium">{f.fileName}</p>
+                    <p className="mt-0.5 text-[0.6875rem] text-ink-faint">
+                      {f.error ? (
+                        <span className="text-negative">{f.error}</span>
+                      ) : (
+                        <>
+                          Read as {labelFor(f.kind)}
+                          {f.signs ? <> · {describeSigns(f.signs)}</> : null}
+                        </>
+                      )}
+                    </p>
+                  </div>
+                  {f.kind === "card" && !f.error && cards.length > 1 ? (
+                    <Select
+                      value={loaded.cardFor[f.fileName] ?? ""}
+                      onChange={(e) =>
+                        onLoaded({
+                          ...loaded,
+                          cardFor: { ...loaded.cardFor, [f.fileName]: e.target.value },
+                        })
+                      }
+                      aria-label={`Card for ${f.fileName}`}
+                      className={cn(
+                        "h-7 w-44 py-0 text-[0.6875rem]",
+                        !loaded.cardFor[f.fileName] && "border-amber-500/50",
+                      )}
+                    >
+                      <option value="">Which card?</option>
+                      {cards.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : null}
+                </div>
               </li>
             ))}
           </ul>
@@ -753,9 +846,13 @@ function ExpensesStep({
   onBack,
   rows,
   onRows,
+  files,
+  cardFor,
 }: StepProps & {
   rows: ImportedRow[];
   onRows: (rows: ImportedRow[]) => void;
+  files: RoutedFile[];
+  cardFor: Record<string, string>;
 }) {
   const userCategories = useFinance((s) => s.categories);
   /*
@@ -775,18 +872,50 @@ function ExpensesStep({
     () => allAccounts.filter((a) => isLiability(a.kind)),
     [allAccounts],
   );
+  const debtName = (id: string) => allAccounts.find((a) => a.id === id)?.name;
 
-  const spend = rows.filter((r) => r.type === "expense");
+  /*
+   * The month's money out, as one list. A card payment is shown as itself —
+   * the payment, to the card — in place of the bank's debit for it, which says
+   * only "Pre-authorized Debit" and is left out so the payment counts once.
+   */
+  const isPayment = (r: ImportedRow) => r.type === "transfer" && r.payee === CARD_PAYMENT_PAYEE;
+  const spend = rows.filter(
+    (r) => (r.type === "expense" && !r.paysCard) || isPayment(r),
+  );
+  /*
+   * A row already in the record is part of this month all the same. It used
+   * to arrive unticked and marked as seen, which read as the import refusing a
+   * real payment — an export downloaded on the 1st carries that day, so the
+   * rent paid on the 1st was stored a month early and the close then appeared
+   * to be missing it. It is shown ticked and counted, and the save does not
+   * write it a second time.
+   */
+  const counts = (r: ImportedRow) => r.include || r.dup;
+  const cardName = (r: ImportedRow) => {
+    const id =
+      cardFor[r.sourceFile] ||
+      (files.find((f) => f.fileName === r.sourceFile)?.kind === "card"
+        ? allAccounts.find((a) => a.kind === "credit")?.id
+        : undefined);
+    return allAccounts.find((a) => a.id === id)?.name ?? "the card";
+  };
   /*
    * A repayment is the one row whose far side cannot be guessed. Every other
    * expense ends at the merchant; this one ends at a debt, and which debt
    * decides whose balance goes down.
    */
-  const repayments = spend.filter((r) => r.include && r.category === DEBT_CATEGORY);
+  const repayments = spend.filter(
+    (r) => r.type === "expense" && r.include && r.category === DEBT_CATEGORY,
+  );
   const unassigned = repayments.filter((r) => !r.debtAccountId);
-  const included = spend.filter((r) => r.include);
-  const totalSpend = included.reduce((sum, r) => sum + r.amount, 0);
-  const willLearn = included.filter((r) => r.category !== r.suggestedCategory).length;
+  const included = spend.filter(counts);
+  const totalSpend = included
+    .filter((r) => r.type === "expense")
+    .reduce((sum, r) => sum + r.amount, 0);
+  const willLearn = included.filter(
+    (r) => r.include && r.category !== r.suggestedCategory,
+  ).length;
 
   const patch = (id: string, change: Partial<ImportedRow>) =>
     onRows(rows.map((r) => (r.id === id ? { ...r, ...change } : r)));
@@ -807,7 +936,7 @@ function ExpensesStep({
           <>
             {included.length} of {spend.length} rows kept,{" "}
             <span className="font-semibold tabular-nums">{fmtCAD(totalSpend, 2)}</span>{" "}
-            in all
+            spent
             {willLearn > 0 ? (
               <>
                 , with {willLearn}{" "}
@@ -860,13 +989,15 @@ function ExpensesStep({
                   key={r.id}
                   className={cn(
                     "border-b border-line/40 last:border-0",
-                    !r.include && "opacity-40",
+                    !counts(r) && "opacity-40",
                   )}
                 >
                   <td className="px-2 py-1.5">
                     <input
                       type="checkbox"
-                      checked={r.include}
+                      checked={counts(r)}
+                      disabled={r.dup}
+                      title={r.dup ? "Already in your records, so it counts and is not saved again" : undefined}
                       aria-label={`Keep ${r.payee}`}
                       onChange={(e) => patch(r.id, { include: e.target.checked })}
                       className="h-3.5 w-3.5 accent-[var(--brand-strong)]"
@@ -877,48 +1008,76 @@ function ExpensesStep({
                   </td>
                   <td className="max-w-[170px] truncate px-2 py-1.5">
                     <span className="flex items-center gap-1.5">
-                      <span className="truncate">{r.payee}</span>
-                      {r.dup ? <Badge>seen before</Badge> : null}
+                      {/*
+                        * The bank names a pre-authorized debit and nothing
+                        * else, so it is the one merchant worth typing. The
+                        * name is kept with the payment, and next month a
+                        * debit of the same amount is named and filed from it.
+                        */}
+                      {isPayment(r) ? (
+                        <span className="truncate">Payment to {cardName(r)}</span>
+                      ) : isUnnamedDebit(r.note ?? "") && r.category !== DEBT_CATEGORY ? (
+                        <Input
+                          value={isUnnamedDebit(r.payee) ? "" : r.payee}
+                          placeholder="Who was paid?"
+                          onChange={(e) => patch(r.id, { payee: e.target.value })}
+                          onBlur={(e) => {
+                            if (!e.target.value.trim()) patch(r.id, { payee: r.note ?? r.payee });
+                          }}
+                          aria-label={`Recipient of the pre-authorized debit on ${r.date}`}
+                          className="h-7 w-36 py-0 text-[0.6875rem]"
+                        />
+                      ) : (
+                        <span className="truncate">{r.payee}</span>
+                      )}
+                      {r.dup ? <Badge>recorded earlier</Badge> : null}
                     </span>
                   </td>
                   <td className="px-2 py-1.5">
-                    <Select
-                      value={r.category}
-                      onChange={(e) => patch(r.id, { category: e.target.value })}
-                      aria-label={`Category for ${r.payee}`}
-                      className={cn(
-                        "h-7 w-auto py-0 text-[0.6875rem]",
-                        // Amber where the guess was weak, so the eye goes to
-                        // the rows actually worth checking.
-                        !r.confident && "border-amber-500/50",
-                      )}
-                    >
-                      {alphabetical(userCategories).map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </Select>
-                    {r.category === DEBT_CATEGORY && debts.length > 0 ? (
-                      <Select
-                        value={r.debtAccountId ?? ""}
-                        onChange={(e) =>
-                          patch(r.id, { debtAccountId: e.target.value })
-                        }
-                        aria-label={`Debt paid by ${r.payee}`}
-                        className={cn(
-                          "mt-1 h-7 w-auto py-0 text-[0.6875rem]",
-                          !r.debtAccountId && "border-amber-500/50",
-                        )}
-                      >
-                        <option value="">Which debt?</option>
-                        {debts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name}
-                          </option>
-                        ))}
-                      </Select>
-                    ) : null}
+                    {isPayment(r) ? (
+                      <span className="text-[0.6875rem] text-ink-dim">Card payment</span>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Select
+                          disabled={r.dup}
+                          value={r.category}
+                          onChange={(e) => patch(r.id, chooseCategory(r, e.target.value, debtName))}
+                          aria-label={`Category for ${r.payee}`}
+                          className={cn(
+                            "h-7 w-36 py-0 text-[0.6875rem]",
+                            // Amber where the guess was weak, so the eye goes to
+                            // the rows actually worth checking.
+                            !r.confident && "border-amber-500/50",
+                          )}
+                        >
+                          {alphabetical(userCategories).map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </Select>
+                        {r.category === DEBT_CATEGORY && debts.length > 0 ? (
+                          <Select
+                            value={r.debtAccountId ?? ""}
+                            onChange={(e) =>
+                              patch(r.id, chooseDebt(r, e.target.value, debtName))
+                            }
+                            aria-label={`Debt paid by ${r.payee}`}
+                            className={cn(
+                              "h-7 w-36 py-0 text-[0.6875rem]",
+                              !r.debtAccountId && "border-amber-500/50",
+                            )}
+                          >
+                            <option value="">Which debt?</option>
+                            {debts.map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.name}
+                              </option>
+                            ))}
+                          </Select>
+                        ) : null}
+                      </div>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">
                     {fmtCAD(r.amount, 2)}
@@ -1160,6 +1319,8 @@ function ReviewStep({
   cash,
   files,
   actions,
+  trades,
+  cardFor,
 }: {
   number: number;
   total: number;
@@ -1170,6 +1331,9 @@ function ReviewStep({
   cash: ImportedRow[];
   files: RoutedFile[];
   actions: CorporateAction[];
+  /** Everything the import read for the positions; only its money movements are used here. */
+  trades: TradeRow[];
+  cardFor: Record<string, string>;
 }) {
   const addTransaction = useFinance((s) => s.addTransaction);
   const setMerchantRule = useFinance((s) => s.setMerchantRule);
@@ -1229,9 +1393,34 @@ function ReviewStep({
     const named = accountForHint(r.accountHint, accounts);
     if (named) return named;
     const kind = files.find((f) => f.fileName === r.sourceFile)?.kind;
-    return kind === "card" ? cardId : cashId;
+    return kind === "card" ? cardFor[r.sourceFile] || cardId : cashId;
   };
   const byMonth = useMemo(() => contributionsByMonth(transactions), [transactions]);
+
+  /*
+   * Money moving into or out of an investment account. Nothing else in the
+   * checklist records it, so without this a month closed here held no
+   * contribution at all. Checked against what is stored by the same rule the
+   * import page uses, so a deposit already recorded — individually or inside a
+   * month's total — is not written again.
+   */
+  const accountIdFor = (r: Registration) => accountForHint(r, accounts) ?? "";
+  const moneyRows = useMemo(
+    () =>
+      markAlreadyImported(
+        trades.filter(
+          (t) =>
+            (t.type === "deposit" || t.type === "withdrawal") && t.include && !t.duplicate,
+        ),
+        (r) => accountForHint(r, accounts) ?? "",
+        holdings,
+        transactions.filter((t) => t.type === "transfer"),
+        new Set(accounts.filter((a) => isInvestmentAccount(a.kind)).map((a) => a.id)),
+      ),
+    [trades, accounts, holdings, transactions],
+  );
+  const moneyMoves = moneyRows.filter((r) => r.include);
+  const heldBack = moneyRows.filter((r) => !r.include && !r.duplicate);
 
   const incomeRows = draft.incomeBoxes
     .map((b) => ({ box: b, amount: Number(draft.income[b.key]) || 0 }))
@@ -1239,6 +1428,7 @@ function ReviewStep({
   const incomeTotal = incomeRows.reduce((sum, r) => sum + r.amount, 0);
 
   const expenseRows = cash.filter((r) => r.type === "expense" && r.include);
+  const paymentRows = cash.filter((r) => r.type === "transfer" && r.include);
   const expenseTotal = expenseRows.reduce((sum, r) => sum + r.amount, 0);
   const rules = expenseRows.filter((r) => r.category !== r.suggestedCategory);
 
@@ -1284,6 +1474,25 @@ function ReviewStep({
       count: expenseRows.length,
     });
   }
+  if (paymentRows.length > 0) {
+    const byCard = new Map<string, number>();
+    for (const r of paymentRows) {
+      const id = accountForRow(r);
+      byCard.set(id, (byCard.get(id) ?? 0) + r.amount);
+    }
+    planned.push({
+      label: "Card payments",
+      detail: [...byCard.entries()]
+        .map(
+          ([id, sum]) =>
+            `${fmtCAD(sum, 2)} from ${accounts.find((a) => a.id === cashId)?.name ?? "the everyday account"} to ${
+              accounts.find((a) => a.id === id)?.name ?? "a card"
+            }`,
+        )
+        .join(", "),
+      count: paymentRows.length,
+    });
+  }
   const repaid = expenseRows.filter((r) => r.debtAccountId);
   if (repaid.length > 0) {
     const owed = repaid.reduce((sum, r) => sum + r.amount, 0);
@@ -1325,6 +1534,23 @@ function ReviewStep({
           : ""
       }`,
       count: draft.trades.batch.trades,
+    });
+  }
+  if (moneyMoves.length > 0 || heldBack.length > 0) {
+    const into = moneyMoves.filter((r) => r.type === "deposit").length;
+    const out = moneyMoves.length - into;
+    planned.push({
+      label: "Investment deposits",
+      detail: [
+        into > 0 ? `${into} deposit${into === 1 ? "" : "s"} into an investment account` : "",
+        out > 0 ? `${out} withdrawal${out === 1 ? "" : "s"}` : "",
+        heldBack.length > 0
+          ? `${heldBack.length} not saved: ${heldBack[0].error ?? "this month is kept as monthly totals"}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(", "),
+      count: moneyMoves.length,
     });
   }
   if (pensionValues.length > 0) {
@@ -1375,6 +1601,28 @@ function ReviewStep({
           return;
         }
       }
+      /*
+       * The same question for card payments, which are transfers: a month whose
+       * transfers are kept as one total each cannot take individual ones too.
+       */
+      const paymentClash = paymentRows
+        .map((r) =>
+          conflictingGranularity(transactions, {
+            date: r.date,
+            type: "transfer",
+            granularity: "individual",
+          }),
+        )
+        .find(Boolean);
+      if (paymentClash) {
+        setError(
+          `${labelMonth(paymentClash.month)} keeps its transfers as monthly totals, so a card ` +
+            `payment cannot be added on its own. Add it to that month's total instead, or ` +
+            `untick it on the import.`,
+        );
+        setSaving(false);
+        return;
+      }
 
       const defaultAccount = accounts[0]?.id ?? "";
       for (const { box, amount } of incomeRows) {
@@ -1396,20 +1644,20 @@ function ReviewStep({
         });
       }
 
-      for (const r of expenseRows) {
+      /*
+       * Spending, and the card payments that settle it. Both sides come from
+       * the rule the import page uses, so a row lands the same way whichever
+       * door it came through: a repayment on the debt it paid off, a card
+       * payment out of the everyday account and onto the card.
+       */
+      for (const r of [...expenseRows, ...paymentRows]) {
         if (!r.payee.trim() || r.amount <= 0) continue;
         addTransaction({
           date: r.date,
-          type: "expense",
+          type: r.type,
           amount: r.amount,
           category: r.category,
-          ...sidesFor("expense", accountForRow(r)),
-          /*
-           * A repayment has a far side: the debt it paid off. Given one, the
-           * balance owed comes down by the amount — which is the whole reason
-           * the step asks which debt it was.
-           */
-          ...(r.debtAccountId ? { destinationAccountId: r.debtAccountId } : {}),
+          ...cashRowSides(r, accountForRow(r), cashId),
           payee: r.payee.trim(),
           note: r.note,
         });
@@ -1522,8 +1770,21 @@ function ReviewStep({
             });
           }
         }
-        for (const { accountId, delta } of batch.cash) {
-          adjustAccountCash(accountId, delta);
+        for (const { accountId, delta, currency } of batch.cash) {
+          adjustAccountCash(accountId, delta, undefined, currency);
+        }
+      }
+
+      if (moneyMoves.length > 0) {
+        const { transfers } = accumulatePositions(
+          moneyMoves,
+          accountIdFor,
+          holdings,
+          (id) => accounts.find((a) => a.id === id)?.balanceAsOf ?? null,
+        );
+        for (const t of transfers) {
+          const txn = transferFor(t, cashId);
+          if (txn) addTransaction(txn);
         }
       }
 
@@ -2140,9 +2401,8 @@ function Checklist({ onClose }: { onClose: () => void }) {
   );
 
   /*
-   * Only the three kinds the trade form can record. A deposit or a withdrawal
-   * in an activity export is cash moving in or out of the brokerage, which the
-   * cash rows already carry — offering it here would record it twice.
+   * Only the three kinds the trade form can record. Deposits and withdrawals
+   * are not trades: the last step saves them as transfers.
    */
   const drafts = useMemo<TradeDraft[]>(
     () =>
@@ -2153,19 +2413,7 @@ function Checklist({ onClose }: { onClose: () => void }) {
             !t.duplicate &&
             (t.type === "buy" || t.type === "sell" || t.type === "dividend"),
         )
-        .map((t) => ({
-          date: t.date,
-          action: t.type as "buy" | "sell" | "dividend",
-          ticker: t.ticker,
-          quantity: String(t.quantity),
-          price: String(t.pricePerUnit),
-          accountId:
-            accounts.find(
-              (a) => t.registration !== null && a.registration === t.registration,
-            )?.id ?? "",
-          currency: t.currency,
-          cadAmount: t.currency === "USD" ? String(t.amountCad) : "",
-        })),
+        .map((t) => tradeDraftFrom(t, accounts)),
     [loaded.trades, accounts],
   );
 
@@ -2208,6 +2456,8 @@ function Checklist({ onClose }: { onClose: () => void }) {
           {...shared}
           rows={loaded.cash}
           onRows={(cash) => setLoaded((l) => ({ ...l, cash }))}
+          files={loaded.files}
+          cardFor={loaded.cardFor}
         />
       )}
       {step === "actions" && (
@@ -2254,6 +2504,8 @@ function Checklist({ onClose }: { onClose: () => void }) {
           cash={loaded.cash}
           files={loaded.files}
           actions={loaded.actions}
+          trades={loaded.trades}
+          cardFor={loaded.cardFor}
         />
       )}
     </Modal>

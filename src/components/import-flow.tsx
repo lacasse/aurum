@@ -22,13 +22,27 @@ import {
   cn,
 } from "@/components/ui";
 import { useFinance } from "@/lib/store";
-import { ImportedRow, describeSigns, suggestCategory, txnKey } from "@/lib/csv";
+import {
+  ImportedRow,
+  cashRowSides,
+  chooseCategory,
+  chooseDebt,
+  countKeys,
+  describeSigns,
+  isUnnamedDebit,
+  nameFromHistory,
+  reconcileCardPayments,
+  suggestCategory,
+  txnKey,
+} from "@/lib/csv";
+import { CHEQUING_HINT } from "@/lib/activities";
 import {
   TradeRow,
   accumulatePositions,
   markAlreadyImported,
   positionToHolding,
   tradeKey,
+  transferFor,
 } from "@/lib/trades";
 import { RoutedFile, accountForHint, labelFor, routeFile } from "@/lib/import-router";
 import {
@@ -42,10 +56,8 @@ import {
   alphabetical,
   REGISTRATION_LABELS,
   Registration,
-  TRANSFER_CATEGORY,
   isInvestmentAccount,
   isLiability,
-  sidesFor,
   granularityClashes,
 } from "@/lib/types";
 import { fmtCAD, labelMonth } from "@/lib/format";
@@ -112,6 +124,7 @@ export function ImportFlow() {
    * balance comes down — so it is the one far side that cannot be guessed.
    */
   const debts = accounts.filter((a) => isLiability(a.kind));
+  const debtName = (id: string) => accounts.find((a) => a.id === id)?.name;
   const cashAccountId =
     accounts.find((a) => a.kind === "checking")?.id ??
     accounts.find((a) => !isInvestmentAccount(a.kind) && !isLiability(a.kind))?.id ??
@@ -152,7 +165,7 @@ export function ImportFlow() {
   };
 
   const existingTxnKeys = useMemo(
-    () => new Set(transactions.map((t) => txnKey(t.date, t.amount, t.payee))),
+    () => countKeys(transactions.map((t) => txnKey(t.date, t.amount, t.payee))),
     [transactions],
   );
 
@@ -226,17 +239,43 @@ export function ImportFlow() {
     setBusy(true);
     // Keys carry forward across files so an overlap between two exports — the
     // usual case when a month is downloaded twice — is caught, not counted.
-    const txnKeys = new Set([...existingTxnKeys, ...cashRows.map((r) => txnKey(r.date, r.amount, r.payee))]);
+    // Counted, not just collected: a key stored once covers one row. Only rows
+    // that are new add to it — a row matched to a stored one is that row.
+    const txnKeys = new Map(existingTxnKeys);
+    const carry = (rows: ImportedRow[]) => {
+      for (const r of rows.filter((x) => !x.dup)) {
+        const k = txnKey(r.date, r.amount, r.payee);
+        txnKeys.set(k, (txnKeys.get(k) ?? 0) + 1);
+      }
+    };
+    carry(cashRows);
     const tKeys = new Set(tradeRows.map(tradeKey));
     const routed: RoutedFile[] = [];
     for (const file of csvs) {
       const res = await routeFile(file, txnKeys, tKeys, merchantRules, userCategories);
-      for (const r of res.cash) txnKeys.add(txnKey(r.date, r.amount, r.payee));
+      carry(res.cash);
       for (const t of res.trades) tKeys.add(tradeKey(t));
       routed.push(res);
     }
     setFiles((prev) => [...prev, ...routed]);
-    setCashRows((prev) => [...prev, ...routed.flatMap((r) => r.cash)]);
+    /*
+     * Card payments are checked across every file loaded so far, not file by
+     * file: the bank's side of a payment usually arrives in a different export
+     * from the card's.
+     */
+    const kinds = new Map([...files, ...routed].map((f) => [f.fileName, f.kind]));
+    setCashRows((prev) =>
+      nameFromHistory(
+        reconcileCardPayments(
+          [...prev, ...routed.flatMap((r) => r.cash)],
+          transactions,
+          accounts,
+          (r) => r.accountHint === CHEQUING_HINT || kinds.get(r.sourceFile) === "bank",
+        ),
+        transactions,
+        accounts,
+      ),
+    );
     setTradeRows((prev) => [...prev, ...routed.flatMap((r) => r.trades)]);
     setActions((prev) => [...prev, ...routed.flatMap((r) => r.actions)]);
     setBusy(false);
@@ -299,14 +338,9 @@ export function ImportFlow() {
         type: r.type,
         amount: r.amount,
         category: r.category,
-        ...sidesFor(r.type, accountForRow(r)),
-        /*
-         * A repayment has a far side: the debt it paid off. Given one, the
-         * balance owed comes down by the amount — the same thing the monthly
-         * checklist does, so a loan payment lands the same way whichever door
-         * it came through.
-         */
-        ...(r.debtAccountId ? { destinationAccountId: r.debtAccountId } : {}),
+        // The same rule as the monthly checklist, so a row lands the same way
+        // whichever door it came through.
+        ...cashRowSides(r, accountForRow(r), cashAccountId),
         payee: r.payee.trim(),
         note: r.note,
       });
@@ -394,7 +428,7 @@ export function ImportFlow() {
       actionsApplied += 1;
     }
 
-    const { positions, cashDeltas, transfers } = accumulatePositions(
+    const { positions, cashDeltas, usdCashDeltas, transfers } = accumulatePositions(
       includedTrades,
       accountIdFor,
       afterActions,
@@ -413,24 +447,14 @@ export function ImportFlow() {
       }
     }
     for (const t of transfers) {
-      const from = t.deposit ? (t.fromAccountId ?? cashAccountId) : t.accountId;
-      const to = t.deposit ? t.accountId : cashAccountId;
-      const label = REGISTRATION_LABELS[t.registration];
-      if (from && to && from !== to) {
-        addTransaction({
-          date: t.date,
-          type: "transfer",
-          amount: t.amount,
-          category: TRANSFER_CATEGORY,
-          sourceAccountId: from,
-          destinationAccountId: to,
-          payee: t.deposit ? `Deposit to ${label}` : `Withdrawal from ${label}`,
-          note: `Imported: ${label} ${t.deposit ? "deposit" : "withdrawal"}`,
-        });
-      }
+      const txn = transferFor(t, cashAccountId);
+      if (txn) addTransaction(txn);
     }
     for (const [id, delta] of cashDeltas) {
       adjustAccountCash(id, Math.round(delta * 100) / 100);
+    }
+    for (const [id, delta] of usdCashDeltas) {
+      adjustAccountCash(id, Math.round(delta * 100) / 100, undefined, "USD");
     }
 
     setResult({
@@ -764,75 +788,112 @@ export function ImportFlow() {
                         </td>
                         <td className="whitespace-nowrap px-2 py-1.5 text-ink-dim">{r.date}</td>
                         <td className="max-w-[16rem] truncate px-2 py-1.5" title={r.payee}>
-                          {r.payee}
-                          {r.dup && (
-                            <Badge className="ml-2 text-[0.5625rem]">already have it</Badge>
+                          {/* The bank never says who a pre-authorized debit paid. */}
+                          {isUnnamedDebit(r.note ?? "") && r.category !== DEBT_CATEGORY ? (
+                            <Input
+                              value={isUnnamedDebit(r.payee) ? "" : r.payee}
+                              placeholder="Who was paid?"
+                              onChange={(e) => updateCash(r.id, { payee: e.target.value })}
+                              onBlur={(e) => {
+                                if (!e.target.value.trim()) {
+                                  updateCash(r.id, { payee: r.note ?? r.payee });
+                                }
+                              }}
+                              aria-label={`Recipient of the pre-authorized debit on ${r.date}`}
+                              className="inline-flex h-7 w-36 py-0 text-[0.6875rem]"
+                            />
+                          ) : (
+                            r.payee
                           )}
+                          {r.paysCard ? (
+                            <Badge className="ml-2 text-[0.5625rem]">paid a card</Badge>
+                          ) : r.dup ? (
+                            <Badge className="ml-2 text-[0.5625rem]">already have it</Badge>
+                          ) : null}
                         </td>
-                        <td className="px-2 py-1.5">
-                          <Select
-                            value={r.type}
-                            onChange={(e) =>
-                              changeType(r, e.target.value as ImportedRow["type"])
-                            }
-                            className="h-7 w-auto py-0 text-[0.6875rem]"
-                            aria-label={`Type for ${r.payee}`}
-                          >
-                            <option value="expense">Expense</option>
-                            <option value="income">Income</option>
-                          </Select>
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <Select
-                            value={r.category}
-                            onChange={(e) => updateCash(r.id, { category: e.target.value })}
-                            className={cn(
-                              "h-7 w-auto py-0 text-[0.6875rem]",
-                              !r.confident && "border-amber-500/50",
-                            )}
-                            aria-label={`Category for ${r.payee}`}
-                          >
-                            {/*
-                              * The shared list, not a copy of it. The copy
-                              * that stood here had already drifted — it was
-                              * missing Freelance — so a row suggested as
-                              * Freelance could not have been left that way.
-                              */}
-                            {alphabetical(
-                              r.type === "income"
-                                ? INCOME_CATEGORIES
-                                : userCategories,
-                            ).map((c) => (
-                              <option key={c} value={c}>
-                                {c}
-                              </option>
-                            ))}
-                          </Select>
-                          {r.type === "expense" &&
-                          r.category === DEBT_CATEGORY &&
-                          debts.length > 0 ? (
+                        {r.type === "transfer" ? (
+                          /*
+                           * A card payment is not income or spending, so neither picker
+                           * applies. It moves money from the everyday account to the card.
+                           */
+                          <>
+                            <td className="px-2 py-1.5 text-[0.6875rem] text-ink-dim">Card payment</td>
+                            <td className="px-2 py-1.5 text-[0.6875rem] text-ink-faint">Transfer</td>
+                          </>
+                        ) : (
+                          <>
+                          <td className="px-2 py-1.5">
                             <Select
-                              value={r.debtAccountId ?? ""}
+                              value={r.type}
                               onChange={(e) =>
-                                updateCash(r.id, { debtAccountId: e.target.value })
+                                changeType(r, e.target.value as ImportedRow["type"])
                               }
-                              aria-label={`Debt paid by ${r.payee}`}
-                              className={cn(
-                                "mt-1 h-7 w-auto py-0 text-[0.6875rem]",
-                                !r.debtAccountId && "border-amber-500/50",
-                              )}
+                              className="h-7 w-auto py-0 text-[0.6875rem]"
+                              aria-label={`Type for ${r.payee}`}
                             >
-                              <option value="">Which debt?</option>
-                              {debts.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.name}
+                              <option value="expense">Expense</option>
+                              <option value="income">Income</option>
+                            </Select>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Select
+                              value={r.category}
+                              onChange={(e) =>
+                                updateCash(r.id, chooseCategory(r, e.target.value, debtName))
+                              }
+                              className={cn(
+                                "h-7 w-auto py-0 text-[0.6875rem]",
+                                !r.confident && "border-amber-500/50",
+                              )}
+                              aria-label={`Category for ${r.payee}`}
+                            >
+                              {/*
+                                * The shared list, not a copy of it. The copy
+                                * that stood here had already drifted — it was
+                                * missing Freelance — so a row suggested as
+                                * Freelance could not have been left that way.
+                                */}
+                              {alphabetical(
+                                r.type === "income"
+                                  ? INCOME_CATEGORIES
+                                  : userCategories,
+                              ).map((c) => (
+                                <option key={c} value={c}>
+                                  {c}
                                 </option>
                               ))}
                             </Select>
-                          ) : null}
-                        </td>
+                            {r.type === "expense" &&
+                            r.category === DEBT_CATEGORY &&
+                            debts.length > 0 ? (
+                              <Select
+                                value={r.debtAccountId ?? ""}
+                                onChange={(e) =>
+                                  updateCash(r.id, chooseDebt(r, e.target.value, debtName))
+                                }
+                                aria-label={`Debt paid by ${r.payee}`}
+                                className={cn(
+                                  "mt-1 h-7 w-auto py-0 text-[0.6875rem]",
+                                  !r.debtAccountId && "border-amber-500/50",
+                                )}
+                              >
+                                <option value="">Which debt?</option>
+                                {debts.map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name}
+                                  </option>
+                                ))}
+                              </Select>
+                            ) : null}
+                          </td>
+                          </>
+                        )}
                         <td className="whitespace-nowrap px-2 py-1.5 text-[0.6875rem] text-ink-faint">
-                          {accounts.find((a) => a.id === accountForRow(r))?.name ?? "—"}
+                          {r.type === "transfer"
+                            ? `${accounts.find((a) => a.id === cashAccountId)?.name ?? "—"} → ${
+                                accounts.find((a) => a.id === accountForRow(r))?.name ?? "—"
+                              }`
+                            : (accounts.find((a) => a.id === accountForRow(r))?.name ?? "—")}
                         </td>
                         <td
                           className={cn(
@@ -840,7 +901,7 @@ export function ImportFlow() {
                             r.type === "income" ? "text-positive" : "text-ink",
                           )}
                         >
-                          {r.type === "income" ? "+" : "−"}
+                          {r.type === "income" ? "+" : r.type === "expense" ? "−" : ""}
                           {fmtCAD(r.amount)}
                         </td>
                       </tr>
