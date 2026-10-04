@@ -19,12 +19,23 @@ import {
   Segmented,
   cn,
 } from "@/components/ui";
-import { SeriesChart, Waterfall, YearSankey } from "@/components/charts";
+import {
+  BAND_ORDER,
+  CLASS_COLORS,
+  DonutChart,
+  SeriesChart,
+  Waterfall,
+  YearSankey,
+} from "@/components/charts";
 import { MonthlyChecklistButton, MonthlyChecklistModal } from "@/components/monthly-checklist";
 import { useFinance } from "@/lib/store";
 import { PageSkeleton, useReady, useRemembered, useSpendGroups, useIncomeTransactions } from "@/lib/hooks";
 import { yearToDate } from "@/lib/spans";
 import {
+  closesFromHoldings,
+  firstAccountMonth,
+  monthsSince,
+  netWorthByClass,
   portfolioHistory,
   fiProgress,
   netWorthOver,
@@ -248,9 +259,28 @@ export default function OverviewPage() {
      * zero put net worth below nothing for months when the portfolio was the
      * largest thing owned.
      */
-    const portfolio =
-      portfolioHistory(holdings, snapshots)?.points ?? portfolioSeries(holdings, 18);
+    const history = portfolioHistory(holdings, snapshots);
+    const portfolio = history?.points ?? portfolioSeries(holdings, 18);
     const netWorth = netWorthOver(accounts, portfolio, usdCadRate);
+
+    /*
+     * The balance sheet by what it is made of, on the same month-end as the
+     * figures above it. The same rule as the Year page's composition chart,
+     * so a pension is its own slice beside cash and each asset class.
+     */
+    const start = history?.points[0]?.key ?? firstAccountMonth(accounts) ?? through;
+    const classes = start
+      ? netWorthByClass(
+          accounts,
+          holdings,
+          closesFromHoldings(holdings),
+          monthsSince(start),
+          snapshots,
+          usdCadRate,
+        )
+      : [];
+    const mix =
+      classes.find((p) => p.key === through) ?? classes[classes.length - 1] ?? null;
 
     const shape = periodShape(transactions, netWorth, from, through, group);
     /* The same stretch a year earlier, on the same rules, for every comparison. */
@@ -286,7 +316,7 @@ export default function OverviewPage() {
       through,
     ).length;
 
-    return { through, shape, before, closing, opening, flow, netWorth, gaps };
+    return { through, shape, before, closing, opening, flow, netWorth, gaps, mix };
   }, [accounts, transactions, holdings, snapshots, usdCadRate, spendGroups]);
 
   /*
@@ -584,40 +614,69 @@ export default function OverviewPage() {
         </Card>
 
         <Chapter title="The long term" />
-        <Card>
-          <CardHeader
-            title="Net worth over time"
-            subtitle={`up to the end of ${labelMonth(longView[longView.length - 1]?.key ?? data.through)}`}
-            action={
-              <div className="flex items-center gap-2">
-                <Segmented<Range>
-                  options={[
-                    { value: "ytd", label: "YTD" },
-                    { value: "12", label: "1Y" },
-                    { value: "60", label: "5Y" },
-                    { value: "all", label: "All" },
-                  ]}
-                  value={range}
-                  onChange={setRange}
-                />
-                <Link href="/year">
-                  <Button variant="ghost" size="sm">
-                    Net worth composition <ArrowRight size={13} />
-                  </Button>
-                </Link>
-              </div>
-            }
-          />
-          <div className="px-3 pb-4">
-            <SeriesChart
-              data={longView as unknown as Record<string, unknown>[]}
-              xKey="label"
-              series={[{ key: "net", name: "Net worth", color: "#8b5cf6" }]}
-              height={300}
-              yFmt={fmtCompact}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+          <Card className="flex h-full flex-col">
+            <CardHeader
+              title="Net worth over time"
+              subtitle={`up to the end of ${labelMonth(longView[longView.length - 1]?.key ?? data.through)}`}
+              action={
+                <div className="flex items-center gap-2">
+                  <Segmented<Range>
+                    options={[
+                      { value: "ytd", label: "YTD" },
+                      { value: "12", label: "1Y" },
+                      { value: "60", label: "5Y" },
+                      { value: "all", label: "All" },
+                    ]}
+                    value={range}
+                    onChange={setRange}
+                  />
+                  <Link href="/year">
+                    <Button variant="ghost" size="sm">
+                      Net worth composition <ArrowRight size={13} />
+                    </Button>
+                  </Link>
+                </div>
+              }
             />
-          </div>
-        </Card>
+            <div className="px-3 pb-4">
+              <SeriesChart
+                data={longView as unknown as Record<string, unknown>[]}
+                xKey="label"
+                series={[{ key: "net", name: "Net worth", color: "#8b5cf6" }]}
+                height={300}
+                yFmt={fmtCompact}
+              />
+            </div>
+          </Card>
+          {data.mix && (
+            <Card className="flex h-full flex-col">
+              <CardHeader
+                title="Balance sheet"
+                subtitle={`What you own, as of ${monthName}${
+                  data.mix.liabilities > 0
+                    ? `, before ${fmtCAD(data.mix.liabilities)} of debt`
+                    : ""
+                }`}
+              />
+              <div className="px-5 pb-5">
+                <DonutChart
+                  data={BAND_ORDER.filter((c) => data.mix![c] > 0).map((c) => ({
+                    name: c,
+                    value: data.mix![c],
+                  }))}
+                  colors={CLASS_COLORS}
+                  fmt={fmtCAD}
+                  centerLabel="Owned"
+                  centerValue={fmtCompact(
+                    BAND_ORDER.reduce((sum, c) => sum + Math.max(0, data.mix![c]), 0),
+                  )}
+                  shares
+                />
+              </div>
+            </Card>
+          )}
+        </div>
       </div>
 
       <MonthlyChecklistModal open={checklistOpen} onClose={() => setChecklistOpen(false)} />

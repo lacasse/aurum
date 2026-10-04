@@ -532,6 +532,7 @@ export function DonutChart({
   fmt,
   colors,
   legend = "below",
+  shares = false,
 }: {
   data: { name: string; value: number }[];
   height?: number;
@@ -549,6 +550,8 @@ export function DonutChart({
    * let the pair fill the width.
    */
   legend?: "below" | "left" | "right";
+  /** Each slice's share of the whole beside its amount in the key. */
+  shares?: boolean;
 }) {
   /*
    * Sorted here rather than trusted from the caller: the colour map is keyed
@@ -559,6 +562,7 @@ export function DonutChart({
   const colorOf = (name: string, i: number) =>
     colors?.[name] ?? spectrumAt(i, rows.length);
   const beside = legend !== "below";
+  const total = rows.reduce((sum, d) => sum + Math.max(0, d.value), 0);
   return (
     <div
       className={cn(
@@ -611,6 +615,11 @@ export function DonutChart({
             <span className="ml-auto font-medium tabular-nums text-ink">
               {fmt ? fmt(d.value) : d.value}
             </span>
+            {shares && (
+              <span className="w-9 text-right tabular-nums text-ink-faint">
+                {total > 0 ? `${Math.round((Math.max(0, d.value) / total) * 100)}%` : "—"}
+              </span>
+            )}
           </li>
         ))}
       </ul>
