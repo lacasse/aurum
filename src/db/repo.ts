@@ -1035,11 +1035,24 @@ const EXPENSE_SETTINGS_KEY = "expense_settings";
  */
 export interface ExpenseSettings {
   groups: Record<string, SpendGroup>;
-  car: { start: string; categories: string[] } | null;
+  car: {
+    start: string;
+    categories: string[];
+    /** What the car cost to buy, so the total is the cost of owning it. */
+    price?: number | null;
+    /** A month's running cost for the months before the record begins. */
+    estimate?: number | null;
+  } | null;
+  /** The car card was dismissed; the settings page brings it back. */
+  carHidden?: boolean;
+  /** Budgets follow each category's 12-month average instead of a set figure. */
+  autoBudget?: boolean;
 }
 
 export async function getExpenseSettings(userId: string): Promise<ExpenseSettings> {
-  const empty: ExpenseSettings = { groups: {}, car: null };
+  const empty: ExpenseSettings = { groups: {}, car: null, carHidden: false, autoBudget: false };
+  const amount = (v: unknown) =>
+    typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
   const raw = await getSetting(userId, EXPENSE_SETTINGS_KEY);
   if (raw === null) return empty;
   try {
@@ -1057,9 +1070,16 @@ export async function getExpenseSettings(userId: string): Promise<ExpenseSetting
             categories: (parsed.car.categories ?? []).filter(
               (c): c is string => typeof c === "string",
             ),
+            price: amount(parsed.car.price),
+            estimate: amount(parsed.car.estimate),
           }
         : null;
-    return { groups, car };
+    return {
+      groups,
+      car,
+      carHidden: parsed.carHidden === true,
+      autoBudget: parsed.autoBudget === true,
+    };
   } catch {
     return empty;
   }

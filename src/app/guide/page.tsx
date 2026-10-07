@@ -292,7 +292,7 @@ export default function GuidePage() {
 
         <Section
           id="spending"
-          title="Necessity, choice, and neither"
+          title="Needs, wants, and neither"
           lead="The three judgements the expenses page makes about a category"
         >
           <p>
@@ -301,14 +301,14 @@ export default function GuidePage() {
               expenses page
             </Link>{" "}
             sits in one of three groups. A{" "}
-            <strong className="text-ink">necessity</strong> arrives whether or
+            <strong className="text-ink">need</strong> arrives whether or
             not the month went well — rent, food, getting to work, keeping a
             body and a dog alive. A{" "}
-            <strong className="text-ink">choice</strong> is decided one
+            <strong className="text-ink">want</strong> is decided one
             purchase at a time, and it is the part a bad quarter can actually
             move. Everything else is{" "}
-            <strong className="text-ink">neither</strong>, and is left out of
-            every total on that page.
+            <strong className="text-ink">neither</strong>: it is shown in grey
+            in the charts, and left out of every total on that page.
           </p>
           <p>
             Debt repayment starts in that third group. Paying down a loan is
@@ -321,7 +321,7 @@ export default function GuidePage() {
           <p>
             The split is a default rather than a rule — donations may feel less
             optional than groceries — so any category can be moved with the
-            Categories button on that page. Only the departures from the
+            Edit categories button on that page. Only the departures from the
             defaults are stored, which is why a category added later still
             picks up a sensible side rather than whatever the map happened to
             say when it was last saved.
