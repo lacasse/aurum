@@ -688,6 +688,13 @@ describe("the year as one flow", () => {
     assert.equal(into(f, "Left in cash"), 36000);
   });
 
+  test("a dividend read from a holding is drawn arriving with the income", () => {
+    const f = yearFlow(txns, "2026");
+    const dividends = f.nodes.findIndex((n) => n.name === "Dividends");
+    const to = f.links.filter((l) => l.source === dividends).map((l) => f.nodes[l.target].name);
+    assert.deepEqual(to, ["Money in"]);
+  });
+
   test("a year that overspent draws where the rest came from", () => {
     const over = [
       txn("2026-01-31", "income", 10000, "Salary"),
@@ -714,7 +721,8 @@ describe("the year as one flow", () => {
       txn("2026-06-30", "income", 3000, "Gifts"),
     ];
     const f = yearFlow(many, "2026", { limit: 1 });
-    assert.equal(Math.round(into(f, "2026")), 72000);
+    // Everything but the dividend, which arrives with the income.
+    assert.equal(Math.round(into(f, "2026")), 67000);
     assert.ok(f.nodes.some((n) => n.name === "Other income"));
   });
 
@@ -1610,8 +1618,28 @@ describe("the spendable bar answers to the accounts", () => {
 
   test("and the other way, when more arrived than the record shows", () => {
     const over = yearFlow(rows, "2026", { accounts, openingCash: 5000, closingCash: 20000 });
-    assert.equal(edge(over, "Not accounted for", "Money in"), 5000);
+    assert.equal(edge(over, "Unexplained source", "Money in"), 5000);
     assert.equal(named(over, "From savings"), false, "it is not known to have come from savings");
+  });
+
+  test("a gap each way is two nodes, not one standing for both", () => {
+    // Cash left over that the close does not explain, and a purchase nothing paid for.
+    const f = yearFlow(rows, "2026", {
+      accounts: [...accounts, { id: "brk", name: "Brokerage", kind: "investment" as const }],
+      holdings: [
+        {
+          accountId: "brk",
+          assetClass: "US Equity",
+          flows: [{ date: "2026-05-01", kind: "buy", amount: 3000 }],
+        },
+      ],
+      openingCash: 5000,
+      closingCash: 9000,
+    } as Parameters<typeof yearFlow>[2]);
+    assert.equal(edge(f, "Money in", "Not accounted for"), 6000);
+    assert.equal(edge(f, "Unexplained source", "Investments"), 3000);
+    const leaf = f.nodes.findIndex((x) => x.name === "Not accounted for");
+    assert.equal(f.links.some((l) => l.source === leaf), false, "a leaf, not a pass-through");
   });
 
   test("without balances it still says the weaker, true thing", () => {
@@ -1795,7 +1823,8 @@ describe("a window that is not a calendar year", () => {
     const into = f.links
       .filter((l) => f.nodes[l.target].name === "Twelve months")
       .reduce((a, l) => a + l.value, 0);
-    assert.equal(Math.round(into), 64000);
+    // The window's income, less the dividend drawn arriving with the income.
+    assert.equal(Math.round(into), 63000);
   });
 });
 

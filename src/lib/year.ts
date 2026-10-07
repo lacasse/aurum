@@ -1,4 +1,5 @@
 import {
+  DIVIDENDS_CATEGORY,
   NON_SPENDABLE_INCOME,
   PASSIVE_INCOME_CATEGORIES,
   accountValueAt,
@@ -1117,6 +1118,17 @@ const CLOSING = "Closing balance";
  */
 const UNEXPLAINED = "Not accounted for";
 /**
+ * The same gap pointing the other way: money that left a bar and never
+ * reached it in the record.
+ *
+ * Named apart from the one above because a node is found by its name. Sharing
+ * one, a bar with money left over and another that was short were drawn as a
+ * single node fed by the first and feeding the second, so it stood taller than
+ * the ribbon into it and read as the one paying for the other. They are two
+ * gaps, and nothing in the record says either explains the other.
+ */
+const UNEXPLAINED_IN = "Unexplained source";
+/**
  * What the difference is called when there are no balances to check against.
  *
  * Without them the bar can only balance against itself, and the difference is
@@ -1325,7 +1337,20 @@ export function yearFlow(
        * one of them was right.
        */
       const contribution = t.category === PENSION_CATEGORY;
-      const hub = contribution ? INVESTMENTS : hubOf(t.destinationAccountId);
+      /*
+       * A dividend is read from the holding that paid it, and that row names
+       * no account so that nothing replaying balances can move on it. Left to
+       * `hubOf` it fell through to the node for rows with no account at all,
+       * drawn beside the accounts as though it were one. It is income like the
+       * salary beside it, so it arrives where income does. Not into the
+       * invested bar: that is money put to work, and a dividend need not be.
+       */
+      const dividend = t.category === DIVIDENDS_CATEGORY && !t.destinationAccountId;
+      const hub = contribution
+        ? INVESTMENTS
+        : dividend
+          ? CASH
+          : hubOf(t.destinationAccountId);
       if (hub === INVESTMENTS) anyInvested = true;
       if (contribution || byId.get(t.destinationAccountId ?? "")?.kind === "pension") {
         pensionIn += cents;
@@ -1658,7 +1683,7 @@ export function yearFlow(
    * Whether the bar was given real balances to answer to. See UNEXPLAINED.
    */
   const reconciled = openingCash !== undefined && closingCash !== undefined;
-  const deficitName = reconciled ? UNEXPLAINED : FROM_BALANCE;
+  const deficitName = reconciled ? UNEXPLAINED_IN : FROM_BALANCE;
   const surplusName = reconciled ? UNEXPLAINED : LEFT_OVER;
 
   const shortfall = new Map<string, number>();
