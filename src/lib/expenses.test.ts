@@ -7,7 +7,6 @@ import {
   latestExpenseMonth,
   monthSummary,
   monthlySpend,
-  recurringFloor,
   rollingAverage,
   runningCost,
 } from "./expenses";
@@ -265,47 +264,6 @@ describe("monthSummary", () => {
   });
 });
 
-describe("recurringFloor", () => {
-  const floor = recurringFloor(steady(), {}, 12, "2025-12");
-
-  test("keeps the categories that arrive every month", () => {
-    assert.deepEqual(
-      floor.items.map((i) => i.category).sort(),
-      ["Drinks & Dining", "Groceries", "Housing"],
-    );
-  });
-
-  test("uses the median, so one cheap month does not move the floor", () => {
-    assert.equal(floor.items.find((i) => i.category === "Groceries")!.typical, 400);
-    assert.equal(floor.total, 1600);
-  });
-
-  test("drops a category that only turned up occasionally", () => {
-    const withTravel = recurringFloor(
-      [...steady(), txn("2025-03-01", 4000, "Travel")],
-      {},
-      12,
-      "2025-12",
-    );
-    assert.ok(!withTravel.items.some((i) => i.category === "Travel"));
-  });
-
-  test("debt repayment is never part of the floor", () => {
-    const withDebt = recurringFloor(
-      [
-        ...steady(),
-        ...Array.from({ length: 12 }, (_, i) =>
-          txn(`2025-${String(i + 1).padStart(2, "0")}-20`, 800, "Debt Repayment"),
-        ),
-      ],
-      {},
-      12,
-      "2025-12",
-    );
-    assert.ok(!withDebt.items.some((i) => i.category === "Debt Repayment"));
-  });
-});
-
 describe("runningCost", () => {
   const txns = [
     txn("2025-01-10", 600, "Transport"),
@@ -341,6 +299,25 @@ describe("runningCost", () => {
     const wide = runningCost(txns, ["Transport"], "2024-11", "2025-01");
     assert.equal(wide.months, 3);
     assert.equal(wide.total, 1599);
+  });
+
+  test("months before the record use the owner's estimate, and only those", () => {
+    const early = runningCost(txns, ["Transport", "Insurance"], "2024-10", "2025-06", {
+      recordedFrom: "2025-01",
+      perMonth: 100,
+    });
+    assert.equal(early.months, 9);
+    assert.equal(early.estimatedMonths, 3);
+    // Three estimated months replace whatever the record held before it began.
+    assert.equal(early.total, 300 + 1200);
+    assert.equal(early.series[0].estimated, true);
+    assert.equal(early.series[3].estimated, undefined);
+    assert.equal(early.largest?.key, "2025-01");
+  });
+
+  test("no estimate leaves the early months at what was recorded", () => {
+    const early = runningCost(txns, ["Transport"], "2024-11", "2025-01");
+    assert.equal(early.estimatedMonths, 0);
   });
 
   test("no categories means no answer rather than a division by zero", () => {

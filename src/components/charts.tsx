@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import {
   Area,
@@ -533,11 +533,17 @@ export function DonutChart({
   colors,
   legend = "below",
   shares = false,
+  fitCenter = false,
 }: {
   data: { name: string; value: number }[];
   height?: number;
   centerLabel?: string;
   centerValue?: string;
+  /**
+   * Size the centre figure to the hole rather than at one fixed size, so it
+   * fills the ring comfortably at whatever width the card gives it.
+   */
+  fitCenter?: boolean;
   fmt?: (n: number) => string;
   /** Colour per category name. Falls back to the palette in slice order. */
   colors?: Record<string, string>;
@@ -563,6 +569,29 @@ export function DonutChart({
     colors?.[name] ?? spectrumAt(i, rows.length);
   const beside = legend !== "below";
   const total = rows.reduce((sum, d) => sum + Math.max(0, d.value), 0);
+
+  /*
+   * The hole is 62% of the ring's diameter, and the ring is as large as the
+   * smaller side of its box. The figure takes about 70% of the hole's width —
+   * tabular digits run near 0.6em each — and never more than a third of its
+   * height, so it reads as filling the space without crowding the ring.
+   */
+  const ringBox = useRef<HTMLDivElement>(null);
+  const [hole, setHole] = useState(0);
+  useEffect(() => {
+    const el = ringBox.current;
+    if (!fitCenter || !el) return;
+    const measure = () => setHole(0.62 * Math.min(el.clientWidth, height));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fitCenter, height]);
+  const centerSize =
+    fitCenter && hole > 0 && centerValue
+      ? Math.max(14, Math.min(40, (hole * 0.7) / (centerValue.length * 0.6), hole * 0.32))
+      : undefined;
+
   return (
     <div
       className={cn(
@@ -570,7 +599,7 @@ export function DonutChart({
         legend === "left" && "sm:flex-row-reverse",
       )}
     >
-      <div className={cn("relative", beside && "min-w-0 flex-1")}>
+      <div ref={ringBox} className={cn("relative", beside && "min-w-0 flex-1")}>
         <ResponsiveContainer width="100%" height={height}>
           <PieChart>
             <Pie
@@ -594,8 +623,15 @@ export function DonutChart({
         </ResponsiveContainer>
         {centerValue ? (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-[0.6875rem] text-ink-faint">{centerLabel}</span>
-            <span className="text-lg font-semibold tabular-nums">{centerValue}</span>
+            {centerLabel ? (
+              <span className="text-[0.6875rem] text-ink-faint">{centerLabel}</span>
+            ) : null}
+            <span
+              className={cn("font-semibold tabular-nums", !centerSize && "text-lg")}
+              style={centerSize ? { fontSize: `${centerSize}px`, lineHeight: 1.1 } : undefined}
+            >
+              {centerValue}
+            </span>
           </div>
         ) : null}
       </div>

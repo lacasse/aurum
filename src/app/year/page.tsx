@@ -64,6 +64,7 @@ import {
 } from "@/lib/contributions";
 import { fmtCAD, fmtCompact, fmtPct, fmtSignedCAD, labelMonth } from "@/lib/format";
 import { getSettings, saveSettings } from "@/lib/api";
+import { ExpensesReview } from "@/components/expenses-review";
 
 /** How much of the monthly composition to draw. */
 type Range = "ytd" | "12" | "60" | "all";
@@ -395,6 +396,8 @@ export default function YearPage() {
           * single step to it — the direction only appears once there are three
           * or four bars to read along.
           */}
+        <ExpensesReview year={Number(selected.year)} groups={spendGroups} />
+
         {byYear.years.length > 1 && (
           <Card>
             <CardHeader

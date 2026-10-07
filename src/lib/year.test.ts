@@ -201,14 +201,14 @@ describe("what was repaid is named, opposite what was borrowed", () => {
   test("a band holding only repayments says so", () => {
     const names = flowOf(base).nodes.map((n) => n.name);
     assert.ok(names.includes("Debt repaid"), names.join(", "));
-    assert.ok(!names.includes("Not consumption"));
+    assert.ok(!names.includes("Neither"));
   });
 
   test("with anything else in it, the general name is kept", () => {
     const names = flowOf(base, (c) =>
       c === "Debt Repayment" || c === "Groceries" ? "excluded" : "necessity",
     ).nodes.map((n) => n.name);
-    assert.ok(names.includes("Not consumption"), names.join(", "));
+    assert.ok(names.includes("Neither"), names.join(", "));
     assert.ok(!names.includes("Debt repaid"));
   });
 
@@ -225,7 +225,7 @@ describe("what was repaid is named, opposite what was borrowed", () => {
   test("a year with no repayments has neither", () => {
     const names = flowOf([base[0], base[1]]).nodes.map((n) => n.name);
     assert.ok(!names.includes("Debt repaid"));
-    assert.ok(!names.includes("Not consumption"));
+    assert.ok(!names.includes("Neither"));
   });
 });
 
@@ -873,8 +873,8 @@ describe("what the money left an account for", () => {
 
   test("spending ends at whether it could have been avoided", () => {
     assert.equal(edge("Money in", "Expenses"), 25000);
-    assert.equal(edge("Expenses", "Necessity"), 20000);
-    assert.equal(edge("Expenses", "Discretionary"), 5000);
+    assert.equal(edge("Expenses", "Needs"), 20000);
+    assert.equal(edge("Expenses", "Wants"), 5000);
     // The categories themselves are not drawn: two ends, not ten.
     assert.equal(f.nodes.some((n) => n.name === "Housing"), false);
     assert.equal(f.nodes.some((n) => n.name === "Travel"), false);
@@ -910,8 +910,8 @@ describe("what the money left an account for", () => {
       o.links
         .filter((l) => o.nodes[l.source].name === from && o.nodes[l.target].name === to)
         .reduce((a, l) => a + l.value, 0);
-    assert.equal(e("Expenses", "Necessity"), 25000);
-    assert.equal(o.nodes.some((n) => n.name === "Discretionary"), false);
+    assert.equal(e("Expenses", "Needs"), 25000);
+    assert.equal(o.nodes.some((n) => n.name === "Wants"), false);
   });
 
   test("every node says what it is, so colour is not read off the name", () => {
@@ -920,8 +920,8 @@ describe("what the money left an account for", () => {
     assert.equal(role("Money in"), "account");
     assert.equal(role("Left in cash"), "kept");
     // Each end of the spending branch is its own colour.
-    assert.equal(role("Necessity"), "necessity");
-    assert.equal(role("Discretionary"), "discretionary");
+    assert.equal(role("Needs"), "necessity");
+    assert.equal(role("Wants"), "discretionary");
     // The invested bar reads as the invested side, not as cash.
     assert.equal(role("Investments"), "investing");
   });
@@ -1456,7 +1456,7 @@ describe("the flow, on shapes the sample data does not have", () => {
     assert.equal(columnsOf(f), 4, "four columns, not five");
     assert.equal(edge(f, "Investments", "Expenses"), 0, "never through the Spending bar");
     assert.ok(
-      f.links.some((l) => f.nodes[l.source].name === "Investments" && f.nodes[l.target].name === "Discretionary"),
+      f.links.some((l) => f.nodes[l.source].name === "Investments" && f.nodes[l.target].name === "Wants"),
       "straight to what it was for",
     );
   });
@@ -1472,7 +1472,7 @@ describe("the flow, on shapes the sample data does not have", () => {
     );
     const into = (name: string) =>
       f.links.filter((l) => f.nodes[l.target].name === name).reduce((a, l) => a + l.value, 0);
-    assert.equal(into("Necessity") + into("Discretionary"), 30040, "nothing is lost by the shortcut");
+    assert.equal(into("Needs") + into("Wants"), 30040, "nothing is lost by the shortcut");
   });
 
   test("the pooled remainder stays at the foot even when it also feeds investments", () => {

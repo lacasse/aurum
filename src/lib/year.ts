@@ -1279,7 +1279,7 @@ export function yearFlow(
   /*
    * What the band of things that are not consumption should be called.
    *
-   * "Not consumption" says what the money is not, which is a poor name for the
+   * "Neither" says what the money is not, which is a poor name for the
    * one band that answers the year's other question: with "Borrowed" drawn
    * plainly on the left, what was repaid deserves to be drawn plainly on the
    * right. The group can hold whatever the Expenses page assigns to it, so the

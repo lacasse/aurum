@@ -10,8 +10,12 @@ const bodySchema = z.object({
     .object({
       start: z.string().regex(/^\d{4}-\d{2}$/, "Start must be a month."),
       categories: z.array(z.string()),
+      price: z.number().finite().nonnegative().nullable().optional(),
+      estimate: z.number().finite().nonnegative().nullable().optional(),
     })
     .nullable(),
+  carHidden: z.boolean().optional(),
+  autoBudget: z.boolean().optional(),
 });
 
 export async function GET() {

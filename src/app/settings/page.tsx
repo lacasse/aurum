@@ -7,14 +7,16 @@ import { AccountSettings } from "@/components/account-settings";
 import { MarketDataKeys } from "@/components/market-data-keys";
 import { PeopleSettings } from "@/components/people-settings";
 import { StartOver } from "@/components/start-over";
+import { PageSettings } from "@/components/page-settings";
 
 /**
  * Settings, in the order they are reached for: how you sign in, the keys your
- * prices come from, who else uses this installation (administrators only), and
- * last, set apart, deleting your record.
+ * prices come from, which cards the pages show, who else uses this
+ * installation (administrators only), and last, set apart, deleting your
+ * record.
  *
- * In the demo only the keys card shows, to say the demo does not use any:
- * there is no account to change and nothing on the server to delete.
+ * In the demo only the keys and pages cards show: there is no account to
+ * change and nothing on the server to delete.
  */
 export default function SettingsPage() {
   const demo = useFinance((s) => s.demo);
@@ -39,6 +41,7 @@ export default function SettingsPage() {
       <div className="space-y-4">
         {demo ? null : <AccountSettings />}
         <MarketDataKeys demo={demo} />
+        <PageSettings />
         {isAdmin && !demo ? <PeopleSettings /> : null}
         {demo ? null : <StartOver />}
       </div>

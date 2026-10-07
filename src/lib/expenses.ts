@@ -29,9 +29,16 @@ export const SPEND_GROUPS: SpendGroup[] = [
 ];
 
 export const SPEND_GROUP_LABELS: Record<SpendGroup, string> = {
-  necessity: "Necessity",
-  discretionary: "Discretionary",
-  excluded: "Not consumption",
+  necessity: "Needs",
+  discretionary: "Wants",
+  excluded: "Neither",
+};
+
+/** The same, for one category: a category is a need, not "needs". */
+export const SPEND_GROUP_LABEL_ONE: Record<SpendGroup, string> = {
+  necessity: "Need",
+  discretionary: "Want",
+  excluded: "Neither",
 };
 
 /**
@@ -387,84 +394,6 @@ export function monthSummary(
   };
 }
 
-/* ── The floor ── */
-
-export interface FloorItem {
-  category: string;
-  /** The middle month, not the mean: one large vet bill is not a commitment. */
-  typical: number;
-  months: number;
-}
-
-export interface Floor {
-  total: number;
-  items: FloorItem[];
-  window: number;
-}
-
-/**
- * What a month costs before anything is decided.
- *
- * The categories that turned up in nearly every month of the window are the
- * ones that arrive on their own; their median month is what they usually
- * take. The sum is the floor: the number that has to be cleared before a
- * month can be called cheap, and the one that matters when asking how long
- * savings would last.
- *
- * Median rather than mean, because these series contain the odd large month —
- * an annual insurance payment, a vet emergency — and a mean would fold a
- * once-a-year charge into every month's baseline.
- */
-export function recurringFloor(
-  transactions: Transaction[],
-  overrides: Record<string, SpendGroup> = {},
-  window = 12,
-  end?: string,
-): Floor {
-  const last = end ?? latestExpenseMonth(transactions);
-  if (!last) return { total: 0, items: [], window: 0 };
-  const keys = lastMonthKeys(window, last);
-  const inWindow = new Set(keys);
-
-  const cents = new Map<string, Map<string, number>>();
-  const activeMonths = new Set<string>();
-  for (const t of transactions) {
-    if (t.type !== "expense") continue;
-    const key = monthKeyOf(t.date);
-    if (!inWindow.has(key)) continue;
-    if (groupOf(t.category, overrides) === "excluded") continue;
-    activeMonths.add(key);
-    const row = cents.get(t.category) ?? new Map<string, number>();
-    row.set(key, (row.get(key) ?? 0) + toCents(t.amount));
-    cents.set(t.category, row);
-  }
-
-  const n = activeMonths.size;
-  if (n === 0) return { total: 0, items: [], window: 0 };
-  // One month may be missed — a bill paid a day late lands in the next month —
-  // without the cost ceasing to be a commitment.
-  const threshold = Math.max(1, n - 1);
-
-  const items: FloorItem[] = [];
-  for (const [category, byMonth] of cents) {
-    const values = [...activeMonths]
-      .map((k) => byMonth.get(k) ?? 0)
-      .sort((a, b) => a - b);
-    const seen = values.filter((v) => v > 0).length;
-    if (seen < threshold) continue;
-    const mid = Math.floor(values.length / 2);
-    const median =
-      values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid];
-    items.push({ category, typical: fromCents(median), months: seen });
-  }
-  items.sort((a, b) => b.typical - a.typical);
-  return {
-    total: roundMoney(items.reduce((sum, i) => sum + i.typical, 0)),
-    items,
-    window: n,
-  };
-}
-
 /* ── The cost of a thing you own ── */
 
 export interface RunningCost {
@@ -485,7 +414,20 @@ export interface RunningCost {
   /** Months that actually had a charge, so the sparseness is visible. */
   monthsWithSpend: number;
   largest: { key: string; value: number } | null;
-  series: { key: string; label: string; value: number }[];
+  series: { key: string; label: string; value: number; estimated?: boolean }[];
+  /** Months before the record begins, counted at the owner's own estimate. */
+  estimatedMonths: number;
+}
+
+/**
+ * For months the record does not reach: a car bought before the first
+ * statement was entered still cost something every month it was owned. The
+ * owner's own estimate stands in for those months, and only those.
+ */
+export interface RunningCostEstimate {
+  /** The first month the record covers. Months before it use `perMonth`. */
+  recordedFrom: string;
+  perMonth: number;
 }
 
 export function runningCost(
@@ -493,6 +435,7 @@ export function runningCost(
   categories: readonly string[],
   start: string,
   end: string,
+  estimate?: RunningCostEstimate,
 ): RunningCost {
   const wanted = new Set(categories);
   const empty: RunningCost = {
@@ -503,6 +446,7 @@ export function runningCost(
     monthsWithSpend: 0,
     largest: null,
     series: [],
+    estimatedMonths: 0,
   };
   if (wanted.size === 0 || start > end) return empty;
 
@@ -518,6 +462,14 @@ export function runningCost(
     if (!byMonth.has(key)) continue;
     byMonth.set(key, byMonth.get(key)! + toCents(t.amount));
   }
+  const estimated = new Set<string>();
+  if (estimate && estimate.perMonth > 0) {
+    for (const key of keys) {
+      if (key >= estimate.recordedFrom) break;
+      byMonth.set(key, toCents(estimate.perMonth));
+      estimated.add(key);
+    }
+  }
 
   const totalCents = [...byMonth.values()].reduce((a, b) => a + b, 0);
   const perMonth = roundMoney(fromCents(totalCents) / keys.length);
@@ -525,9 +477,14 @@ export function runningCost(
     key,
     label: labelMonth(key),
     value: fromCents(byMonth.get(key) ?? 0),
+    ...(estimated.has(key) ? { estimated: true } : {}),
   }));
+  // An estimate is a flat figure, so it never names the priciest month.
   const largest = series.reduce<{ key: string; value: number } | null>(
-    (best, p) => (p.value > 0 && (!best || p.value > best.value) ? p : best),
+    (best, p) =>
+      !p.estimated && p.value > 0 && (!best || p.value > best.value)
+        ? { key: p.key, value: p.value }
+        : best,
     null,
   );
 
@@ -539,6 +496,7 @@ export function runningCost(
     monthsWithSpend: series.filter((p) => p.value > 0).length,
     largest,
     series,
+    estimatedMonths: estimated.size,
   };
 }
 
