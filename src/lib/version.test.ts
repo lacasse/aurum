@@ -43,4 +43,9 @@ describe("reading the latest release", () => {
     assert.equal(parseLatestRelease({ message: "Not Found" }), null);
     assert.equal(parseLatestRelease(null), null);
   });
+
+  test("links only to an https page", () => {
+    assert.equal(parseLatestRelease({ ...release, html_url: "javascript:alert(1)" }), null);
+    assert.equal(parseLatestRelease({ ...release, html_url: "http://example.com" }), null);
+  });
 });

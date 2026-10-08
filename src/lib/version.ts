@@ -41,7 +41,8 @@ export function compareVersions(a: string, b: string): number {
  * The release named in GitHub's "latest release" response, or null.
  *
  * Drafts and pre-releases are never "latest" there, but both are checked
- * anyway: a banner asking someone to install a draft is worse than none.
+ * anyway: a banner asking someone to install a draft is worse than none. The
+ * page has to be an https address, since it becomes a link in the app.
  */
 export function parseLatestRelease(body: unknown): Release | null {
   if (!body || typeof body !== "object") return null;
@@ -49,5 +50,7 @@ export function parseLatestRelease(body: unknown): Release | null {
   if (r.draft === true || r.prerelease === true) return null;
   if (typeof r.tag_name !== "string" || typeof r.html_url !== "string") return null;
   if (!SEMVER.test(r.tag_name)) return null;
+  // The banner links to it, so it has to be a web page and nothing else.
+  if (!/^https:\/\//.test(r.html_url)) return null;
   return { version: r.tag_name.replace(/^v/, ""), url: r.html_url };
 }
