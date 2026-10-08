@@ -153,6 +153,88 @@ function ThemeToggle() {
  * delete, and the server will not seed it again.
  */
 /**
+ * Says when a newer release has been published than the one running.
+ *
+ * Asked once on load and then every few hours while the page stays open; the
+ * server caches GitHub's answer, so a tab left open all week costs nothing.
+ * Only an administrator gets an answer — the route refuses everyone else, and
+ * a refusal shows nothing. Dismissing hides that one version: the next
+ * release raises the banner again.
+ */
+function UpdateBanner() {
+  const demo = useFinance((s) => s.demo);
+  const [update, setUpdate] = useState<{ current: string; latest: string; url: string } | null>(
+    null,
+  );
+  const [dismissed, setDismissed] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (demo) return;
+    let live = true;
+    const check = async () => {
+      try {
+        const res = await fetch("/api/version", { cache: "no-store" });
+        if (!res.ok) return;
+        const body = await res.json();
+        if (live && body.updateAvailable) {
+          setDismissed(readDismissed());
+          setUpdate({ current: body.current, latest: body.latest, url: body.url });
+        }
+      } catch {
+        /* offline or GitHub unreachable: say nothing rather than something wrong */
+      }
+    };
+    check();
+    const timer = setInterval(check, UPDATE_CHECK_EVERY_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [demo]);
+
+  if (demo || !update || dismissed === update.latest) return null;
+
+  const dismiss = () => {
+    setDismissed(update.latest);
+    try {
+      localStorage.setItem(UPDATE_DISMISSED_KEY, update.latest);
+    } catch {
+      /* storage unavailable: hidden until the page is reloaded */
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-brand/30 bg-brand/10 px-4 py-2 text-xs sm:px-6 lg:px-8">
+      <p className="min-w-0 flex-1 text-ink-dim">
+        <span className="font-semibold text-brand">Update available</span> · Version{" "}
+        {update.latest} has been released. This installation runs {update.current}.
+      </p>
+      <div className="flex items-center gap-2">
+        <a href={update.url} target="_blank" rel="noreferrer">
+          <Button size="sm" variant="secondary">
+            What&apos;s new
+          </Button>
+        </a>
+        <Button size="sm" variant="ghost" aria-label="Dismiss" onClick={dismiss}>
+          <X size={14} />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+const UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+const UPDATE_DISMISSED_KEY = "aurum.update.dismissed";
+
+function readDismissed(): string | null {
+  try {
+    return localStorage.getItem(UPDATE_DISMISSED_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Says, on every page, that this is the demo.
  *
  * The figures are invented but plausible, which is exactly what makes them
@@ -466,6 +548,7 @@ export function Shell({
           * band of the window spent restating where you already are.
           */}
         <DemoBanner />
+        <UpdateBanner />
         <header className="border-b border-line bg-background">
           <div className="flex items-center gap-3 px-4 py-4 sm:px-6 lg:px-8">
             <Button
