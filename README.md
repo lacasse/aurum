@@ -1,8 +1,8 @@
 # Aurum · Personal Finance
 
 **A self-hosted webapp for keeping track of your own money.** Net worth, income and
-expenses, budgets, and an investment portfolio — on your own machine, in your own
-database, with nothing sent anywhere.
+expenses, budgets, goals and an investment portfolio — on your own machine, in your own
+database, with nothing about your money sent anywhere.
 
 State lives in **PostgreSQL** behind a small JSON API, and the whole stack ships as a set
 of **Docker containers**. CSV imports — card statements, bank exports, brokerage activity
@@ -37,6 +37,9 @@ These are the calls the app makes, so you can tell early whether they suit you:
   anything called "assets" or "spendable".
 - **Realized and unrealized are kept apart**, so a good year is not hidden behind a loss
   already banked.
+- **An RRSP year runs from 1 March to the end of February**, named for the year it starts
+  in, because a contribution made in January or February uses the room of the year before.
+  TFSA and FHSA room is a calendar year.
 
 ## Scope, and what it is not
 
@@ -88,6 +91,20 @@ Only HTTPS is exposed. A self-signed certificate is generated automatically on f
 startup (stored in the `certs` volume). HTTP requests on port 80 redirect to HTTPS. Since
 the certificate is self-signed, browsers will show a warning you'll need to accept.
 
+### A ready-built image
+
+Every release after 2.7.0 is also published as an image at `ghcr.io/lacasse/aurum`, for
+both Intel and ARM hosts, tagged with its version (`X.Y.Z`) and its minor line (`X.Y`). It
+is built from the tagged commit in a clean checkout, so it is exactly what the release
+names. Building on the host instead takes most of half an hour on a Raspberry Pi.
+
+To use it, point the `app` service's `image` at it in a `docker-compose.override.yml`, then
+upgrade with:
+
+```bash
+docker compose pull app && docker compose up -d app
+```
+
 ### What is reachable, and from where
 
 **Every published port binds to `127.0.0.1`.** Nothing listens on a routable address, so the
@@ -113,6 +130,19 @@ the only thing between the network and a complete financial history.
 
 Nothing else changes: the proxy already terminates TLS, sets the security headers, and is
 the only way in.
+
+### What leaves the machine
+
+Nothing about your record. The app makes two kinds of outbound request, and neither
+carries an amount, an account or a person:
+
+- **Price lookups**, to the two market-data providers described under
+  [Market data](#market-data), which name the tickers being priced.
+- **An update check** for administrators: the server asks GitHub for this repository's
+  latest release, caching the answer for six hours, and the app shows an administrator a
+  banner when a newer one is out. Dismissing it hides that version until the next.
+  `AURUM_UPDATE_CHECK=off` stops the request entirely; `AURUM_UPDATE_REPO` (`owner/name`)
+  points it at a fork.
 
 ### Accounts and login
 
@@ -248,7 +278,7 @@ database in the clear; if you need a copy outside the volume, take one this way 
 # Find the file you want:
 docker exec finance-backup-1 sh -c 'ls -l /backups/'
 # Load it (drops nothing; COPY appends — for a full restore, truncate tables first):
-docker exec finance-db-1 psql -U aurum -d aurum -c "TRUNCATE transactions, holdings, monthly_snapshots, accounts, budgets, categories, merchant_rules RESTART IDENTITY CASCADE;"
+docker exec finance-db-1 psql -U aurum -d aurum -c "TRUNCATE users, invites, user_settings, accounts, transactions, recurring_transactions, holdings, monthly_snapshots, budgets, categories, merchant_rules, price_history, app_meta RESTART IDENTITY CASCADE;"
 docker exec finance-backup-1 sh -c 'gzip -dc /backups/aurum_XXXXXXXX.sql.gz' | docker exec -i finance-db-1 psql -U aurum -d aurum
 ```
 
@@ -311,24 +341,29 @@ skipped with console errors).
 
 | Page | What you get |
 | --- | --- |
-| **Dashboard** | Net worth KPI cards with sparklines, an all-time net-worth line, what net worth is *made of* as a 100% stacked composition, a financial-independence tracker against your own spending, cash-flow averages, income vs expenses, where the money went, and spending by category as a 100% stacked line |
-| **Income** | Every kind of income over 1, 2 or 5 years: what arrives a month, how much of it is spendable, how much is passive, and a per-source table with trends — averaged over the window rather than over the months a source turned up in |
+| **Overview** | Where you stand over the trailing twelve months: net worth and what moved it, a **roll forward** from net worth a year ago through income, spending and markets to today, average monthly cash flow against the twelve months before, a **money flow** chart from each source through the accounts to what it became, financial independence and passive-income coverage, a short list of things worth a look, and net worth over time beside a **balance sheet** pie of everything owned — cash, stocks, bonds, crypto and the pension |
+| **Income** | Every kind of income over the year to date, 1, 2 or 5 years: what arrives a month, how much of it is spendable, how much is passive, and a per-source table with trends — averaged over the window rather than over the months a source turned up in |
 | **Transactions** | Everything that happened on a date, in one list: transactions **and trades**, under one set of filters (search, type — including buy/sell/dividend — category, account, month). Full CRUD on both; a trade is corrected by replaying its position's whole history rather than patching the numbers. Balances adjust automatically, every row records where the money came *from* and went *to*, and **Add** asks whether it repeats — a one-off, or a rule that posts itself on schedule. Rows are drawn a page at a time |
-| **Expenses** | One month against the twelve before it: what it cost, how it split between necessity and choice, where it ranks against every month on record, what moved against each category's average, the recurring-cost floor, and a **cost-of-ownership card** (the car) averaged over every month owned rather than every month billed. **Budgets live here too** — a limit is an attribute of a category, so it is set beside what the category actually costs |
-| **Investments** | Holdings CRUD with price updates, all-time value vs cost basis, asset allocation, holdings exposure by position, **where the money stands** — what open positions have done, what closed ones did, and what was paid out, kept apart so a good year is not hidden behind a loss already banked — three measures of return side by side (simple, money-weighted, time-weighted) against a benchmark, and a per-position table sortable by class, value, gain and MWRR |
-| **Accounts** | Assets/liabilities/net-worth KPIs, assets-vs-liabilities stacked area, account cards with history sparklines, and a defined-benefit pension card (transfer value against what you contributed). Accounts carry a kind (chequing, savings, cash, investment, crypto, property, credit, loan, pension) and a registration (non-registered, TFSA, RRSP, FHSA, Pension) |
-| **Year** | Every year on record against the one before: income against spending, what it grew to, what the portfolio did with it, and the month each milestone was first passed |
-| **Tax** | Realized gains, dividends and interest by year — non-registered only, since that is the only place any of it is reportable |
+| **Expenses** | Opens on one month: what it cost against the 12-month average, how it split between **needs, wants and neither**, the last twelve months as bars that select a month, and the categories that moved most. One categories card with a simple view — spending against budget, a six-month streak per category, personal bests — and a detailed table; a category opens its expenses for the month. **Budgets live here** — a limit is an attribute of a category — and can follow each category's 12-month average until switched off. A **cost-of-ownership card** (the car) takes a purchase price and an estimate for months before the record begins, and can be hidden |
+| **Investments** | The month so far, the monthly gain bars and the month's top movers on one row, then all-time value against cost basis, asset allocation, holdings exposure by position, **where the money stands** — what open positions have done, what closed ones did, and what was paid out, kept apart so a good year is not hidden behind a loss already banked — three measures of return side by side (simple, money-weighted, time-weighted) against a benchmark, and a per-position table sortable by class, value, gain and MWRR |
+| **Accounts** | Assets/liabilities/net-worth KPIs, cash against debt, account cards with history sparklines, and a defined-benefit pension card (transfer value against what you contributed). Accounts carry a kind (chequing, savings, cash, investment, crypto, property, credit, loan, pension) and a registration (non-registered, TFSA, RRSP, FHSA, Pension) |
+| **Year** | Every year on record against the one before: income against spending, a roll forward from opening to closing net worth, where the money came from and went, passive income over time, registered contribution room, a review of the year's spending against its budgets, what net worth is made of, and the month each milestone was first passed |
+| **Goals** | The year's goals, set the SMART way from measures the app already keeps — net worth, the portfolio, cash on hand, debt, money saved and invested, passive income, plan contributions, spending and charitable giving — as an amount or a percentage, plus custom goals checked off by hand. Each goal shows whether it is on track; when one is met, on any page, there is confetti, a chime and a way to the goal |
+| **Settings** | Your username and password, your own market-data keys, people and invitations (administrators), which optional cards are shown, and **Start over**, which deletes your own record and nothing else |
 | **Import CSV** | Drop in one file or many and each is routed by what it *is*: a card statement, a bank export with debit/credit columns, a trade log, or a brokerage activity report that is all of those at once. Format, sign convention and account are detected per file, categories are suggested against your own list, duplicates are flagged, and every row is reviewable before anything is saved |
-| **Monthly checklist** | Closes the month that just ended in one pass: import → income → spending → *mergers* → trades → pension → save. The mergers step appears only when a file carried one. Nothing is written until the last step |
-| **Guide** | How each figure is arrived at: the pension, staking rewards, necessity vs choice, what a statement is read for, what the checklist covers, realized vs unrealized, and which months a chart shows |
+| **Monthly checklist** | Closes the month that just ended in one pass: import → income → spending → *mergers* → trades → pension → *room* → *goals* → save. The steps in italics appear only when there is something for them — a file that carried a merger, a new contribution year whose room is not set, and the January checklist that closes December. Nothing is written until the last step |
+| **Tax** *(unreleased)* | Realized gains, dividends and interest by year — non-registered only, since that is the only place any of it is reportable |
+| **Guide** *(unreleased)* | How each figure is arrived at: the pension, staking rewards, needs and wants, what a statement is read for, what the checklist covers, realized vs unrealized, and which months a chart shows |
+
+Pages marked *unreleased* are hidden from the sidebar in a production build; see
+[Shipping an unfinished page](#shipping-an-unfinished-page).
 
 ## Stack
 
 - [Next.js](https://nextjs.org) 16 (App Router, Turbopack) + React 19 + TypeScript
 - [PostgreSQL](https://www.postgresql.org) 17 + [Drizzle ORM](https://orm.drizzle.team) (migrations in `drizzle/`, applied at startup)
 - [Zod](https://zod.dev) for request-body validation — schemas are declared once in `src/lib/schemas.ts` and shared by every route
-- Route Handlers under `src/app/api` expose the data (accounts, transactions, holdings, budgets, categories, merchant rules, recurring rules, demo-data deletion)
+- Route Handlers under `src/app/api` expose the data (accounts, transactions, holdings, budgets, categories, merchant rules, recurring rules, snapshots, contribution limits, goals, settings, people and invitations, backups, prices, demo-data deletion)
 - [Tailwind CSS](https://tailwindcss.com) v4 — semantic design tokens only (`--surface`, `--ink`, `--line`…), so both themes are one set of names with two sets of values, and the type scale is one declaration (`html { font-size }`)
 - [Recharts](https://recharts.org) for all charts
 - [Zustand](https://zustand.docs.pmnd.rs) as the client cache — optimistic updates with fire-and-forget persistence to the API
@@ -345,7 +380,7 @@ skipped with console errors).
 independent attributes, because they answer different questions:
 
 - **Kind** — what it is and how it behaves: `checking`, `savings`, `cash`, `investment`,
-  `crypto`, `property`, `credit`, `loan`. This decides the balance arithmetic (credit cards
+  `crypto`, `property`, `credit`, `loan`, `pension`. This decides the balance arithmetic (credit cards
   and loans store what is *owed*, so the signs invert) and which accounts can hold
   securities. Investment and crypto accounts both hold positions; a wallet or exchange
   account works the same way as a brokerage.
@@ -399,7 +434,8 @@ moved.
 ## The monthly checklist
 
 One pass that closes the month that has just **finished**, not the one running: import →
-income → spending → trades → pension → save.
+income → spending → mergers → trades → pension → room → goals → save. Mergers, room and
+goals appear only when they have something to ask.
 
 Everything imported is trimmed to that month. A statement downloaded on the third carries
 a few days of both months, and without the trim those days land silently in the wrong
@@ -415,6 +451,15 @@ spending was never reviewed, or trades posted before the snapshot meant to value
 
 Income is dated the last day of the month being closed, whatever day the checklist is
 actually done on, and the pension figure is recorded against that month too.
+
+Deposits into and withdrawals from investment accounts are saved as **transfers**, so they
+count toward contribution room rather than disappearing. Where more than one credit card
+is on record, the checklist asks which one a statement belongs to rather than filing it
+against the first.
+
+**Room** appears when the month being closed opens a contribution year whose room is not
+yet set. **Goals** appears only in the January checklist, the one that closes December,
+as an optional step for setting the new year's goals.
 
 **Mergers and demergers get a step only when a file carried one.** An empty step every
 month, for something that happens twice a decade, is a step people learn to click past.
@@ -451,6 +496,21 @@ answer written down in the file:
   pre-authorized debits and e-transfers recorded as card spending. The row's own word wins
   now, then the file's kind, and the everyday account is the last resort rather than the
   first.
+
+Two kinds of row are recorded as transfers rather than as income or spending, because the
+money only moved between your own accounts:
+
+- **A deposit into an investment account** comes from the everyday account — or, where
+  the same amount left another investment account that day, it is one transfer between
+  the two. A deposit in a month kept as monthly totals is matched against that month
+  rather than written beside it. An account moved in from another institution is listed
+  for attention and not recorded.
+- **A credit card payment** is recorded once, from the card's statement, as a transfer
+  from the everyday account onto that card. The bank's line for the same payment is left
+  out, so it is not also counted as spending.
+
+Dividends paid in US dollars are added to the account's US-dollar cash, and withholding
+tax is paired with the dividend it was taken from.
 
 Two smaller ones. A **ticker's exchange suffix is ignored when matching an existing
 position** — a broker writes `TSLA.NEO` where you hold `TSLA`, and treating those as
@@ -535,8 +595,9 @@ Three limits, each deliberate:
 ## Shipping an unfinished page
 
 Pages under construction are marked `unreleased` in the nav array in
-`src/components/shell.tsx`. They are listed in development and hidden in a production
-build, so work carries on with no release branch to cherry-pick onto and no revert to
+`src/components/shell.tsx`, read through `SHOW_UNRELEASED` in `src/lib/unreleased.ts`,
+which also gates anything such a page brings with it elsewhere — a checklist step, a
+celebration. They are listed in development and hidden in a production build, so work carries on with no release branch to cherry-pick onto and no revert to
 re-apply. Promoting a page is deleting one word.
 
 ```ts
@@ -551,9 +612,9 @@ real app before it is promoted. It is not a way to keep anything private.
 ## Performance
 
 The client does all its own analysis, so the work that matters is a page's selectors
-rather than a query. Measured against a real record — 1,438 transactions, 60 holdings, 80
-months of history — the dashboard's analysis costs **24 ms**, down from 59 ms, after four
-fixes worth recording because each was a class of mistake rather than a slow line:
+rather than a query. Measured against a real record of several years, the dashboard's
+analysis costs **24 ms**, down from 59 ms, after four fixes worth recording because each
+was a class of mistake rather than a slow line:
 
 - **Dates parsed inside a loop that never needed them again.** The money-weighted return
   bisects ~44 times over the same flows, and each pass re-parsed every date: 188,000
@@ -569,20 +630,21 @@ fixes worth recording because each was a class of mistake rather than a slow lin
 - **String-keyed maps in the hot loop.** Ten thousand month-keyed `Map` writes per pass
   became array offsets.
 
-The transactions table also draws a page at a time. It used to render every match — 1,438
-rows, some ten thousand elements — so every keystroke in the search box rebuilt the lot.
+The transactions table also draws a page at a time. It used to render every match — some
+ten thousand elements — so every keystroke in the search box rebuilt the lot.
 
 ## Structure
 
 ```
 src/
-  app/            # routes: dashboard, income, transactions, expenses, investments,
-                  #   accounts, year, tax, import, import-trades, guide, login
+  app/            # routes: overview, income, transactions, expenses, investments,
+                  #   accounts, year, goals, tax, guide, settings, import-trades,
+                  #   login, invite
   app/api/        # JSON API (force-dynamic route handlers)
   components/     # shell (sidebar/logo/topbar), ui primitives, charts, forms,
-                  #   stat cards, the monthly checklist
+                  #   stat cards, the monthly checklist, goals, settings cards
   db/
-    schema.ts     # Drizzle schema (11 tables; money stored as exact `numeric`)
+    schema.ts     # Drizzle schema (13 tables; money stored as exact `numeric`)
     repo.ts       # queries, validation, balance side-effects, seed/reset
     init.ts       # one-shot migrate + first-run seed
   lib/
@@ -594,8 +656,12 @@ src/
     store.ts      # zustand store — optimistic updates + API sync
     api.ts        # typed fetch client for the API
     analytics.ts  # pure selectors: series, allocations, returns, totals
-    expenses.ts   # necessity/discretionary grouping, recurring floor, cost of ownership
-    year.ts       # year-over-year rollups and milestones
+    expenses.ts   # needs/wants/neither grouping, cost of ownership
+    budget-habits.ts # budgets that follow the average, streaks, the year's review
+    year.ts       # year-over-year rollups, roll forward, money flow, milestones
+    story.ts      # the overview's verdicts: what moved net worth, what is worth a look
+    goals.ts      # goal measures, progress and when a goal counts as met
+    contributions.ts # registered plan contributions against each year's room
     tax.ts        # realized gains, dividends and interest by year, non-registered only
     xirr.ts       # money-weighted return over dated flows
     pension.ts    # defined-benefit estimates from contributions
@@ -613,6 +679,11 @@ src/
     rewards.ts    # staking rewards awaiting a price
     fx.ts         # CAD/USD rate
     auth.ts / login-rate-limit.ts # session cookies, per-IP lockout
+    invites.ts / route-guard.ts   # invitations, the routes that answer without a session
+    api-keys.ts   # whose market-data keys a request uses
+    demo.ts       # the browser-only demo from the login page
+    unreleased.ts # whether unfinished pages are shown
+    version.ts    # comparing the running version with the latest release
     format.ts     # currency/date/month formatting helpers
     hooks.tsx     # mounted/server-ready gates + page skeleton
 drizzle/          # generated SQL migrations (applied on startup)
@@ -621,8 +692,8 @@ drizzle/          # generated SQL migrations (applied on startup)
 ## Tests
 
 ```bash
-npm test            # 592 unit tests (money, schemas, auth, rate limiting, analytics,
-                    #   csv, checklist, trades, expenses, tax, pension, xirr…)
+npm test            # unit tests (money, schemas, auth, rate limiting, analytics, csv,
+                    #   checklist, trades, expenses, goals, tax, pension, xirr…)
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint
 npm run check:security
@@ -646,6 +717,12 @@ Every one of the above runs in CI on push and pull request
 ## Market data
 
 Prices come from two providers, and **the ticker's exchange suffix decides which one**.
+
+**Each person brings their own keys**, saved in **Settings → Market-data keys**: a key and its
+allowance belong to one account, so the people an installation invites do not spend its
+owner's. `EODHD_API_KEY` and `TWELVEDATA_API_KEY` in the environment stand in for the first
+account only, so an installation that always kept its keys in `.env` upgrades with nothing
+to do.
 A ticker naming its listing venue — `XEQT.TO`, `RETL.NEO`, `AUTO.NE` — is quoted by
 EODHD. A bare ticker — `AAPL`, `REIT`, `BTC` — is quoted by Twelve Data.
 
@@ -830,10 +907,18 @@ income, there is a pension account, debt repayments, transfers and standing rule
 `src/lib/sample.test.ts` asserts that coverage: a generator that quietly stops producing
 trades leaves whole features looking broken to anyone seeing them for the first time.
 
-**The securities are invented.** The sample is a fiction throughout and reads nobody's
-records, but real tickers still invite the wrong reading — a demo portfolio holding the
-same names as the real one is hard to tell apart at a glance, and a screenshot of it looks
-like a statement.
+**The record is invented; the securities are real.** Every amount, account and person in
+the sample is made up and reads nobody's records. The tickers are real listings — a
+symbol and the company behind it are public — because real ones cover the cases the app
+actually has to handle, such as a depositary receipt beside its underlying share, a venue
+suffix and a coin, which invented ones only gesture at. What the sample never does is
+mirror anyone's portfolio: the holdings, their sizes and their accounts are its own.
+
+**Anyone can try it without an account.** **Explore with demo data** on the login page
+opens the whole app on a freshly generated sample, kept entirely in that browser: the
+demo can load page shells and nothing else from the server, every API route still demands
+a real session, and nothing the visitor changes is ever written to the server. The app
+says throughout that it is a demo.
 
 The integration and smoke suites count what the generator produced rather than literals,
 so growing the sample cannot fail CI for being right.
