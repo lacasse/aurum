@@ -404,6 +404,30 @@ already correct, and rewriting `main` to fix a commit message is a far larger
 risk than the inaccurate message. Amend what is still editable, leave what is
 not, and state plainly which is which.
 
+# Documentation Moves With the Code
+
+## Every commit checks the docs, in the same commit
+
+Before committing, ask what a reader of the documentation would now find
+wrong or missing, and fix it in the same commit as the change:
+
+- **`README.md`** — installing and updating: a new env var, a changed port or
+  command, a step an upgrade now needs.
+- **`docs/`** — `about.md` (the pages and what the app decides), `running.md`
+  (exposure, outbound requests, accounts, backups), `using.md` (workflows and
+  imports), `market-data.md` (providers and limits), `development.md` (stack,
+  structure, tests).
+- **The in-app guide** (`src/app/guide/page.tsx`) when a page's behaviour or
+  wording changes.
+
+A change nobody would read about — a refactor, a test, a typo — needs no docs
+edit, and the check takes a moment: search `README.md`, `docs/` and the guide
+for the names the change touches. A docs fix that waits for a later commit
+waits for ever.
+
+Documentation is published text: `npm run check:text` on every file touched,
+and no figure from the owner's record as an example of anything.
+
 # Versions and Releases
 
 Semantic versioning, read for an application rather than a library. Nobody
