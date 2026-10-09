@@ -836,55 +836,57 @@ export function ImportFlow() {
                             </Select>
                           </td>
                           <td className="px-2 py-1.5">
-                            <Select
-                              value={r.category}
-                              onChange={(e) =>
-                                updateCash(r.id, chooseCategory(r, e.target.value, debtName))
-                              }
-                              className={cn(
-                                "h-7 w-auto py-0 text-[0.6875rem]",
-                                !r.confident && "border-amber-500/50",
-                              )}
-                              aria-label={`Category for ${r.payee}`}
-                            >
-                              {/*
-                                * The shared list, not a copy of it. The copy
-                                * that stood here had already drifted — it was
-                                * missing Freelance — so a row suggested as
-                                * Freelance could not have been left that way.
-                                */}
-                              {alphabetical(
-                                r.type === "income"
-                                  ? INCOME_CATEGORIES
-                                  : userCategories,
-                              ).map((c) => (
-                                <option key={c} value={c}>
-                                  {c}
-                                </option>
-                              ))}
-                            </Select>
-                            {r.type === "expense" &&
-                            r.category === DEBT_CATEGORY &&
-                            debts.length > 0 ? (
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <Select
-                                value={r.debtAccountId ?? ""}
+                                value={r.category}
                                 onChange={(e) =>
-                                  updateCash(r.id, chooseDebt(r, e.target.value, debtName))
+                                  updateCash(r.id, chooseCategory(r, e.target.value, debtName))
                                 }
-                                aria-label={`Debt paid by ${r.payee}`}
                                 className={cn(
-                                  "mt-1 h-7 w-auto py-0 text-[0.6875rem]",
-                                  !r.debtAccountId && "border-amber-500/50",
+                                  "h-7 w-36 py-0 text-[0.6875rem]",
+                                  !r.confident && "border-amber-500/50",
                                 )}
+                                aria-label={`Category for ${r.payee}`}
                               >
-                                <option value="">Which debt?</option>
-                                {debts.map((a) => (
-                                  <option key={a.id} value={a.id}>
-                                    {a.name}
+                                {/*
+                                  * The shared list, not a copy of it. The copy
+                                  * that stood here had already drifted — it was
+                                  * missing Freelance — so a row suggested as
+                                  * Freelance could not have been left that way.
+                                  */}
+                                {alphabetical(
+                                  r.type === "income"
+                                    ? INCOME_CATEGORIES
+                                    : userCategories,
+                                ).map((c) => (
+                                  <option key={c} value={c}>
+                                    {c}
                                   </option>
                                 ))}
                               </Select>
-                            ) : null}
+                              {r.type === "expense" &&
+                              r.category === DEBT_CATEGORY &&
+                              debts.length > 0 ? (
+                                <Select
+                                  value={r.debtAccountId ?? ""}
+                                  onChange={(e) =>
+                                    updateCash(r.id, chooseDebt(r, e.target.value, debtName))
+                                  }
+                                  aria-label={`Debt paid by ${r.payee}`}
+                                  className={cn(
+                                    "h-7 w-36 py-0 text-[0.6875rem]",
+                                    !r.debtAccountId && "border-amber-500/50",
+                                  )}
+                                >
+                                  <option value="">Which debt?</option>
+                                  {debts.map((a) => (
+                                    <option key={a.id} value={a.id}>
+                                      {a.name}
+                                    </option>
+                                  ))}
+                                </Select>
+                              ) : null}
+                            </div>
                           </td>
                           </>
                         )}
