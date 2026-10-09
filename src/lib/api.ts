@@ -47,7 +47,30 @@ export class DemoModeError extends Error {
   }
 }
 
-async function send<T>(url: string, method: string, body?: unknown): Promise<T> {
+/*
+ * The last write still in flight to each record. A PUT carries the whole row,
+ * so two sent back to back for one account -- its Canadian cash and then its
+ * US cash -- could arrive in either order, and when the first landed last it
+ * put the other currency back. Writes to one URL now leave one at a time, in
+ * the order they were made. Creates are left alone: each is its own row.
+ */
+const inFlight = new Map<string, Promise<unknown>>();
+
+function send<T>(url: string, method: string, body?: unknown): Promise<T> {
+  if (method === "GET" || method === "POST") return request<T>(url, method, body);
+  const pending = inFlight.get(url);
+  // Nothing ahead of it: leave now, as before, rather than a tick later.
+  const next = pending
+    ? pending.catch(() => undefined).then(() => request<T>(url, method, body))
+    : request<T>(url, method, body);
+  inFlight.set(url, next);
+  void next.finally(() => {
+    if (inFlight.get(url) === next) inFlight.delete(url);
+  }).catch(() => undefined);
+  return next;
+}
+
+async function request<T>(url: string, method: string, body?: unknown): Promise<T> {
   /*
    * In the demo a write is a success that goes nowhere — the store has already
    * applied it and saves it in the browser — and a read is refused, since the
