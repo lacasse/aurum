@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -22,6 +22,7 @@ import {
   cn,
 } from "@/components/ui";
 import { useFinance } from "@/lib/store";
+import { loadAppliedConversions, recordConversions } from "@/lib/conversions";
 import {
   ImportedRow,
   cashRowSides,
@@ -164,6 +165,12 @@ export function ImportFlow() {
     return accountForHint(row.accountHint, accounts) ?? cashAccountId;
   };
 
+  // Conversions already applied, so a file loaded again does not convert twice.
+  const [appliedConversions, setAppliedConversions] = useState<string[]>([]);
+  useEffect(() => {
+    loadAppliedConversions().then(setAppliedConversions);
+  }, []);
+
   const existingTxnKeys = useMemo(
     () => countKeys(transactions.map((t) => txnKey(t.date, t.amount, t.payee))),
     [transactions],
@@ -249,7 +256,7 @@ export function ImportFlow() {
       }
     };
     carry(cashRows);
-    const tKeys = new Set(tradeRows.map(tradeKey));
+    const tKeys = new Set([...appliedConversions, ...tradeRows.map(tradeKey)]);
     const routed: RoutedFile[] = [];
     for (const file of csvs) {
       const res = await routeFile(file, txnKeys, tKeys, merchantRules, userCategories);
@@ -327,7 +334,7 @@ export function ImportFlow() {
     });
   };
 
-  const save = () => {
+  const save = async () => {
     let learned = 0;
     const validCash = includedCash.filter(
       (r) => r.payee.trim() && r.amount > 0 && r.date && accountForRow(r),
@@ -456,6 +463,7 @@ export function ImportFlow() {
     for (const [id, delta] of usdCashDeltas) {
       adjustAccountCash(id, Math.round(delta * 100) / 100, undefined, "USD");
     }
+    await recordConversions(includedTrades, appliedConversions);
 
     setResult({
       transactions: validCash.length,

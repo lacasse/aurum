@@ -320,7 +320,8 @@ export function parseActivitiesCsv(
       cashAmount: number,
       fromRegistration?: Registration,
     ) => {
-      const moneyOnly = tradeType === "deposit" || tradeType === "withdrawal";
+      const moneyOnly =
+        tradeType === "deposit" || tradeType === "withdrawal" || tradeType === "conversion";
       if (!symbol && !moneyOnly) {
         drop("security rows with no symbol");
         return;
@@ -362,6 +363,7 @@ export function parseActivitiesCsv(
         duplicate: false,
         sourceFile: fileName,
         ...(fromRegistration ? { fromRegistration } : {}),
+        ...(tradeType === "conversion" ? { incoming: cashAmount > 0 } : {}),
       };
       const key = tradeKey(row);
       row.duplicate = seenTrade.has(key);
@@ -423,7 +425,8 @@ export function parseActivitiesCsv(
         break;
       }
       case "FxExchange":
-        drop("currency conversions");
+        // Two rows, one per currency, each signed: the side that left and the side that arrived.
+        addTrade("conversion", 0, 0, amount);
         break;
       case "ListingSwap":
         /*

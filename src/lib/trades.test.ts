@@ -223,7 +223,7 @@ describe("accumulatePositions", () => {
     transactedAmount: 300,
     registration: "TFSA" as Registration | null,
     registrationRaw: "TFSA",
-    currency: "CAD" as const,
+    currency: "CAD" as "CAD" | "USD",
     amountCad: 300,
     include: true,
     duplicate: false,
@@ -306,6 +306,42 @@ describe("accumulatePositions", () => {
       [],
     );
     assert.equal(cashDeltas.get("acc-tfsa"), -300 + 200 + 12);
+  });
+
+  test("a US-dollar buy and sale settle in the account's US-dollar cash", () => {
+    const { cashDeltas, usdCashDeltas } = accumulatePositions(
+      [
+        row({ ticker: "MSFT", currency: "USD", transactedAmount: 400, amountCad: 550 }),
+        row({
+          ticker: "MSFT",
+          date: "2025-02-01",
+          type: "sell",
+          quantity: 5,
+          currency: "USD",
+          transactedAmount: 250,
+          amountCad: 340,
+        }),
+      ],
+      resolve,
+      [],
+    );
+    assert.equal(usdCashDeltas.get("acc-tfsa"), -400 + 250);
+    assert.equal(cashDeltas.get("acc-tfsa"), undefined, "no Canadian cash moved");
+  });
+
+  test("each side of a conversion moves its own currency, and opens no position", () => {
+    const leg = { ticker: "", quantity: 0, pricePerUnit: 0, type: "conversion" as TradeType };
+    const { positions, cashDeltas, usdCashDeltas } = accumulatePositions(
+      [
+        row({ ...leg, transactedAmount: 1380, amountCad: 1380, incoming: false }),
+        row({ ...leg, currency: "USD", transactedAmount: 1000, amountCad: 1380, incoming: true }),
+      ],
+      resolve,
+      [],
+    );
+    assert.equal(positions.length, 0);
+    assert.equal(cashDeltas.get("acc-tfsa"), -1380);
+    assert.equal(usdCashDeltas.get("acc-tfsa"), 1000);
   });
 
   test("deposits and withdrawals become transfers, not positions", () => {

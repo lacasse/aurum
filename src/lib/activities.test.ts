@@ -392,3 +392,35 @@ describe("withholding tax and its dividend", () => {
     assert.equal(res.trades[0].taxWithheld, undefined);
   });
 });
+
+describe("a currency conversion", () => {
+  test("is read as two legs, each signed by the side it moved", () => {
+    const res = parse(
+      activityRow({
+        date: "2025-03-03",
+        accountType: "TFSA",
+        activityType: "FxExchange",
+        currency: "CAD",
+        description: "FX Rate: 1.38",
+        netCash: -1380,
+      }),
+      activityRow({
+        date: "2025-03-03",
+        accountType: "TFSA",
+        activityType: "FxExchange",
+        currency: "USD",
+        description: "FX Rate: 1.38",
+        netCash: 1000,
+      }),
+    );
+    const legs = res.trades.filter((t) => t.type === "conversion");
+    assert.deepEqual(
+      legs.map((t) => [t.currency, t.transactedAmount, t.incoming, t.registration]),
+      [
+        ["CAD", 1380, false, "TFSA"],
+        ["USD", 1000, true, "TFSA"],
+      ],
+    );
+    assert.equal(res.skipped.length, 0, "no longer dropped");
+  });
+});

@@ -148,12 +148,13 @@ export const api = {
  * otherwise they go to the server exactly as they did.
  */
 const SETTINGS: Record<
-  "/api/expense-settings" | "/api/contribution-limits" | "/api/goals",
+  "/api/expense-settings" | "/api/contribution-limits" | "/api/goals" | "/api/conversions",
   DemoSetting
 > = {
   "/api/expense-settings": "expense-settings",
   "/api/contribution-limits": "contribution-limits",
   "/api/goals": "goals",
+  "/api/conversions": "conversions",
 };
 export type SettingsPath = keyof typeof SETTINGS;
 

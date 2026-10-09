@@ -297,7 +297,8 @@ describe("planTrades: buying", () => {
     );
     assert.ok(plan.ok);
     assert.equal(plan.batch.changes[0].avgCost, 125);
-    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", currency: "CAD", delta: -250 }]);
+    // The cost base is in Canadian dollars; the cash left in the dollars it was paid in.
+    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", currency: "USD", delta: -200 }]);
   });
 
   test("a zero price is refused", () => {
@@ -307,6 +308,17 @@ describe("planTrades: buying", () => {
 });
 
 describe("planTrades: selling", () => {
+  test("a US-dollar sale returns US-dollar cash", () => {
+    const plan = planTrades(
+      [row({ action: "sell", quantity: "10", price: "50", currency: "USD", cadAmount: "690" })],
+      [],
+      [holding({ currency: "USD" })],
+      1.37,
+    );
+    assert.ok(plan.ok);
+    assert.deepEqual(plan.batch.cash, [{ accountId: "acct-1", currency: "USD", delta: 500 }]);
+  });
+
   test("reduces the position and returns the cash", () => {
     const plan = planTrades(
       [row({ action: "sell", quantity: "40", price: "36" })],

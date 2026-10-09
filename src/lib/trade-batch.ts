@@ -364,9 +364,10 @@ export function planTrades(
         return { ok: false, error: `Buy ${ticker}: price must be > 0.` };
       }
       const costCad = isUsd ? Number(row.cadAmount) || qty * px * usdCadRate : qty * px;
-      // The cash that paid for the shares leaves the account's balance; the
-      // shares themselves are valued from the holding.
-      moveCash(row.accountId, -Math.abs(costCad), row.date);
+      // The cash that paid for the shares leaves the account's balance, in the
+      // currency it was paid in; the shares are valued from the holding.
+      if (isUsd) moveCash(row.accountId, -qty * px, row.date, "USD");
+      else moveCash(row.accountId, -Math.abs(costCad), row.date);
       const newShares = lot.shares + qty;
       lot.avgCost =
         lot.shares > 0 ? (lot.shares * lot.avgCost + costCad) / newShares : costCad / qty;
@@ -392,7 +393,8 @@ export function planTrades(
       const proceedsCad = isUsd
         ? Number(row.cadAmount) || qty * px * usdCadRate
         : qty * px;
-      moveCash(row.accountId, Math.abs(proceedsCad), row.date);
+      if (isUsd) moveCash(row.accountId, qty * px, row.date, "USD");
+      else moveCash(row.accountId, Math.abs(proceedsCad), row.date);
       lot.shares -= qty;
       lot.flows.push({
         date: row.date,

@@ -21,7 +21,12 @@ import {
 import { baseTicker, resolveTicker } from "./trade-batch";
 import { daysApart, todayISO } from "./format";
 
-export type TradeType = "buy" | "sell" | "dividend" | "deposit" | "withdrawal";
+/**
+ * A conversion is one leg of a currency exchange inside an account: the export
+ * writes the Canadian and the US side as two rows, and each moves that
+ * currency's cash.
+ */
+export type TradeType = "buy" | "sell" | "dividend" | "deposit" | "withdrawal" | "conversion";
 
 export interface TradeRow {
   id: string;
@@ -72,6 +77,8 @@ export interface TradeRow {
   fromRegistration?: Registration;
   /** For a dividend, the tax withheld from it at source, in CAD. */
   taxWithheld?: number;
+  /** For a conversion, whether this leg's currency came in (true) or went out. */
+  incoming?: boolean;
 }
 
 /**
@@ -572,10 +579,19 @@ export function accumulatePositions(
   let skipped = 0;
   const oversold: AccumulationResult["oversold"] = [];
 
-  const moveCash = (accountId: string, delta: number, onDate: string) => {
+  /*
+   * A US-dollar trade, dividend or conversion leg moves the account's US-dollar
+   * cash, as the money did. Anything in Canadian dollars moves the rest.
+   */
+  const moveCash = (accountId: string, delta: number, onDate: string, currency: Currency = "CAD") => {
     if (!movementApplies({ balanceAsOf: balanceAnchorFor(accountId) }, onDate)) return;
-    cashDeltas.set(accountId, (cashDeltas.get(accountId) ?? 0) + delta);
+    const deltas = currency === "USD" ? usdCashDeltas : cashDeltas;
+    deltas.set(accountId, (deltas.get(accountId) ?? 0) + delta);
   };
+  const settle = (row: TradeRow, accountId: string, sign: 1 | -1) =>
+    row.currency === "USD"
+      ? moveCash(accountId, sign * row.transactedAmount, row.date, "USD")
+      : moveCash(accountId, sign * row.amountCad, row.date);
 
   const positionFor = (row: TradeRow, accountId: string): Position => {
     const key = `${resolveTicker(row.ticker, existingHoldings, accountId, row.currency)}|${accountId}`;
@@ -670,6 +686,11 @@ export function accumulatePositions(
       continue;
     }
 
+    if (row.type === "conversion") {
+      moveCash(accountId, (row.incoming ? 1 : -1) * row.transactedAmount, row.date, row.currency);
+      continue;
+    }
+
     const pos = positionFor(row, accountId);
     if (row.pricePerUnit > 0) pos.lastPrice = row.pricePerUnit;
 
@@ -677,14 +698,14 @@ export function accumulatePositions(
       // Buying converts cash already in the account into securities, so the
       // cash has to leave the balance or the money is counted twice — once as
       // cash and again as the position.
-      moveCash(accountId, -row.amountCad, row.date);
+      settle(row, accountId, -1);
       pos.shares += row.quantity;
       pos.costNative += row.transactedAmount;
       pos.costCad += row.amountCad;
       pos.everHeld = true;
       pos.flows.push({ date: row.date, kind: "buy", amount: row.amountCad, shares: row.quantity });
     } else if (row.type === "sell") {
-      moveCash(accountId, row.amountCad, row.date);
+      settle(row, accountId, 1);
       /*
        * A sale bigger than the position means the buys are missing or landed
        * elsewhere. Clamping at zero keeps the arithmetic sane, but the caller
@@ -706,14 +727,7 @@ export function accumulatePositions(
       pos.shares = remaining;
       pos.flows.push({ date: row.date, kind: "sell", amount: row.amountCad, shares: -sold });
     } else if (row.type === "dividend") {
-      // A US-dollar dividend is US-dollar cash: see the same rule in planTrades.
-      if (row.currency === "USD") {
-        if (movementApplies({ balanceAsOf: balanceAnchorFor(accountId) }, row.date)) {
-          usdCashDeltas.set(accountId, (usdCashDeltas.get(accountId) ?? 0) + row.transactedAmount);
-        }
-      } else {
-        moveCash(accountId, row.amountCad, row.date);
-      }
+      settle(row, accountId, 1);
       pos.dividendsNative += row.transactedAmount;
       pos.dividendsCad += row.amountCad;
       pos.flows.push({

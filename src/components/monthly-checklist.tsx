@@ -23,6 +23,7 @@ import {
 } from "@/lib/contributions";
 import type { TradeBatch, TradeInput } from "@/lib/trade-batch";
 import { useFinance } from "@/lib/store";
+import { loadAppliedConversions, recordConversions } from "@/lib/conversions";
 import {
   fmtCAD,
   labelMonth,
@@ -323,10 +324,16 @@ function ImportStep({
     () => countKeys(transactions.map((t) => txnKey(t.date, t.amount, t.payee))),
     [transactions],
   );
+  // Conversions already applied, so a file loaded again does not convert twice.
+  const [appliedConversions, setAppliedConversions] = useState<string[]>([]);
+  useEffect(() => {
+    loadAppliedConversions().then(setAppliedConversions);
+  }, []);
   const existingTradeKeys = useMemo(
     () =>
-      new Set(
-        holdings.flatMap((h) =>
+      new Set([
+        ...appliedConversions,
+        ...holdings.flatMap((h) =>
           h.flows.map((f) =>
             tradeKey({
               date: f.date,
@@ -338,8 +345,8 @@ function ImportStep({
             }),
           ),
         ),
-      ),
-    [holdings],
+      ]),
+    [holdings, appliedConversions],
   );
 
   const handleFiles = async (list: FileList | File[]) => {
@@ -1420,6 +1427,10 @@ function ReviewStep({
     [trades, accounts, holdings, transactions],
   );
   const moneyMoves = moneyRows.filter((r) => r.include);
+  /* Currency exchanged inside an account: each leg moves that currency's cash. */
+  const conversions = trades.filter(
+    (t) => t.type === "conversion" && t.include && !t.duplicate,
+  );
   const heldBack = moneyRows.filter((r) => !r.include && !r.duplicate);
 
   const incomeRows = draft.incomeBoxes
@@ -1551,6 +1562,13 @@ function ReviewStep({
         .filter(Boolean)
         .join(", "),
       count: moneyMoves.length,
+    });
+  }
+  if (conversions.length > 0) {
+    planned.push({
+      label: "Currency conversions",
+      detail: `${conversions.length} side${conversions.length === 1 ? "" : "s"} of an exchange between Canadian and US dollars`,
+      count: conversions.length,
     });
   }
   if (pensionValues.length > 0) {
@@ -1773,6 +1791,22 @@ function ReviewStep({
         for (const { accountId, delta, currency } of batch.cash) {
           adjustAccountCash(accountId, delta, undefined, currency);
         }
+      }
+
+      if (conversions.length > 0) {
+        const fx = accumulatePositions(
+          conversions,
+          accountIdFor,
+          holdings,
+          (id) => accounts.find((a) => a.id === id)?.balanceAsOf ?? null,
+        );
+        for (const [id, delta] of fx.cashDeltas) {
+          adjustAccountCash(id, Math.round(delta * 100) / 100);
+        }
+        for (const [id, delta] of fx.usdCashDeltas) {
+          adjustAccountCash(id, Math.round(delta * 100) / 100, undefined, "USD");
+        }
+        await recordConversions(conversions, await loadAppliedConversions());
       }
 
       if (moneyMoves.length > 0) {

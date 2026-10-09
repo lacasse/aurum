@@ -135,8 +135,13 @@ money only moved between your own accounts:
   from the everyday account onto that card. The bank's line for the same payment is left
   out, so it is not also counted as spending.
 
-Dividends paid in US dollars are added to the account's US-dollar cash, and withholding
-tax is paired with the dividend it was taken from.
+US dollars stay US dollars. A dividend paid in US dollars is added to the account's
+US-dollar cash, and a US-dollar buy or sale takes from or adds to it; the cost base is still
+recorded in Canadian dollars at that day's rate. A **currency conversion** is read as the
+two lines the export writes, one per currency, each moving its own cash. A conversion leaves
+no other record, so the app remembers the ones it has applied and marks them "already have
+it" if the same file is imported again. Withholding tax is paired with the dividend it was
+taken from, and is still recorded as a Canadian-dollar expense.
 
 Two smaller ones. A **ticker's exchange suffix is ignored when matching an existing
 position** — a broker writes `TSLA.NEO` where you hold `TSLA`, and treating those as

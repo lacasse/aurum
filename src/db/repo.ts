@@ -712,6 +712,31 @@ export async function setGoals(userId: string, goals: Goal[]): Promise<void> {
   await setSetting(userId, GOALS_KEY, JSON.stringify(cleanGoals(goals)));
 }
 
+const CONVERSIONS_KEY = "applied_conversions";
+
+/**
+ * The currency conversions already applied to an account's cash, by their
+ * import key, so importing the same file again does not convert twice. A
+ * conversion has no other record to recognise it by: it is not a transaction
+ * and belongs to no holding.
+ */
+export async function getAppliedConversions(userId: string): Promise<string[]> {
+  const raw = await getSetting(userId, CONVERSIONS_KEY);
+  if (raw === null) return [];
+  try {
+    const keys: unknown = JSON.parse(raw);
+    return Array.isArray(keys) ? keys.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Adds to what is stored and never removes: forgetting a key converts again. */
+export async function addAppliedConversions(userId: string, keys: string[]): Promise<void> {
+  const all = new Set([...(await getAppliedConversions(userId)), ...keys]);
+  await setSetting(userId, CONVERSIONS_KEY, JSON.stringify([...all]));
+}
+
 /* ------------------------------------------------------------------ */
 /* Users                                                               */
 /* ------------------------------------------------------------------ */
