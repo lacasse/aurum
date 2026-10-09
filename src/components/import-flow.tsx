@@ -1029,7 +1029,9 @@ export function ImportFlow() {
                         <td className="px-2 py-1.5">
                           <span className="font-medium">{r.ticker}</span>{" "}
                           <span className="text-ink-faint">
-                            {r.type ?? r.typeRaw}
+                            {r.type === "conversion"
+                              ? `conversion ${r.incoming ? "in" : "out"}`
+                              : (r.type ?? r.typeRaw)}
                             {r.fromRegistration &&
                               ` from ${REGISTRATION_LABELS[r.fromRegistration]}`}
                           </span>
@@ -1049,7 +1051,8 @@ export function ImportFlow() {
                           {r.quantity || "—"}
                         </td>
                         <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">
-                          {fmtCAD(r.amountCad)}
+                          {/* The amount in the currency whose cash it moves. */}
+                          {fmtCAD(r.currency === "USD" ? r.transactedAmount : r.amountCad)}
                           {r.currency === "USD" && (
                             <span className="ml-1 text-[0.625rem] text-info">USD</span>
                           )}
