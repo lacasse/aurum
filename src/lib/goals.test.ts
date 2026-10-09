@@ -271,6 +271,22 @@ describe("charitable giving", () => {
     );
   });
 
+  test("a tenth of income or more wears the orange diamond", () => {
+    const fmt = (n: number) => `${n} dollars`;
+    const giving = (target: number, basis: "amount" | "percent" = "percent") =>
+      describeGoal(goal({ metric: "donations", basis, target }), fmt);
+    assert.equal(giving(10), "\u{1F538} Give 10% of income to charity in 2026");
+    assert.equal(giving(15), "\u{1F538} Give 15% of income to charity in 2026");
+    assert.equal(giving(9.9), "Give 9.9% of income to charity in 2026");
+    // A dollar amount says nothing about a share of income.
+    assert.equal(giving(5000, "amount"), "Give 5000 dollars to charity in 2026");
+    // Ten percent of something else is not giving.
+    assert.equal(
+      describeGoal(goal({ metric: "saved", basis: "percent", target: 20 }), fmt),
+      "Save 20% of income in 2026",
+    );
+  });
+
   test("a stored share over a hundred percent is dropped", () => {
     const kept = cleanGoals([
       goal({ id: "ok", metric: "donations", basis: "percent", target: 10 }),

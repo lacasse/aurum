@@ -905,7 +905,28 @@ export function describe(
     spending: [`Keep ${spending} under ${x}`, `Keep ${spending} under ${x} of income`],
     donations: [`Give ${x} to charity`, `Give ${x} of income to charity`],
   };
-  return `${sentence[goal.metric][pct ? 1 : 0]}${when}`;
+  const mark = isPledgeLevel(goal) ? `${PLEDGE_MARK} ` : "";
+  return `${mark}${sentence[goal.metric][pct ? 1 : 0]}${when}`;
+}
+
+/**
+ * The orange diamond worn by people who give a tenth of their income or more,
+ * after the 10% Pledge. A giving goal at that level carries it in front.
+ */
+export const PLEDGE_MARK = "\u{1F538}";
+/** The share of income, in percent, from which a giving goal carries the mark. */
+export const PLEDGE_SHARE = 10;
+
+/**
+ * Whether a goal is to give a tenth of income or more.
+ *
+ * Only a share of income qualifies: a dollar amount is a tenth of one year's
+ * income and not the next, so the mark would come and go with the salary.
+ * Derived from the goal, never stored, so editing the share below a tenth
+ * takes the mark off with it.
+ */
+export function isPledgeLevel(goal: Pick<Goal, "metric" | "basis" | "target">): boolean {
+  return goal.metric === "donations" && goal.basis === "percent" && goal.target >= PLEDGE_SHARE;
 }
 
 /* ── Checking what is stored ── */
