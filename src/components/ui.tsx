@@ -66,6 +66,36 @@ export function CardHeader({
 /* ---------------- Button ---------------- */
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonSize = "sm" | "md" | "icon";
+
+/**
+ * A button's look, for something that is not a button.
+ *
+ * A link that leads somewhere has to be an `<a>`, and wrapping a `<button>` in
+ * one puts an interactive element inside another: invalid HTML, and two stops
+ * for a keyboard or a screen reader where there should be one. The link wears
+ * these classes instead.
+ */
+export function buttonClass({
+  variant = "primary",
+  size = "md",
+  className,
+}: { variant?: ButtonVariant; size?: ButtonSize; className?: string } = {}) {
+  return cn(
+    "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:pointer-events-none disabled:opacity-50",
+    size === "md" && "h-9 px-3.5 text-sm",
+    size === "sm" && "h-7 px-2.5 text-xs",
+    size === "icon" && "h-8 w-8",
+    variant === "primary" &&
+      "bg-brand-strong text-white hover:bg-brand dark:text-zinc-950",
+    variant === "secondary" &&
+      "border border-line bg-elevated text-ink hover:border-brand/50",
+    variant === "ghost" && "text-ink-dim hover:bg-elevated hover:text-ink",
+    variant === "danger" &&
+      "bg-negative/10 text-negative hover:bg-negative/20",
+    className,
+  );
+}
 
 export function Button({
   variant = "primary",
@@ -74,27 +104,9 @@ export function Button({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
-  size?: "sm" | "md" | "icon";
+  size?: ButtonSize;
 }) {
-  return (
-    <button
-      className={cn(
-        "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:pointer-events-none disabled:opacity-50",
-        size === "md" && "h-9 px-3.5 text-sm",
-        size === "sm" && "h-7 px-2.5 text-xs",
-        size === "icon" && "h-8 w-8",
-        variant === "primary" &&
-          "bg-brand-strong text-white hover:bg-brand dark:text-zinc-950",
-        variant === "secondary" &&
-          "border border-line bg-elevated text-ink hover:border-brand/50",
-        variant === "ghost" && "text-ink-dim hover:bg-elevated hover:text-ink",
-        variant === "danger" &&
-          "bg-negative/10 text-negative hover:bg-negative/20",
-        className,
-      )}
-      {...props}
-    />
-  );
+  return <button className={buttonClass({ variant, size, className })} {...props} />;
 }
 
 /* ---------------- Inputs ---------------- */

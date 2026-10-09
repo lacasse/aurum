@@ -26,7 +26,7 @@ import {
   X,
   LogOut,
 } from "lucide-react";
-import { Button, Modal } from "./ui";
+import { Button, Modal, buttonClass } from "./ui";
 import { useFinance } from "@/lib/store";
 import { leaveDemo } from "@/lib/demo";
 import { useMounted } from "@/lib/hooks";
@@ -210,10 +210,13 @@ function UpdateBanner() {
         {update.latest} has been released. This installation runs {update.current}.
       </p>
       <div className="flex items-center gap-2">
-        <a href={update.url} target="_blank" rel="noreferrer">
-          <Button size="sm" variant="secondary">
-            What&apos;s new
-          </Button>
+        <a
+          href={update.url}
+          target="_blank"
+          rel="noreferrer"
+          className={buttonClass({ size: "sm", variant: "secondary" })}
+        >
+          What&apos;s new
         </a>
         <Button size="sm" variant="ghost" aria-label="Dismiss" onClick={dismiss}>
           <X size={14} />
