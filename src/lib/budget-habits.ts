@@ -297,21 +297,67 @@ export function averageBudgets(
 }
 
 /**
- * The budgets in force: the ones set by hand, or — while the owner has asked
- * for budgets to follow the 12-month average — that average, recomputed as
- * the months go by. Every reader of a budget takes it from here, so the
- * expenses page and the year's review can never disagree about what it was.
+ * Which categories' budgets follow their 12-month average. `all` covers every
+ * category, including ones added later; otherwise only those listed do, and
+ * the rest keep the figure set by hand.
+ */
+export interface Averaging {
+  all: boolean;
+  categories: readonly string[];
+}
+
+export const NO_AVERAGING: Averaging = { all: false, categories: [] };
+
+export function followsAverage(a: Averaging, category: string): boolean {
+  return a.all || a.categories.includes(category);
+}
+
+/**
+ * Turn following the average on or off for one category. Turning one off
+ * while every category follows lists all the others by name, so they carry
+ * on following; turning the last one on collapses the list back into `all`.
+ */
+export function setFollowing(
+  a: Averaging,
+  category: string,
+  on: boolean,
+  allCategories: readonly string[],
+): Averaging {
+  if (on) {
+    if (a.all) return a;
+    const next = [...new Set([...a.categories, category])];
+    return allCategories.length > 0 && allCategories.every((c) => next.includes(c))
+      ? { all: true, categories: [] }
+      : { all: false, categories: next };
+  }
+  const rest = (a.all ? allCategories : a.categories).filter((c) => c !== category);
+  return { all: false, categories: rest };
+}
+
+/**
+ * The budgets in force, category by category: the 12-month average for a
+ * category that follows it, the figure set by hand for one that does not.
+ * Every reader of a budget takes it from here, so the expenses page and the
+ * year's review can never disagree about what it was.
  *
- * Following the average never writes over the budgets set by hand; they are
- * simply not read while it is on.
+ * Following the average never writes over a budget set by hand; it is simply
+ * not read while the category follows the average.
  */
 export function effectiveLimits(
   budgets: readonly { category: string; limit: number }[],
-  followAverage: boolean,
+  averaging: Averaging,
   transactions: Transaction[],
   overrides: Record<string, SpendGroup>,
   now: string,
 ): Map<string, number> {
-  if (!followAverage) return new Map(budgets.map((b) => [b.category, b.limit]));
-  return averageBudgets(transactions, overrides, now);
+  const out = new Map(
+    budgets
+      .filter((b) => !followsAverage(averaging, b.category))
+      .map((b) => [b.category, b.limit] as [string, number]),
+  );
+  if (!averaging.all && averaging.categories.length === 0) return out;
+  for (const [c, v] of averageBudgets(transactions, overrides, now)) {
+    if (followsAverage(averaging, c)) out.set(c, v);
+  }
+  return out;
 }

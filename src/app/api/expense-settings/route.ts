@@ -16,6 +16,7 @@ const bodySchema = z.object({
     .nullable(),
   carHidden: z.boolean().optional(),
   autoBudget: z.boolean().optional(),
+  averaged: z.array(z.string()).optional(),
 });
 
 export async function GET() {

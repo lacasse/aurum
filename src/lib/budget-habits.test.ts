@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   averageBudgets,
   effectiveLimits,
+  followsAverage,
+  setFollowing,
   budgetHistory,
   budgetStreak,
   categoryStreak,
@@ -246,24 +248,68 @@ describe("averageBudgets", () => {
 });
 
 describe("effectiveLimits", () => {
-  const manual = [{ category: "Groceries", limit: 999 }];
+  const manual = [
+    { category: "Groceries", limit: 999 },
+    { category: "Housing", limit: 1200 },
+  ];
   const tx = groceries(2025);
+  const none = { all: false, categories: [] };
+  const all = { all: true, categories: [] };
 
-  test("the budgets set by hand, when not following the average", () => {
-    assert.deepEqual([...effectiveLimits(manual, false, tx, {}, "2026-01")], [["Groceries", 999]]);
+  test("the budgets set by hand, when nothing follows the average", () => {
+    const l = effectiveLimits(manual, none, tx, {}, "2026-01");
+    assert.deepEqual([...l], [["Groceries", 999], ["Housing", 1200]]);
   });
 
-  test("the 12-month average, when following it, whatever was set by hand", () => {
-    const l = effectiveLimits(manual, true, tx, {}, "2026-01");
+  test("the 12-month average for every category, when all follow it", () => {
+    const l = effectiveLimits(manual, all, tx, {}, "2026-01");
     assert.equal(l.get("Groceries"), 400);
     assert.equal(l.get("Housing"), 1000);
+  });
+
+  test("some by hand, some on the average", () => {
+    const l = effectiveLimits(manual, { all: false, categories: ["Groceries"] }, tx, {}, "2026-01");
+    assert.equal(l.get("Groceries"), 400, "follows the average");
+    assert.equal(l.get("Housing"), 1200, "kept as set");
+  });
+
+  test("a category on the average gets one even with nothing set by hand", () => {
+    const l = effectiveLimits([], { all: false, categories: ["Housing"] }, tx, {}, "2026-01");
+    assert.deepEqual([...l], [["Housing", 1000]]);
   });
 
   test("following it keeps up as months finish", () => {
     const later = [...tx, txn("2026-01-10", 1600, "Groceries"), txn("2026-01-05", 1000, "Housing")];
     // January still running: not counted.
-    assert.equal(effectiveLimits(manual, true, later, {}, "2026-01").get("Groceries"), 400);
+    assert.equal(effectiveLimits(manual, all, later, {}, "2026-01").get("Groceries"), 400);
     // January finished: the window moves on, dropping last January.
-    assert.equal(effectiveLimits(manual, true, later, {}, "2026-02").get("Groceries"), 500);
+    assert.equal(effectiveLimits(manual, all, later, {}, "2026-02").get("Groceries"), 500);
+  });
+});
+
+describe("setFollowing", () => {
+  const cats = ["Dining", "Groceries", "Housing"];
+
+  test("one category on, one at a time", () => {
+    const a = setFollowing({ all: false, categories: [] }, "Dining", true, cats);
+    assert.deepEqual(a, { all: false, categories: ["Dining"] });
+    assert.equal(followsAverage(a, "Dining"), true);
+    assert.equal(followsAverage(a, "Housing"), false);
+  });
+
+  test("the last one on becomes every category, new ones included", () => {
+    const a = setFollowing({ all: false, categories: ["Dining", "Groceries"] }, "Housing", true, cats);
+    assert.deepEqual(a, { all: true, categories: [] });
+    assert.equal(followsAverage(a, "Travel"), true);
+  });
+
+  test("taking one off every category leaves the others following", () => {
+    const a = setFollowing({ all: true, categories: [] }, "Groceries", false, cats);
+    assert.deepEqual(a, { all: false, categories: ["Dining", "Housing"] });
+  });
+
+  test("taking one off a list removes only it", () => {
+    const a = setFollowing({ all: false, categories: ["Dining", "Housing"] }, "Dining", false, cats);
+    assert.deepEqual(a, { all: false, categories: ["Housing"] });
   });
 });

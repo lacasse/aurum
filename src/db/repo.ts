@@ -1045,12 +1045,20 @@ export interface ExpenseSettings {
   } | null;
   /** The car card was dismissed; the settings page brings it back. */
   carHidden?: boolean;
-  /** Budgets follow each category's 12-month average instead of a set figure. */
+  /** Every category's budget follows its 12-month average, new ones included. */
   autoBudget?: boolean;
+  /** Otherwise, the categories whose budgets follow it; the rest are set by hand. */
+  averaged?: string[];
 }
 
 export async function getExpenseSettings(userId: string): Promise<ExpenseSettings> {
-  const empty: ExpenseSettings = { groups: {}, car: null, carHidden: false, autoBudget: false };
+  const empty: ExpenseSettings = {
+    groups: {},
+    car: null,
+    carHidden: false,
+    autoBudget: false,
+    averaged: [],
+  };
   const amount = (v: unknown) =>
     typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
   const raw = await getSetting(userId, EXPENSE_SETTINGS_KEY);
@@ -1079,6 +1087,9 @@ export async function getExpenseSettings(userId: string): Promise<ExpenseSetting
       car,
       carHidden: parsed.carHidden === true,
       autoBudget: parsed.autoBudget === true,
+      averaged: Array.isArray(parsed.averaged)
+        ? parsed.averaged.filter((c): c is string => typeof c === "string")
+        : [],
     };
   } catch {
     return empty;

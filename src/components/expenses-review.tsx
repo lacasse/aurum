@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardHeader } from "@/components/ui";
 import { useFinance } from "@/lib/store";
-import { effectiveLimits, yearReview } from "@/lib/budget-habits";
+import {
+  NO_AVERAGING,
+  effectiveLimits,
+  yearReview,
+  type Averaging,
+} from "@/lib/budget-habits";
 import { getSettings } from "@/lib/api";
 import type { SpendGroup } from "@/lib/expenses";
 import { currentMonthKey, fmtCAD, labelMonth } from "@/lib/format";
@@ -24,12 +29,14 @@ export function ExpensesReview({
   const budgets = useFinance((s) => s.budgets);
   // Whether budgets follow the 12-month average: the same budgets the
   // expenses page judges against, from the same function.
-  const [autoBudget, setAutoBudget] = useState(false);
+  const [averaging, setAveraging] = useState<Averaging>(NO_AVERAGING);
   useEffect(() => {
     let cancelled = false;
-    getSettings<{ autoBudget?: boolean }>("/api/expense-settings")
+    getSettings<{ autoBudget?: boolean; averaged?: string[] }>("/api/expense-settings")
       .then((s) => {
-        if (!cancelled) setAutoBudget(s.autoBudget === true);
+        if (!cancelled) {
+          setAveraging({ all: s.autoBudget === true, categories: s.averaged ?? [] });
+        }
       })
       .catch(() => {});
     return () => {
@@ -37,8 +44,8 @@ export function ExpensesReview({
     };
   }, []);
   const limits = useMemo(
-    () => effectiveLimits(budgets, autoBudget, transactions, groups, currentMonthKey()),
-    [budgets, autoBudget, transactions, groups],
+    () => effectiveLimits(budgets, averaging, transactions, groups, currentMonthKey()),
+    [budgets, averaging, transactions, groups],
   );
   const r = useMemo(
     () => yearReview(transactions, year, groups, limits, currentMonthKey()),

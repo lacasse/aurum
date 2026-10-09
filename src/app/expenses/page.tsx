@@ -68,6 +68,9 @@ import {
   categoryStreak,
   averageBudgets,
   effectiveLimits,
+  followsAverage,
+  setFollowing,
+  type Averaging,
   judgedMonths,
   personalBests,
   type BudgetMonth,
@@ -82,11 +85,18 @@ interface Settings {
     estimate?: number | null;
   } | null;
   carHidden?: boolean;
-  /** Budgets follow each category's 12-month average instead of a set figure. */
+  /** Every category's budget follows its 12-month average, new ones included. */
   autoBudget?: boolean;
+  /** Otherwise, the categories whose budgets follow it; the rest are set by hand. */
+  averaged?: string[];
 }
 
-const EMPTY: Settings = { groups: {}, car: null, carHidden: false, autoBudget: false };
+/** Which budgets follow the average, as the settings record it. */
+function averagingOf(s: Settings): Averaging {
+  return { all: s.autoBudget === true, categories: s.averaged ?? [] };
+}
+
+const EMPTY: Settings = { groups: {}, car: null, carHidden: false, autoBudget: false, averaged: [] };
 
 const GROUP_TONE: Record<SpendGroup, "positive" | "brand" | "neutral"> = {
   necessity: "brand",
@@ -128,6 +138,8 @@ export default function ExpensesPage() {
   const toggleCategory = (c: string) => setOpenCategory((o) => (o === c ? null : c));
   /* Which category's budget is being typed into, in the table below. */
   const [editingLimit, setEditingLimit] = useState<string | null>(null);
+  /* Which budget was clicked while budgets follow the average: it asks first. */
+  const [unlocking, setUnlocking] = useState<string | null>(null);
   const setBudget = useFinance((s) => s.setBudget);
   const deleteBudget = useFinance((s) => s.deleteBudget);
 
@@ -141,6 +153,7 @@ export default function ExpensesPage() {
             car: s.car ?? null,
             carHidden: s.carHidden ?? false,
             autoBudget: s.autoBudget ?? false,
+            averaged: s.averaged ?? [],
           });
         }
       })
@@ -205,7 +218,7 @@ export default function ExpensesPage() {
      */
     const limits = effectiveLimits(
       budgets,
-      settings.autoBudget === true,
+      averagingOf(settings),
       transactions,
       g,
       currentMonthKey(),
@@ -282,6 +295,19 @@ export default function ExpensesPage() {
     window === "ytd"
       ? yearToDate(data.trend, (m) => m.key, { withBase: false })
       : data.trend.slice(-Number(window));
+
+  /*
+   * Setting one budget by hand takes only that category off the average. Its
+   * average is written in as its budget first, so the box opens on the figure
+   * it had a moment ago; every other category carries on as it was.
+   */
+  const averaging = averagingOf(settings);
+  const stopFollowing = (category: string) => {
+    const v = data.limits.get(category);
+    if (v !== undefined) setBudget(category, v);
+    const next = setFollowing(averaging, category, false, categories);
+    save({ ...settings, autoBudget: next.all, averaged: [...next.categories] });
+  };
 
   const inProgress = selected === currentMonthKey();
   const consumption = summary.necessity + summary.discretionary;
@@ -724,7 +750,7 @@ export default function ExpensesPage() {
                       * at what the category actually costs.
                       */}
                     <td
-                      className="px-3 py-2 text-right tabular-nums"
+                      className="relative px-3 py-2 text-right tabular-nums"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {editingLimit === r.category ? (
@@ -753,14 +779,18 @@ export default function ExpensesPage() {
                           aria-label={`Monthly budget for ${r.category}`}
                         />
                       ) : (
+                        <>
                         <button
                           type="button"
-                          onClick={() => !settings.autoBudget && setEditingLimit(r.category)}
-                          disabled={settings.autoBudget === true}
-                          className="inline-flex items-center justify-end gap-2 rounded px-1 hover:bg-elevated disabled:cursor-default disabled:hover:bg-transparent"
+                          onClick={() =>
+                            followsAverage(averaging, r.category)
+                              ? setUnlocking((u) => (u === r.category ? null : r.category))
+                              : setEditingLimit(r.category)
+                          }
+                          className="inline-flex items-center justify-end gap-2 rounded px-1 hover:bg-elevated"
                           title={
-                            settings.autoBudget
-                              ? "Following the 12-month average. Change this in Edit categories."
+                            followsAverage(averaging, r.category)
+                              ? "Follows the 12-month average. Click to set it yourself."
                               : `Set a monthly budget for ${r.category}`
                           }
                         >
@@ -787,6 +817,35 @@ export default function ExpensesPage() {
                             <span className="text-ink-faint">Set</span>
                           )}
                         </button>
+                        {unlocking === r.category && (
+                          <div
+                            role="dialog"
+                            aria-label={`Set the ${r.category} budget yourself`}
+                            className="absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-line bg-surface p-3 text-left text-xs shadow-lg"
+                          >
+                            <p className="leading-relaxed text-ink-dim">
+                              The {r.category} budget follows its 12-month
+                              average. Set it yourself, and it keeps the figure
+                              you give it; other categories are not affected.
+                            </p>
+                            <div className="mt-2.5 flex justify-end gap-2">
+                              <Button variant="ghost" size="sm" onClick={() => setUnlocking(null)}>
+                                Keep the average
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  stopFollowing(r.category);
+                                  setUnlocking(null);
+                                  setEditingLimit(r.category);
+                                }}
+                              >
+                                Set it myself
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                        </>
                       )}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
@@ -1205,22 +1264,47 @@ function CategoriesModal({
   } | null>(null);
 
   /*
-   * Budgets can follow each category's 12-month average instead of a set
-   * figure, recomputed as months finish. While they do, the boxes show the
-   * average and cannot be typed in. Turning it off writes the averages in as
-   * ordinary budgets, so nothing moves at the moment it is switched off.
+   * A budget can follow its category's 12-month average instead of a set
+   * figure, recomputed as months finish — every category at once, or only
+   * the ones chosen with Avg. While one does, its box shows the average and
+   * cannot be typed in. Taking it off writes the average in as an ordinary
+   * budget, so nothing moves at the moment it is switched.
    */
-  const auto = settings.autoBudget === true;
+  const averaging = averagingOf(settings);
+  const all = averaging.all;
+  const following = categories.filter((c) => followsAverage(averaging, c)).length;
   const averages = useMemo(
     () => averageBudgets(transactions, draft, currentMonthKey()),
     [transactions, draft],
   );
-  const limits = auto ? averages : new Map(budgets.map((b) => [b.category, b.limit]));
-  const setAuto = (on: boolean) => {
+  const manual = new Map(budgets.map((b) => [b.category, b.limit]));
+  const limitOf = (c: string) =>
+    followsAverage(averaging, c) ? averages.get(c) : manual.get(c);
+  /* A budget clicked while following the average, and the one to focus after. */
+  const [unlocking, setUnlocking] = useState<string | null>(null);
+  const [focusLimit, setFocusLimit] = useState<string | null>(null);
+  const saveAveraging = (next: Averaging) =>
+    onSave({ ...settings, autoBudget: next.all, averaged: [...next.categories] });
+
+  /*
+   * Taking a category off the average writes its average in as its budget,
+   * so the figure does not move at the moment it is switched. Turning every
+   * category off at once does the same for each.
+   */
+  const setOne = (c: string, on: boolean) => {
     if (!on) {
-      for (const [c, v] of averages) if (categories.includes(c)) setBudget(c, v);
+      const v = averages.get(c);
+      if (v !== undefined) setBudget(c, v);
     }
-    onSave({ ...settings, autoBudget: on });
+    saveAveraging(setFollowing(averaging, c, on, categories));
+  };
+  const setAll = (on: boolean) => {
+    if (!on) {
+      for (const [c, v] of averages) {
+        if (categories.includes(c) && followsAverage(averaging, c)) setBudget(c, v);
+      }
+    }
+    saveAveraging(on ? { all: true, categories: [] } : { all: false, categories: [] });
   };
 
   const set = (category: string, group: SpendGroup) =>
@@ -1254,6 +1338,13 @@ function CategoriesModal({
         return setError(`“${n}” already exists.`);
       }
       renameCategory(renaming, n);
+      // A category on the average stays on it under its new name.
+      if (!all && averaging.categories.includes(renaming)) {
+        saveAveraging({
+          all: false,
+          categories: averaging.categories.map((x) => (x === renaming ? n : x)),
+        });
+      }
     }
     setRenaming(null);
     setError("");
@@ -1284,31 +1375,33 @@ function CategoriesModal({
 
       <label className="mb-3 flex items-center justify-between gap-4 rounded-lg border border-line px-4 py-3">
         <span>
-          <span className="block text-sm font-medium">Keep budgets at the 12-month average</span>
+          <span className="block text-sm font-medium">Use the 12-month average for every category</span>
           <span className="block text-xs text-ink-faint">
-            {auto
+            {all
               ? "Each budget is what the category cost a month over the last 12 finished months, and updates as each month ends. Turning it off keeps today's figures."
-              : "Set every budget to what the category cost a month over the last 12 finished months, and keep it updated as each month ends."}
+              : following > 0
+                ? `${following} of ${categories.length} follow the average. Use Avg beside a budget to choose, or switch this on for every category.`
+                : "A budget can follow what its category cost a month over the last 12 finished months, updated as each month ends. Use Avg beside a budget for one, or this for all."}
           </span>
         </span>
         <button
           type="button"
           role="switch"
-          aria-checked={auto}
+          aria-checked={all}
           disabled={averages.size === 0}
-          onClick={() => setAuto(!auto)}
+          onClick={() => setAll(!all)}
           className={cn(
             "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full p-0 transition-colors disabled:opacity-50",
-            auto ? "bg-brand" : "bg-elevated ring-1 ring-inset ring-line",
+            all ? "bg-brand" : "bg-elevated ring-1 ring-inset ring-line",
           )}
         >
           <span
             className={cn(
               "absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
-              auto ? "translate-x-[1.125rem]" : "translate-x-0.5",
+              all ? "translate-x-[1.125rem]" : "translate-x-0.5",
             )}
           />
-          <span className="sr-only">Keep budgets at the 12-month average</span>
+          <span className="sr-only">Use the 12-month average for every category</span>
         </button>
       </label>
 
@@ -1318,13 +1411,14 @@ function CategoriesModal({
             <tr className="border-b border-line text-left text-[0.625rem] uppercase tracking-wider text-ink-faint">
               <th className="px-3 py-2 font-medium">Category</th>
               <th className="px-3 py-2 font-medium">Kind</th>
-              <th className="w-28 px-3 py-2 text-right font-medium">Budget</th>
+              <th className="w-44 px-3 py-2 text-right font-medium">Budget</th>
               <th className="w-16 px-3 py-2" />
             </tr>
           </thead>
           <tbody>
             {[...categories].sort().map((c) => (
-              <tr key={c} className="border-b border-line/40 last:border-0">
+              <Fragment key={c}>
+              <tr className="border-b border-line/40 last:border-0">
                 <td className="px-3 py-1.5">
                   {renaming === c ? (
                     <span className="flex items-center gap-1.5">
@@ -1370,6 +1464,7 @@ function CategoriesModal({
                   />
                 </td>
                 <td className="px-3 py-1.5 text-right">
+                  <span className="flex items-center justify-end gap-1.5">
                   <Input
                     type="number"
                     min="0"
@@ -1378,17 +1473,54 @@ function CategoriesModal({
                     placeholder="—"
                     // Keyed on the value, so a budget set from elsewhere — the
                     // button above — shows here at once.
-                    key={`${c}:${auto}:${limits.get(c) ?? ""}`}
-                    defaultValue={limits.get(c) ? String(limits.get(c)) : ""}
-                    disabled={auto}
-                    title={auto ? "Following the 12-month average" : undefined}
-                    onBlur={(e) => saveLimit(c, e.target.value)}
+                    key={`${c}:${followsAverage(averaging, c)}:${limitOf(c) ?? ""}`}
+                    defaultValue={limitOf(c) ? String(limitOf(c)) : ""}
+                    // Read-only rather than disabled while following the
+                    // average, so a click can still say why and offer a way out.
+                    readOnly={followsAverage(averaging, c)}
+                    autoFocus={!followsAverage(averaging, c) && focusLimit === c}
+                    onClick={() => followsAverage(averaging, c) && setUnlocking(c)}
+                    title={
+                      followsAverage(averaging, c)
+                        ? "Follows the 12-month average. Click to set it yourself."
+                        : undefined
+                    }
+                    onBlur={(e) => !followsAverage(averaging, c) && saveLimit(c, e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") e.currentTarget.blur();
                     }}
                     className="h-7 w-24 py-0 text-right text-[0.8125rem] tabular-nums"
                     aria-label={`Monthly budget for ${c}`}
                   />
+                  {/*
+                    * Per category: on, the budget is the 12-month average and
+                    * keeps up with it; off, it is the figure in the box.
+                    */}
+                  <button
+                    type="button"
+                    aria-pressed={followsAverage(averaging, c)}
+                    disabled={!averages.has(c)}
+                    onClick={() => {
+                      setOne(c, !followsAverage(averaging, c));
+                      setUnlocking(null);
+                    }}
+                    title={
+                      !averages.has(c)
+                        ? "Nothing spent in the last 12 months to average"
+                        : followsAverage(averaging, c)
+                          ? "Follows the 12-month average. Click to set it yourself."
+                          : "Use the 12-month average for this budget"
+                    }
+                    className={cn(
+                      "h-7 rounded-md border px-1.5 text-[0.625rem] font-medium uppercase tracking-wider transition-colors disabled:opacity-40",
+                      followsAverage(averaging, c)
+                        ? "border-brand bg-brand/15 text-brand"
+                        : "border-line text-ink-faint hover:text-ink-dim",
+                    )}
+                  >
+                    Avg
+                  </button>
+                  </span>
                 </td>
                 <td className="px-3 py-1.5 text-right">
                   <Button
@@ -1409,6 +1541,35 @@ function CategoriesModal({
                   </Button>
                 </td>
               </tr>
+              {followsAverage(averaging, c) && unlocking === c && (
+                <tr className="border-b border-line/40 bg-elevated/50">
+                  <td colSpan={4} className="px-3 py-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <p className="max-w-md leading-relaxed text-ink-dim">
+                        The {c} budget follows its 12-month average. Set it
+                        yourself, and it keeps the figure you give it; other
+                        categories are not affected.
+                      </p>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => setUnlocking(null)}>
+                          Keep the average
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setOne(c, false);
+                            setUnlocking(null);
+                            setFocusLimit(c);
+                          }}
+                        >
+                          Set it myself
+                        </Button>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>
