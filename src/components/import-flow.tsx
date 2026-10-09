@@ -463,7 +463,8 @@ export function ImportFlow() {
     for (const [id, delta] of usdCashDeltas) {
       adjustAccountCash(id, Math.round(delta * 100) / 100, undefined, "USD");
     }
-    await recordConversions(includedTrades, appliedConversions);
+    // Kept here too, so "Import more" in the same dialog knows them.
+    setAppliedConversions(await recordConversions(includedTrades, appliedConversions));
 
     setResult({
       transactions: validCash.length,

@@ -21,8 +21,10 @@ export async function loadAppliedConversions(): Promise<string[]> {
 }
 
 /** Record the conversions just applied. The whole list goes, since the demo keeps it in one value. */
-export async function recordConversions(rows: TradeRow[], known: string[]): Promise<void> {
+export async function recordConversions(rows: TradeRow[], known: string[]): Promise<string[]> {
   const keys = rows.filter((r) => r.type === "conversion").map(tradeKey);
-  if (keys.length === 0) return;
-  await saveSettings("/api/conversions", { keys: [...new Set([...known, ...keys])] });
+  if (keys.length === 0) return known;
+  const all = [...new Set([...known, ...keys])];
+  await saveSettings("/api/conversions", { keys: all });
+  return all;
 }
