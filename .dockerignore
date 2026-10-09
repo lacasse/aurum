@@ -6,6 +6,7 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 README.md
+docs/
 *.log
 .DS_Store
 tsconfig.tsbuildinfo
