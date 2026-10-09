@@ -272,22 +272,38 @@ stop when the backup fails. A hand-typed `pg_dump` gets none of that and writes 
 database in the clear; if you need a copy outside the volume, take one this way and
 `docker cp` the encrypted file out.
 
-**Restore** a backup (reload a dump from the `backups` volume into the DB):
+**Restore** a backup by replacing the database with the dump. A dump is the whole
+database — tables, rows, and the keys between them — so it goes into an **empty** one.
+Loaded over a database that already has its tables, every row is refused: the tables
+already carry their foreign keys, and the dump writes rows before the users they belong
+to. Emptying the tables first does not help, for the same reason.
+
+This deletes everything in the database. Take a fresh backup first, even of a database
+you believe is broken: it is the only way back if the dump you chose turns out to be the
+wrong one.
 
 ```bash
 # Find the file you want:
 docker exec finance-backup-1 sh -c 'ls -l /backups/'
-# Load it (drops nothing; COPY appends — for a full restore, truncate tables first):
-docker exec finance-db-1 psql -U aurum -d aurum -c "TRUNCATE users, invites, user_settings, accounts, transactions, recurring_transactions, holdings, monthly_snapshots, budgets, categories, merchant_rules, price_history, app_meta RESTART IDENTITY CASCADE;"
-docker exec finance-backup-1 sh -c 'gzip -dc /backups/aurum_XXXXXXXX.sql.gz' | docker exec -i finance-db-1 psql -U aurum -d aurum
+# Stop the app, so nothing writes while the database is replaced:
+docker compose stop app
+# Replace the database with an empty one:
+docker exec finance-db-1 psql -U aurum -d postgres -c "DROP DATABASE aurum WITH (FORCE);" -c "CREATE DATABASE aurum;"
+# Load the dump, stopping at the first error rather than carrying on half-restored:
+docker exec finance-backup-1 sh -c 'gzip -dc /backups/aurum_XXXXXXXX.sql.gz' \
+  | docker exec -i finance-db-1 psql -U aurum -d aurum -v ON_ERROR_STOP=1
+docker compose start app
 ```
 
-For an encrypted dump, decrypt on the way through:
+For an encrypted dump, decrypt on the way through in the load step:
 
 ```bash
 docker exec finance-backup-1 sh -c 'openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:"$BACKUP_ENCRYPTION_KEY" -in /backups/aurum_XXXXXXXX.sql.gz.enc | gzip -dc' \
-  | docker exec -i finance-db-1 psql -U aurum -d aurum
+  | docker exec -i finance-db-1 psql -U aurum -d aurum -v ON_ERROR_STOP=1
 ```
+
+If the load stops on an error, the database is partly restored. Fix the cause, then
+replace and load it again from the top.
 
 **Rehearse it against a scratch database, not this one.** A backup nobody has restored is
 an assumption. Restore into a throwaway container with no volumes attached, compare it
