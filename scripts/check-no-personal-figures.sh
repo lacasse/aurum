@@ -100,6 +100,25 @@ SPELLED="$TENS[- ]$UNITS([- ][a-zA-Z]+){0,2}[- ](shares?|units?|coins?)"
 SPELLED_AWK="$SPELLED"
 EXPORT_ROW_AWK='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9],([^,]*,)([^,]*,)([^,]*,)([^,]*,)'
 
+# The size of the record itself. A count of someone's transactions, holdings
+# or months of history is a quantity from their finances as surely as a
+# balance is -- how many positions they hold is the thing a deny-list of
+# tickers exists to hide -- and every rule above looked only for money. A
+# README section on performance said how large the real record was, in
+# digits, and sat published for months while every check here passed.
+#
+# Two shapes, both narrow. A comma-grouped count right before a noun for a
+# kind of record: fixtures are small and round, and a count in the thousands
+# beside "transactions" is a measurement of something real. And any count of
+# two digits or more before such a noun in a line that says it is describing
+# a real record, or the owner's, which is the sentence that leaked.
+NOUNS='(transactions?|holdings?|positions?|trades?|rows|accounts?|months|payees?|categories)'
+RECORD_COUNT="[0-9]{1,3}(,[0-9]{3})+ (real )?$NOUNS"
+REAL_RECORD="(real|actual|the owner'?s|your own) (record|portfolio|data|database|import|history|account)[^.]*[^0-9.,\$][0-9]{2,} $NOUNS"
+RECORD_COUNT_AWK="[0-9][0-9]?[0-9]?(,[0-9][0-9][0-9])+ (real )?$NOUNS"
+REAL_RECORD_AWK="(real|actual|the owner'?s|your own) (record|portfolio|data|database|import|history|account)[^.]*[^0-9.,$][0-9][0-9]+ $NOUNS"
+RECORD="$RECORD_COUNT|$REAL_RECORD"
+
 # Terms from the private list, as one alternation, or empty when there is none.
 terms_pattern() {
   [ -f "$TERMS" ] || return 0
@@ -122,7 +141,7 @@ report() {
 if [ "${1:-}" = "--staged" ]; then
   # Only added lines. A figure already in the tree is the history rewrite's
   # problem, not this commit's; failing on it would block every unrelated commit.
-  git diff --cached --unified=0 | awk -v money="$MONEY_AWK" -v short="$SHORT_AWK" -v bare="$BARE_AWK" -v row="$EXPORT_ROW_AWK" -v terms="$TERMS_RE" -v allowed="$ALLOWED" -v spelled="$SPELLED_AWK" '
+  git diff --cached --unified=0 | awk -v money="$MONEY_AWK" -v short="$SHORT_AWK" -v bare="$BARE_AWK" -v row="$EXPORT_ROW_AWK" -v terms="$TERMS_RE" -v allowed="$ALLOWED" -v spelled="$SPELLED_AWK" -v count="$RECORD_COUNT_AWK" -v realrec="$REAL_RECORD_AWK" '
     /^\+\+\+ b\// {
       file = substr($0, 7)
       skip = (file ~ allowed)
@@ -143,6 +162,7 @@ if [ "${1:-}" = "--staged" ]; then
       if (line ~ short)  { printf "%s [amount]: %s\n",  file, substr(line, 1, 100); next }
       if (line ~ bare)   { printf "%s [amount]: %s\n",  file, substr(line, 1, 100); next }
       if (line ~ spelled) { printf "%s [quantity in words]: %s\n", file, substr(line, 1, 100); next }
+      if (line ~ count || line ~ realrec) { printf "%s [size of a record]: %s\n", file, substr(line, 1, 100); next }
       if (!loose && line ~ row) { printf "%s [export row]: %s\n", file, substr(line, 1, 100); next }
       if (terms != "" && line ~ terms) { printf "%s [private term]: %s\n", file, substr(line, 1, 100) }
     }
@@ -211,6 +231,8 @@ elif [ "${1:-}" = "--text" ]; then
       report "published text [amount]: $(printf '%s' "$line" | cut -c1-110)"
     elif printf '%s' "$line" | grep -Eq "$SPELLED"; then
       report "published text [quantity in words]: $(printf '%s' "$line" | cut -c1-110)"
+    elif printf '%s' "$line" | grep -Eq "$RECORD"; then
+      report "published text [size of a record]: $(printf '%s' "$line" | cut -c1-110)"
     elif [ -n "$TERMS_RE" ] && printf '%s' "$line" | grep -Eq "$TERMS_RE"; then
       report "published text [private term]: $(printf '%s' "$line" | cut -c1-110)"
     fi
@@ -232,6 +254,8 @@ elif [ "${1:-}" = "--message" ]; then
       report "commit message [amount]: $(printf '%s' "$line" | cut -c1-110)"
     elif printf '%s' "$line" | grep -Eq "$SPELLED"; then
       report "commit message [quantity in words]: $(printf '%s' "$line" | cut -c1-110)"
+    elif printf '%s' "$line" | grep -Eq "$RECORD"; then
+      report "commit message [size of a record]: $(printf '%s' "$line" | cut -c1-110)"
     elif [ -n "$TERMS_RE" ] && printf '%s' "$line" | grep -Eq "$TERMS_RE"; then
       report "commit message [private term]: $(printf '%s' "$line" | cut -c1-110)"
     fi
@@ -251,9 +275,9 @@ else
         strict="$strict $f"
       fi
     done
-    pattern="$MONEY|$SHORT|$BARE|$EXPORT_ROW|$SPELLED"
+    pattern="$MONEY|$SHORT|$BARE|$EXPORT_ROW|$SPELLED|$RECORD"
     [ -n "$TERMS_RE" ] && pattern="$pattern|$TERMS_RE"
-    loose_pattern="$MONEY|$SHORT|$BARE|$SPELLED"
+    loose_pattern="$MONEY|$SHORT|$BARE|$SPELLED|$RECORD"
     [ -n "$TERMS_RE" ] && loose_pattern="$loose_pattern|$TERMS_RE"
     hits=""
     [ -n "$strict" ] && hits=$(grep -nEH "$pattern" $strict 2>/dev/null | grep -v INVENTED || true)

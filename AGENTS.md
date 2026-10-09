@@ -20,7 +20,9 @@ other rule.
 **1. No fact about the owner's finances leaves the database.** Not an amount,
 not a quantity — in digits or in words — not an account, an institution, a plan
 or a payee. Not a date attached to any of those. The database is where these
-live; every other location is a leak.
+live; every other location is a leak. The size of the record counts too: how
+many transactions, holdings or months of history it holds is a quantity from
+it, and a performance note once published all three.
 
 **1a. A ticker is not one of those facts.** A symbol and the company behind it
 are public: anyone can look up what MSFT is. What is private is the
